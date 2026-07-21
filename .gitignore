@@ -1,0 +1,27 @@
+# Xcode / XcodeGen
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+xcuserdata/
+
+# Pinned XcodeGen binary (machine-local tool, not source) -- see SETUP.md
+.xcodegen-2.42.0/
+
+# Secrets -- generated from Config.sample.xcconfig, never commit real values
+Config/Config-Debug.xcconfig
+Config/Config-Release.xcconfig
+
+# Open Wearables deployment secrets -- backend.env.template and
+# docker-compose.prod.secure.yml in this repo hold PLACEHOLDERS only.
+# Real generated values live here instead, never committed.
+open-wearables-deploy/SECRETS.local.txt
+
+# Supabase local dev
+supabase/.branches
+supabase/.temp
+
+# Claude Code local settings -- machine-local, not shared project config
+.claude/settings.local.json
+
+# macOS
+.DS_Store

@@ -1,0 +1,37 @@
+project_id = "soma"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+
+[db]
+port = 54322
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+# soma:// is the custom URL scheme the iOS app registers for OAuth
+# callbacks (Whoop, Oura) and for the Sign in with Apple redirect.
+additional_redirect_urls = [
+  "soma://oauth-callback/whoop",
+  "soma://oauth-callback/oura",
+]
+
+# Sign in with Apple is configured directly in the Supabase Dashboard
+# (Authentication -> Sign In / Providers -> Apple), not here. The app only
+# uses native Sign in with Apple (ASAuthorizationAppleIDProvider), which
+# needs just the bundle ID in the Dashboard's "Client IDs" field -- no
+# Services ID, .p8 key, or secret JWT. See SETUP.md section 5.
+
+[functions.generate-recommendation]
+verify_jwt = true
+
+[functions.store-wearable-token]
+verify_jwt = true
+
+[functions.redeem-referral-code]
+verify_jwt = true

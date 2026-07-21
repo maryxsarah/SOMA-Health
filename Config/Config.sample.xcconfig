@@ -1,0 +1,11 @@
+// Copy this file to Config-Debug.xcconfig and Config-Release.xcconfig
+// (both gitignored) and fill in real values. See SETUP.md.
+//
+// NOTE: xcconfig treats "//" anywhere on a line as a comment start, so
+// full URLs (which contain "://") cannot be stored directly. Store the
+// bare host below; Config.swift prepends "https://" at read time.
+
+SUPABASE_HOST = your-project.supabase.co
+SUPABASE_ANON_KEY = your-anon-key-here
+WHOOP_CLIENT_ID = your-whoop-client-id
+OURA_CLIENT_ID = your-oura-client-id

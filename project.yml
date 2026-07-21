@@ -1,0 +1,95 @@
+name: Soma
+options:
+  bundleIdPrefix: com.skollnitzer
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.skollnitzer.soma
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    ENABLE_PREVIEWS: true
+    # Pinned so `xcodegen generate` doesn't wipe your Team every time --
+    # XcodeGen fully regenerates project.pbxproj from this file, so any
+    # signing setting made only through Xcode's UI (not here) is lost on
+    # the next regenerate. If you change Apple Developer teams, update
+    # this value (or re-set it in Xcode and copy it back here).
+    DEVELOPMENT_TEAM: G52G32NA32
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  Soma:
+    type: application
+    platform: iOS
+    sources:
+      - path: Soma
+        excludes:
+          - "Soma.storekit"
+      # Kept as a project file reference (so Xcode's scheme editor can find
+      # it under Run -> Options -> StoreKit Configuration) but with no
+      # build phase, so it's never copied into the app bundle -- it's a
+      # dev-time-only test config, not something that should ship.
+      - path: Soma/Soma.storekit
+        buildPhase: none
+    info:
+      path: Soma/Resources/Info.plist
+      # XcodeGen regenerates this file from these properties on every
+      # `xcodegen generate` run -- it does NOT preserve hand-edits made
+      # directly to Info.plist, so all custom keys must live here.
+      properties:
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # HealthKit read-permission usage strings (spec requires both keys
+        # even though Soma never writes health data).
+        NSHealthShareUsageDescription: "Soma reads your sleep, heart rate, HRV, and activity data to tell you how hard to train each day."
+        NSHealthUpdateUsageDescription: "Soma does not write to Health, but iOS requires this description alongside read access."
+        # Background Modes: "fetch" is what BGAppRefreshTaskRequest relies
+        # on; "processing" matches the Xcode capability checklist in the spec.
+        UIBackgroundModes:
+          - fetch
+          - processing
+        # Must match BackgroundTaskManager / Config.backgroundTaskIdentifier.
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.soma.app.refresh
+        # OAuth callback scheme for Whoop/Oura via ASWebAuthenticationSession.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.soma.app.oauth
+            CFBundleURLSchemes:
+              - soma
+        # Environment config, populated via xcconfig ($(VAR) substitution).
+        # Read at runtime by Soma/App/Config.swift.
+        SUPABASE_HOST: $(SUPABASE_HOST)
+        SUPABASE_ANON_KEY: $(SUPABASE_ANON_KEY)
+        WHOOP_CLIENT_ID: $(WHOOP_CLIENT_ID)
+        OURA_CLIENT_ID: $(OURA_CLIENT_ID)
+    entitlements:
+      path: Soma/Resources/Soma.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.background-delivery: true
+        com.apple.developer.applesignin:
+          - Default
+    # `configFiles` (not `settings.configs.<name>.xcconfig`, which silently
+    # creates a meaningless literal build setting named "xcconfig" instead
+    # of attaching the file) is XcodeGen's actual key for wiring a real
+    # baseConfigurationReference per build configuration.
+    configFiles:
+      Debug: Config/Config-Debug.xcconfig
+      Release: Config/Config-Release.xcconfig
+    # NOTE: this generates the entitlements file with the right keys and
+    # points CODE_SIGN_ENTITLEMENTS at it, but it does NOT register the
+    # capabilities on your App ID in the Apple Developer portal -- that
+    # still requires opening Signing & Capabilities in Xcode once and
+    # adding HealthKit, Background Modes, and Sign in with Apple via the
+    # "+ Capability" button (with automatic signing on) so Xcode can
+    # provision them for your Team. See SETUP.md.

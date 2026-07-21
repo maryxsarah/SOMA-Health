@@ -1,0 +1,196 @@
+name: open-wearables
+# Hardened copy of upstream docker-compose.prod.yml: Postgres, Redis, and
+# Flower no longer publish ports to the host at all (only reachable by
+# other containers on the internal Docker network, by service name) -- the
+# original file binds them straight to 0.0.0.0, which would expose a
+# database and a cache holding real OAuth tokens directly to the internet
+# on a public Oracle Cloud VM. `app` and `frontend` also stop publishing
+# ports directly; Caddy is the only thing bound to the host, terminating
+# TLS and reverse-proxying to `app:8000` / `frontend:3000` over the
+# internal network.
+#
+# Usage: docker compose -f docker-compose.prod.secure.yml up -d
+# (run from inside the cloned open-wearables repo, with this file and
+# Caddyfile copied into the repo root alongside the real backend/config/.env)
+
+services:
+  db:
+    image: postgres:18
+    container_name: postgres__open-wearables
+    environment:
+      POSTGRES_DB: open-wearables
+      POSTGRES_USER: open-wearables
+      POSTGRES_PASSWORD: REPLACE_ME_DB_PASSWORD
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U open-wearables -d open-wearables"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./backend/scripts/init/create-svix-db.sql:/docker-entrypoint-initdb.d/create-svix-db.sql:ro
+    restart: unless-stopped
+
+  app:
+    build:
+        context: ./backend
+        dockerfile: Dockerfile
+    container_name: backend__open-wearables
+    image: open-wearables-platform:latest
+    pull_policy: never
+    command: scripts/start/app.sh
+    env_file:
+      - ./backend/config/.env
+    environment:
+      - DB_HOST=db
+      - REDIS_HOST=redis
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  celery-worker:
+    container_name: celery-worker__open-wearables
+    image: open-wearables-platform:latest
+    pull_policy: never
+    command: scripts/start/worker.sh
+    env_file:
+      - ./backend/config/.env
+    environment:
+      - DB_HOST=db
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+      - db
+      - app
+    restart: unless-stopped
+
+  celery-beat:
+    container_name: celery-beat__open-wearables
+    image: open-wearables-platform:latest
+    pull_policy: never
+    command: scripts/start/beat.sh
+    env_file:
+      - ./backend/config/.env
+    environment:
+      - DB_HOST=db
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+      - db
+      - app
+    restart: unless-stopped
+
+  flower:
+    container_name: flower__open-wearables
+    image: open-wearables-platform:latest
+    pull_policy: never
+    command: scripts/start/flower.sh
+    env_file:
+      - ./backend/config/.env
+    environment:
+      - DB_HOST=db
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+      - db
+      - app
+    restart: unless-stopped
+    # No ports published -- Flower has no strong auth by default and must
+    # never be internet-reachable. Use `ssh -L 5555:localhost:5555 <vm>`
+    # then open http://localhost:5555 locally if you need to check it.
+
+  redis:
+    container_name: redis__open-wearables
+    image: redis:8
+    entrypoint:
+      - sh
+      - -c
+      - |
+        if [ ! -d /data/appendonlydir ] && [ -f /data/dump.rdb ]; then
+          redis-server --daemonize no &
+          RPID=$$!
+          until redis-cli ping >/dev/null 2>&1; do sleep 0.2; done
+          redis-cli CONFIG SET appendonly yes
+          sleep 1
+          until redis-cli INFO persistence | grep -q 'aof_rewrite_in_progress:0'; do sleep 0.2; done
+          redis-cli SHUTDOWN NOSAVE
+          wait "$$RPID" 2>/dev/null
+        fi
+        exec redis-server --appendonly yes --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  svix-server:
+    container_name: svix-server__open-wearables
+    image: svix/svix-server:v1
+    entrypoint:
+      - sh
+      - -c
+      - |
+        : "$${SVIX_JWT_SECRET:=$$SECRET_KEY}"
+        export SVIX_JWT_SECRET
+        exec svix-server "$$@"
+      - --
+    command: ["--run-migrations"]
+    env_file:
+      - ./backend/config/.env
+    environment:
+      SVIX_DB_DSN: "postgresql://open-wearables:REPLACE_ME_DB_PASSWORD@db:5432/svix"
+      SVIX_QUEUE_TYPE: "redis"
+      SVIX_REDIS_DSN: "redis://redis:6379/1"
+      SVIX_CACHE_TYPE: "redis"
+    expose:
+      - "8071"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "svix-server", "healthcheck", "http://localhost:8071"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:?Set VITE_API_URL in your environment}
+    container_name: frontend__open-wearables
+    image: open-wearables-frontend:latest
+    pull_policy: never
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    container_name: caddy__open-wearables
+    environment:
+      - API_DOMAIN=${API_DOMAIN:?Set API_DOMAIN in the root .env}
+      - ADMIN_DOMAIN=${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in the root .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
