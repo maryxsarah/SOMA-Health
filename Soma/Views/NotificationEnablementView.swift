@@ -82,15 +82,17 @@ struct NotificationEnablementView: View {
                 }
                 try await SupabaseClient.shared.upsertUser(
                     id: userID,
-                    wakeTimePref: Self.timeString(from: wakeTime),
-                    onboardingComplete: true
+                    wakeTimePref: Self.timeString(from: wakeTime)
                 )
                 // Arms Trigger B (the BGAppRefreshTask fallback) around
                 // this wake time; Trigger A (HealthKit observer) is
                 // already armed in AppDelegate if Apple Health was connected.
                 BackgroundTaskManager.shared.rememberWakeTime(wakeTime)
                 BackgroundTaskManager.shared.scheduleNextRefresh(wakeTime: wakeTime)
-                appState.markOnboardingComplete()
+                // onboarding_complete is only set true at the end of the
+                // post-setup sequence (referral code -> loading -> plan
+                // summary -> consent -> paywall), not here.
+                appState.advanceToPostSetup()
             } catch {
                 errorMessage = error.localizedDescription
             }

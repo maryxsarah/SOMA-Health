@@ -105,12 +105,46 @@ final class SupabaseClient {
         id: String,
         wakeTimePref: String? = nil,
         onboardingComplete: Bool? = nil,
-        contactEmail: String? = nil
+        contactEmail: String? = nil,
+        marketingOptIn: Bool? = nil
     ) async throws {
         var body: [String: Any] = ["id": id]
         if let wakeTimePref { body["wake_time_pref"] = wakeTimePref }
         if let onboardingComplete { body["onboarding_complete"] = onboardingComplete }
         if let contactEmail { body["contact_email"] = contactEmail }
+        if let marketingOptIn { body["marketing_opt_in"] = marketingOptIn }
+
+        var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// One-time batch write at the end of the onboarding survey. Only
+    /// answers actually given get written -- any left `nil` are omitted
+    /// (fresh user row, so nothing to accidentally clobber).
+    func saveOnboardingSurvey(id: String, answers: OnboardingSurveyAnswers) async throws {
+        var body: [String: Any] = ["id": id]
+        if let sex = answers.sex { body["sex"] = sex.rawValue }
+        if let frequency = answers.workoutFrequency { body["workouts_per_week"] = frequency.rawValue }
+        if let dob = answers.dateOfBirth {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            formatter.timeZone = .current
+            body["date_of_birth"] = formatter.string(from: dob)
+        }
+        if let source = answers.referralSource { body["referral_source"] = source.rawValue }
+        if let weight = answers.weightKg { body["weight_kg"] = weight }
+        if let trainer = answers.worksWithTrainer { body["works_with_trainer"] = trainer }
+        if let goal = answers.goal { body["goals"] = [goal.rawValue] }
+        if let desired = answers.desiredWeightKg { body["desired_weight_kg"] = desired }
+        if let pace = answers.goalPace { body["goal_pace"] = pace.rawValue }
+        if !answers.blockers.isEmpty { body["blockers"] = answers.blockers.map(\.rawValue) }
+        if let diet = answers.dietType { body["diet_type"] = diet.rawValue }
+        if let accomplishment = answers.accomplishmentGoal { body["accomplishment_goal"] = accomplishment.rawValue }
+        body["marketing_opt_in"] = answers.marketingOptIn
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
@@ -208,6 +242,26 @@ final class SupabaseClient {
         try Self.assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([DailyRecommendation].self, from: data)
         return rows.first
+    }
+
+    /// Plain read via RLS -- feeds Home's calendar strip (green/yellow/
+    /// orange/red per day, based on that day's category).
+    func fetchRecentRecommendations(days: Int = 7) async throws -> [DailyRecommendation] {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+
+        let end = Date()
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
+        let startStr = formatter.string(from: start)
+        let endStr = formatter.string(from: end)
+
+        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,sleep_cap_applied,injury_cap_applied&order=date.asc"
+        var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([DailyRecommendation].self, from: data)
     }
 
     // MARK: - daily_snapshot

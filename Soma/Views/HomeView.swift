@@ -11,11 +11,14 @@ struct HomeView: View {
     @State private var showDetail = false
     @State private var showProfile = false
     @State private var showPaywall = false
+    @State private var recentRecommendations: [DailyRecommendation] = []
 
     var body: some View {
         ScrollView {
             VStack(spacing: 28) {
-                Spacer(minLength: 8)
+                CalendarStripView(recommendations: recentRecommendations)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
 
                 OrbView(state: orbState)
 
@@ -49,9 +52,11 @@ struct HomeView: View {
         .task {
             await loadTodaysRecommendation()
             await appState.refreshReferralBonus()
+            await loadRecentRecommendations()
         }
         .refreshable {
             await checkNow()
+            await loadRecentRecommendations()
         }
         .sheet(isPresented: $showDetail) {
             if let recommendation = appState.currentRecommendation {
@@ -133,6 +138,12 @@ struct HomeView: View {
             // Falls through to the "needs data" card -- covers the "zero
             // daily_snapshot / no recommendation yet" no-crash case.
         }
+    }
+
+    /// Feeds the calendar strip -- silent on failure, same as the other
+    /// plain reads (worst case the strip just shows neutral gray dots).
+    private func loadRecentRecommendations() async {
+        recentRecommendations = (try? await SupabaseClient.shared.fetchRecentRecommendations()) ?? recentRecommendations
     }
 
     /// Manual fallback ("Check now" / pull-to-refresh) -- calls the same

@@ -112,6 +112,7 @@ enum EquipmentTag: String, Codable, CaseIterable, Identifiable {
 /// Training goal tags -- used to prioritize which workout suggestions
 /// surface first, not to filter them out.
 enum GoalTag: String, Codable, CaseIterable, Identifiable {
+    case loseWeight = "lose_weight"
     case maintain
     case buildStrength = "build_strength"
     case gainMuscle = "gain_muscle"
@@ -126,8 +127,17 @@ enum GoalTag: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Exact 9-option subset (in order) for the onboarding "What is your
+    /// goal?" screen -- excludes buildStrength/generalFitness/other, which
+    /// only apply to the post-onboarding Profile screen's fuller list.
+    static let onboardingOptions: [GoalTag] = [
+        .loseWeight, .maintain, .leanerToned, .gainMuscle, .cardioEndurance,
+        .betterSleep, .improveFlexibility, .activeRecovery, .moreSculpted,
+    ]
+
     var displayName: String {
         switch self {
+        case .loseWeight: "Lose Weight"
         case .maintain: "Maintain"
         case .buildStrength: "Build Strength"
         case .gainMuscle: "Gain More Muscle"

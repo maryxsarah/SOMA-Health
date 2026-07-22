@@ -14,10 +14,14 @@ struct SomaApp: App {
                 switch appState.screen {
                 case .onboarding:
                     OnboardingView()
+                case .survey:
+                    OnboardingSurveyView()
                 case .connectDevice:
                     ConnectDeviceView()
                 case .notifications:
                     NotificationEnablementView()
+                case .postSetup:
+                    PostSetupFlowView()
                 case .home:
                     HomeView()
                 }

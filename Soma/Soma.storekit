@@ -66,21 +66,41 @@
         {
           "adHocOffers" : [],
           "codeOffers" : [],
-          "displayPrice" : "4.99",
+          "displayPrice" : "39.99",
           "familyShareable" : false,
           "groupNumber" : 1,
-          "internalID" : "1000000",
+          "internalID" : "1000002",
           "introductoryOffer" : {
             "displayPrice" : "0.00",
-            "internalID" : "1000001",
+            "internalID" : "1000003",
             "numberOfPeriods" : 1,
             "paymentMode" : "free",
-            "subscriptionPeriod" : "P2W"
+            "subscriptionPeriod" : "P1W"
           },
           "localizations" : [
             {
+              "description" : "Full access to daily workout recommendations, step targets, and personalized insights. Best value.",
+              "displayName" : "Soma Premium Annual",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.skollnitzer.soma.premium.annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Soma Premium Annual",
+          "subscriptionGroupID" : "21000000",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "1000000",
+          "localizations" : [
+            {
               "description" : "Full access to daily workout recommendations, step targets, and personalized insights.",
-              "displayName" : "Soma Premium",
+              "displayName" : "Soma Premium Monthly",
               "locale" : "en_US"
             }
           ],

@@ -4,8 +4,10 @@ import Foundation
 /// screens.
 enum AppScreen {
     case onboarding
+    case survey
     case connectDevice
     case notifications
+    case postSetup
     case home
 }
 
@@ -54,7 +56,7 @@ final class AppState: ObservableObject {
     }
 
     func markSignedIn() {
-        screen = .connectDevice
+        screen = .survey
     }
 
     func markProviderConnected(_ provider: Provider) {
@@ -64,6 +66,10 @@ final class AppState: ObservableObject {
 
     func advanceToNotifications() {
         screen = .notifications
+    }
+
+    func advanceToPostSetup() {
+        screen = .postSetup
     }
 
     func markOnboardingComplete() {

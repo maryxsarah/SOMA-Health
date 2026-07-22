@@ -1,0 +1,43 @@
+import SwiftUI
+
+/// Generic Yes/No survey screen (personal trainer question, etc.).
+struct BinaryYesNoQuestionView: View {
+    let headline: String
+    var subtext: String? = nil
+    let progress: Double
+    let onBack: () -> Void
+    let onAnswer: (Bool) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            OnboardingTopBar(progress: progress, onBack: onBack)
+
+            Spacer()
+
+            VStack(spacing: 10) {
+                Text(headline)
+                    .font(Theme.display)
+                    .multilineTextAlignment(.center)
+                if let subtext {
+                    Text(subtext)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .padding(.horizontal, 32)
+
+            Spacer()
+
+            VStack(spacing: 14) {
+                PillButton(title: "Yes") { onAnswer(true) }
+                Button("No") { onAnswer(false) }
+                    .font(.body.bold())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
+        }
+        .somaBackground()
+    }
+}

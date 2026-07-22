@@ -1,14 +1,27 @@
+import StoreKit
 import SwiftUI
 
+private enum SubscriptionPlan {
+    case annual, monthly
+}
+
 /// Shown when the user taps into a recommendation's detail view without
-/// an active subscription or referral bonus. The Home card itself (today's
-/// category + message) always stays free -- this only gates the deeper
-/// step target / workout suggestions / "why" explanation.
+/// an active subscription or referral bonus, and also as the final step
+/// of onboarding. The Home card itself (today's category + message)
+/// always stays free -- this only gates the deeper step target / workout
+/// suggestions / "why" explanation.
 struct PaywallView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
     @Environment(\.dismiss) private var dismiss
 
+    /// Called instead of the sheet-dismiss environment action when this
+    /// view is embedded as a plain step (e.g. in the onboarding post-setup
+    /// flow) rather than presented via `.sheet`. Falls back to `dismiss()`
+    /// when nil, so the existing Home-screen sheet usage is unaffected.
+    var onFinished: (() -> Void)?
+
+    @State private var selectedPlan: SubscriptionPlan = .annual
     @State private var referralCode = ""
     @State private var isRedeeming = false
     @State private var redeemError: String?
@@ -18,12 +31,12 @@ struct PaywallView: View {
         ScrollView {
             VStack(spacing: 24) {
                 OrbView(state: .idle)
-                    .scaleEffect(0.7)
-                    .frame(height: 160)
+                    .scaleEffect(0.85)
+                    .frame(height: 200)
                     .allowsHitTesting(false)
 
                 VStack(spacing: 8) {
-                    Text("Unlock your full plan")
+                    Text(selectedPlan == .annual ? "Start your 7-day free trial to continue" : "Continue with Soma Premium")
                         .font(Theme.display)
                         .multilineTextAlignment(.center)
                     Text("See exactly which workouts fit today, your step target, and why -- not just the headline.")
@@ -33,48 +46,58 @@ struct PaywallView: View {
                 }
                 .padding(.horizontal, 16)
 
-                CardView {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Soma Premium")
-                                .font(.body.bold())
-                            Text("14 days free, then \(priceText)/month")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-
-                    if let error = subscriptionManager.errorMessage {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-
-                    PillButton(
-                        title: "Start Free Trial",
-                        isEnabled: !subscriptionManager.isPurchasing
-                    ) {
-                        Task {
-                            await subscriptionManager.purchase()
-                            if subscriptionManager.isSubscribed {
-                                dismiss()
-                            }
-                        }
-                    }
-
-                    Button("Restore Purchases") {
-                        Task {
-                            await subscriptionManager.restorePurchases()
-                            if subscriptionManager.isSubscribed {
-                                dismiss()
-                            }
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
+                VStack(spacing: 12) {
+                    planRow(
+                        plan: .annual,
+                        title: "Start for free & save",
+                        subtitle: annualBillingText,
+                        priceHeadline: annualMonthlyEquivalentText,
+                        badge: "7 DAYS FREE"
+                    )
+                    planRow(
+                        plan: .monthly,
+                        title: "Monthly",
+                        subtitle: nil,
+                        priceHeadline: monthlyPriceText,
+                        badge: nil
+                    )
                 }
+
+                if let error = subscriptionManager.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                PillButton(
+                    title: selectedPlan == .annual ? "Start Free Trial" : "Continue",
+                    isEnabled: !subscriptionManager.isPurchasing
+                ) {
+                    Task {
+                        guard let product = selectedProduct else { return }
+                        await subscriptionManager.purchase(product)
+                        if subscriptionManager.isSubscribed {
+                            finish()
+                        }
+                    }
+                }
+
+                Text(finePrint)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 12)
+
+                Button("Restore Purchases") {
+                    Task {
+                        await subscriptionManager.restorePurchases()
+                        if subscriptionManager.isSubscribed {
+                            finish()
+                        }
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
                 CardView {
                     Text("Have a referral code?")
@@ -102,7 +125,7 @@ struct PaywallView: View {
                     }
                 }
 
-                Button("Not now") { dismiss() }
+                Button("Not now") { finish() }
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -113,8 +136,77 @@ struct PaywallView: View {
         .somaBackground()
     }
 
-    private var priceText: String {
-        subscriptionManager.product?.displayPrice ?? "$4.99"
+    private var selectedProduct: Product? {
+        switch selectedPlan {
+        case .annual: subscriptionManager.annualProduct
+        case .monthly: subscriptionManager.monthlyProduct
+        }
+    }
+
+    private var annualPriceText: String {
+        subscriptionManager.annualProduct?.displayPrice ?? "$39.99"
+    }
+
+    private var monthlyPriceText: String {
+        "\(subscriptionManager.monthlyProduct?.displayPrice ?? "$4.99")/mo"
+    }
+
+    private var annualMonthlyEquivalentText: String {
+        guard let product = subscriptionManager.annualProduct else { return "$3.33/mo" }
+        let monthly = (product.price as NSDecimalNumber).doubleValue / 12
+        return String(format: "$%.2f/mo", monthly)
+    }
+
+    private var annualBillingText: String {
+        "\(annualPriceText) billed annually"
+    }
+
+    private var finePrint: String {
+        switch selectedPlan {
+        case .annual:
+            "7 days free, then \(annualPriceText) per year. Billed annually and renews automatically unless canceled in the App Store."
+        case .monthly:
+            "\(monthlyPriceText), billed monthly and renews automatically unless canceled in the App Store."
+        }
+    }
+
+    private func planRow(plan: SubscriptionPlan, title: String, subtitle: String?, priceHeadline: String, badge: String?) -> some View {
+        Button {
+            selectedPlan = plan
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                if let badge {
+                    Text(badge)
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Theme.pillFill)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.body.bold())
+                        if let subtitle {
+                            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Text(priceHeadline)
+                        .font(.title3.bold())
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(selectedPlan == plan ? Theme.pillFill : Color(.systemGray5), lineWidth: 2)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func redeemCode() {
@@ -135,10 +227,18 @@ struct PaywallView: View {
                 await NotificationManager.shared.scheduleUpgradeReminder(at: bonusUntil)
                 redeemSuccessMessage = "Applied! Free access extended."
                 try? await Task.sleep(for: .seconds(1))
-                dismiss()
+                finish()
             } catch {
                 redeemError = "That code didn't work. Check it and try again."
             }
+        }
+    }
+
+    private func finish() {
+        if let onFinished {
+            onFinished()
+        } else {
+            dismiss()
         }
     }
 }

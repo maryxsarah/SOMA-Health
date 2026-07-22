@@ -1,17 +1,18 @@
 # Paywall / Subscription Setup
 
-Soma Premium: $4.99/month, 14-day free trial, or a referral code that
-grants bonus free days independent of the trial. Gates only the
-recommendation **detail** view (step target, workout suggestions, "why"
-explanation) — the Home card (today's category + message) always stays
-free.
+Soma Premium: two plans, **Annual $39.99/yr** (7-day free trial) and
+**Monthly $4.99/mo** (no trial), or a referral code that grants bonus free
+days independent of either. Gates only the recommendation **detail**
+view (step target, workout suggestions, "why" explanation) — the Home
+card (today's category + message) always stays free. Also shown
+proactively once, as the last step of onboarding.
 
 ## 1. Test it right now -- no App Store Connect needed
 
 Xcode can simulate the entire purchase flow locally using
 [`Soma/Soma.storekit`](Soma/Soma.storekit), a StoreKit test configuration
-already checked into this project with the $4.99/mo product and its
-14-day free trial pre-configured.
+already checked into this project with both products and the annual
+plan's 7-day free trial pre-configured.
 
 **One-time step (Xcode UI, can't be scripted):**
 1. Product menu (or the scheme selector) → **Edit Scheme...**
@@ -20,10 +21,11 @@ already checked into this project with the $4.99/mo product and its
 4. Close the scheme editor.
 
 Now build and run. Tapping a recommendation card with no active
-subscription shows the paywall; "Start Free Trial" triggers a real
-(simulated) StoreKit purchase sheet, no App Store Connect account or
-banking setup required. Use **Debug → StoreKit → Manage Transactions**
-in Xcode to inspect/delete simulated purchases while testing.
+subscription shows the paywall; the annual plan is selected by default
+and shows "Start Free Trial", switching to monthly shows "Continue" (no
+trial). No App Store Connect account or banking setup required for this.
+Use **Debug → StoreKit → Manage Transactions** in Xcode to inspect/delete
+simulated purchases while testing.
 
 ## 2. Go live: App Store Connect (manual -- your legal/bank identity)
 
@@ -33,18 +35,26 @@ Nothing in step 1 needs this, but a real purchase from a real user does.
    Paid Apps agreement, submit tax forms, add a bank account for
    payouts. Apple can take 24-48h to process this.
 2. **Your app → Monetization → Subscriptions** → **Create a Subscription
-   Group** (e.g. "Soma Premium").
-3. Inside that group, **create a subscription**:
-   - Reference name: `Soma Premium Monthly`
-   - **Product ID: `com.skollnitzer.soma.premium.monthly`** -- must match
-     exactly, it's hardcoded in `SubscriptionManager.productID`.
-   - Duration: 1 month
-   - Price: $4.99 (Tier 5, or type the price directly)
+   Group** (e.g. "Soma Premium") -- both plans below go in the *same*
+   group, as tiers of one subscription.
+3. Inside that group, **create the annual subscription**:
+   - Reference name: `Soma Premium Annual`
+   - **Product ID: `com.skollnitzer.soma.premium.annual`** -- must match
+     exactly, it's hardcoded in `SubscriptionManager.annualProductID`.
+   - Duration: 1 year, Price: $39.99
    - **Subscription Prices** → add an **Introductory Offer** → Free →
-     Duration: 2 weeks → applies once per subscriber.
-   - Add localization (display name, description) for at least English.
-4. Submit the subscription for review along with your next app version
-   (subscriptions are reviewed together with a build, not standalone).
+     Duration: 1 week → applies once per subscriber.
+4. **Create the monthly subscription** in the same group:
+   - Reference name: `Soma Premium Monthly`
+   - **Product ID: `com.skollnitzer.soma.premium.monthly`** -- matches
+     `SubscriptionManager.monthlyProductID`.
+   - Duration: 1 month, Price: $4.99, **no** introductory offer.
+5. Set the annual plan's rank/priority above the monthly plan in the
+   group (so App Store surfaces it as the default/"upgrade" tier).
+6. Add localization (display name, description) for at least English on
+   both, then submit both subscriptions for review along with your next
+   app version (subscriptions are reviewed together with a build, not
+   standalone).
 
 No entitlement or capability needs adding in Xcode for this -- StoreKit
 purchase APIs don't require a special entitlements-file key the way
@@ -59,17 +69,26 @@ Editor** or **Table Editor**:
 insert into referral_codes (code, bonus_days, max_redemptions)
 values ('YOURCODE', 14, 100);  -- null max_redemptions = unlimited
 ```
-One test code, `SOMA14` (14 bonus days, unlimited redemptions), is
-already seeded via migration `20260722000001_seed_referral_code.sql`.
+Two codes are already seeded: `SOMA14` (14 bonus days) and `SOMAFIRST`
+(21 days / 3 weeks, entered on the dedicated onboarding referral-code
+step) -- both unlimited redemptions.
 
 ## 4. What's already wired up
 
-- `SubscriptionManager` (StoreKit 2): loads the product, handles
-  purchase/restore, tracks `isSubscribed` from `Transaction.currentEntitlements`.
-- `PaywallView`: price, "Start Free Trial", "Restore Purchases" (required
-  by App Review for any subscription app), and a referral code field.
+- `SubscriptionManager` (StoreKit 2): loads both products, handles
+  purchase/restore for whichever is selected, tracks `isSubscribed` from
+  `Transaction.currentEntitlements` across either product ID.
+- `PaywallView`: annual/monthly selectable plan cards, dynamic price/fine
+  print, "Restore Purchases" (required by App Review for any subscription
+  app), and a referral code field. Also accepts an `onFinished` closure so
+  it can run as a plain onboarding step, not only as a `.sheet`.
 - `AppState.referralBonusUntil`: fetched from `users.referral_bonus_until`
   on Home appear and after a successful redemption.
 - `HomeView.hasDetailAccess`: `isSubscribed OR referralBonusUntil > now`
   -- gates whether tapping the card opens `RecommendationDetailView` or
   `PaywallView`.
+- The onboarding flow (`PostSetupFlowView`) shows the same `PaywallView`
+  once, right before Home, after two soft reassurance screens ("try free"
+  / "trial reminder") -- declining ("Not now") still proceeds to Home,
+  since the Home card itself is always free regardless of subscription
+  status.
