@@ -36,14 +36,25 @@ final class SubscriptionManager: ObservableObject {
         do {
             let products = try await Product.products(for: [Self.productID])
             product = products.first
+            if product == nil {
+                // Most common cause during development: the Xcode scheme
+                // isn't pointed at Soma.storekit (Edit Scheme -> Run ->
+                // Options -> StoreKit Configuration), so this is asking the
+                // real App Store for a product that doesn't exist there yet.
+                errorMessage = "Subscription product not found. If you're testing in Xcode, check Edit Scheme -> Run -> Options -> StoreKit Configuration is set to Soma.storekit."
+            }
         } catch {
             errorMessage = "Couldn't load subscription info. Check your connection."
         }
     }
 
     func purchase() async {
+        if product == nil {
+            // Retry once on-demand -- covers the case where the initial
+            // load in init() hadn't finished yet when the user tapped in.
+            await loadProduct()
+        }
         guard let product else {
-            errorMessage = "Subscription isn't available right now."
             return
         }
         isPurchasing = true

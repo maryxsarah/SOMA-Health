@@ -18,6 +18,7 @@ struct ProfileView: View {
     @State private var equipment: Set<EquipmentTag> = []
     @State private var injuryTags: Set<InjuryTag> = []
     @State private var contactEmailText = ""
+    @State private var otherGoalText = ""
     @State private var otherEquipmentText = ""
     @State private var injuryNotesText = ""
 
@@ -85,6 +86,11 @@ struct ProfileView: View {
                             }
                         }
                     }
+                    if goals.contains(.other) {
+                        TextField("What's your goal?", text: $otherGoalText)
+                            .textFieldStyle(.roundedBorder)
+                            .padding(.top, 4)
+                    }
                 }
 
                 CardView {
@@ -144,7 +150,9 @@ struct ProfileView: View {
                 }
             }
             .padding(20)
+            .dismissKeyboardOnTap()
         }
+        .scrollDismissesKeyboard(.interactively)
         .somaBackground()
         .task {
             await load()
@@ -198,6 +206,7 @@ struct ProfileView: View {
 
         contactEmailText = profile.contactEmail ?? ""
         goals = Set(profile.goals)
+        otherGoalText = profile.otherGoalNotes ?? ""
         equipment = Set(profile.equipment)
         otherEquipmentText = profile.otherEquipmentNotes ?? ""
         injuryTags = Set(profile.injuryTags)
@@ -213,6 +222,7 @@ struct ProfileView: View {
         let profile = UserProfile(
             contactEmail: contactEmailText.isEmpty ? nil : contactEmailText,
             goals: Array(goals),
+            otherGoalNotes: otherGoalText.isEmpty ? nil : otherGoalText,
             equipment: Array(equipment),
             otherEquipmentNotes: otherEquipmentText.isEmpty ? nil : otherEquipmentText,
             injuryTags: Array(injuryTags),

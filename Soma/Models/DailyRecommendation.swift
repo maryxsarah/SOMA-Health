@@ -112,6 +112,7 @@ enum EquipmentTag: String, Codable, CaseIterable, Identifiable {
 /// Training goal tags -- used to prioritize which workout suggestions
 /// surface first, not to filter them out.
 enum GoalTag: String, Codable, CaseIterable, Identifiable {
+    case maintain
     case buildStrength = "build_strength"
     case gainMuscle = "gain_muscle"
     case leanerToned = "leaner_toned"
@@ -121,11 +122,13 @@ enum GoalTag: String, Codable, CaseIterable, Identifiable {
     case betterSleep = "better_sleep"
     case generalFitness = "general_fitness"
     case activeRecovery = "active_recovery"
+    case other
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
+        case .maintain: "Maintain"
         case .buildStrength: "Build Strength"
         case .gainMuscle: "Gain More Muscle"
         case .leanerToned: "Getting Leaner/Toned"
@@ -135,6 +138,7 @@ enum GoalTag: String, Codable, CaseIterable, Identifiable {
         case .betterSleep: "Better Sleep"
         case .generalFitness: "General Fitness"
         case .activeRecovery: "Active Recovery"
+        case .other: "Other"
         }
     }
 }

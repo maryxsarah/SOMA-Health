@@ -44,7 +44,10 @@ targets:
       # directly to Info.plist, so all custom keys must live here.
       properties:
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        # Bump this before every new archive you upload to App Store
+        # Connect -- Apple rejects re-uploading the same build number
+        # under the same version, even for internal/bug-fix changes.
+        CFBundleVersion: "2"
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:

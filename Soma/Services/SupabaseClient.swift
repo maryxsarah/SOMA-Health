@@ -122,7 +122,7 @@ final class SupabaseClient {
 
     /// Plain read via RLS -- used by ProfileView on appear.
     func fetchProfile(id: String) async throws -> UserProfile {
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,equipment,other_equipment_notes,injury_tags,injury_notes&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_notes&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -140,6 +140,7 @@ final class SupabaseClient {
         // JSONSerialization can't encode `nil` -- use NSNull so Postgres
         // actually clears these columns rather than leaving them untouched.
         body["contact_email"] = profile.contactEmail ?? NSNull()
+        body["other_goal_notes"] = profile.otherGoalNotes ?? NSNull()
         body["other_equipment_notes"] = profile.otherEquipmentNotes ?? NSNull()
         body["injury_notes"] = profile.injuryNotes ?? NSNull()
 

@@ -34,6 +34,7 @@ enum InjuryTag: String, Codable, CaseIterable, Identifiable {
 struct UserProfile: Codable, Equatable {
     var contactEmail: String?
     var goals: [GoalTag]
+    var otherGoalNotes: String?
     var equipment: [EquipmentTag]
     var otherEquipmentNotes: String?
     var injuryTags: [InjuryTag]
@@ -41,7 +42,9 @@ struct UserProfile: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
-        case goals, equipment
+        case goals
+        case otherGoalNotes = "other_goal_notes"
+        case equipment
         case otherEquipmentNotes = "other_equipment_notes"
         case injuryTags = "injury_tags"
         case injuryNotes = "injury_notes"
@@ -50,6 +53,7 @@ struct UserProfile: Codable, Equatable {
     static let empty = UserProfile(
         contactEmail: nil,
         goals: [],
+        otherGoalNotes: nil,
         equipment: [],
         otherEquipmentNotes: nil,
         injuryTags: [],

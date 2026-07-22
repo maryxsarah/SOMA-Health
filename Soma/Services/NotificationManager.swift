@@ -29,6 +29,32 @@ final class NotificationManager {
         }
     }
 
+    /// Schedules a one-time reminder to upgrade, fired when a referral
+    /// code's free-access bonus period ends (e.g. "somafirst" grants 3
+    /// weeks with no payment method required, then this nudges them to
+    /// subscribe). Re-redeeming another code reschedules this same
+    /// notification rather than stacking multiple reminders, since the
+    /// identifier is fixed.
+    func scheduleUpgradeReminder(at date: Date) async {
+        let interval = date.timeIntervalSinceNow
+        guard interval > 0 else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Your free access is ending"
+        content.body = "Subscribe to Soma Premium to keep getting your full daily plan -- workouts, step targets, and more."
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "referral-upgrade-reminder",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        )
+
+        await withCheckedContinuation { continuation in
+            center.add(request) { _ in continuation.resume() }
+        }
+    }
+
     // MARK: - "Already sent today" flag
     //
     // Shared by both the HealthKit-observer trigger and the

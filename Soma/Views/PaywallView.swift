@@ -81,7 +81,7 @@ struct PaywallView: View {
                         .font(.body.bold())
                     HStack(spacing: 8) {
                         TextField("Enter code", text: $referralCode)
-                            .textInputAutocapitalization(.characters)
+                            .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder)
                         Button("Apply") {
@@ -107,7 +107,9 @@ struct PaywallView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(20)
+            .dismissKeyboardOnTap()
         }
+        .scrollDismissesKeyboard(.interactively)
         .somaBackground()
     }
 
@@ -127,6 +129,10 @@ struct PaywallView: View {
             do {
                 let bonusUntil = try await SupabaseClient.shared.redeemReferralCode(code)
                 appState.referralBonusUntil = bonusUntil
+                // No payment method needed during the bonus period -- this
+                // is the only nudge to actually subscribe, fired once the
+                // bonus runs out.
+                await NotificationManager.shared.scheduleUpgradeReminder(at: bonusUntil)
                 redeemSuccessMessage = "Applied! Free access extended."
                 try? await Task.sleep(for: .seconds(1))
                 dismiss()
