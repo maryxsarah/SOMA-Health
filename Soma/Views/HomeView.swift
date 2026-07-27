@@ -12,11 +12,15 @@ struct HomeView: View {
     @State private var showProfile = false
     @State private var showPaywall = false
     @State private var recentRecommendations: [DailyRecommendation] = []
+    @State private var selectedDay: String?
+    @State private var todaysWorkoutLog: WorkoutLogEntry?
+    @State private var completedDates: Set<String> = []
+    @State private var timelineEntries: [WorkoutTimelineEntry] = []
 
     var body: some View {
         ScrollView {
             VStack(spacing: 28) {
-                CalendarStripView(recommendations: recentRecommendations)
+                CalendarStripView(recommendations: recentRecommendations, completedDates: completedDates, onSelectDay: { selectedDay = $0 })
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
 
@@ -30,6 +34,16 @@ struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, 20)
+
+                if let todaysWorkoutLog {
+                    todaysWorkoutCard(todaysWorkoutLog)
+                        .padding(.horizontal, 20)
+                }
+
+                if !timelineEntries.isEmpty {
+                    timelineCard
+                        .padding(.horizontal, 20)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.bottom, 40)
@@ -53,12 +67,24 @@ struct HomeView: View {
             await loadTodaysRecommendation()
             await appState.refreshReferralBonus()
             await loadRecentRecommendations()
+            await loadTodaysWorkoutLog()
+            await loadCompletedDates()
+            await loadTimeline()
         }
         .refreshable {
             await checkNow()
             await loadRecentRecommendations()
+            await loadTodaysWorkoutLog()
+            await loadCompletedDates()
+            await loadTimeline()
         }
-        .sheet(isPresented: $showDetail) {
+        .sheet(isPresented: $showDetail, onDismiss: {
+            Task {
+                await loadTodaysWorkoutLog()
+                await loadCompletedDates()
+                await loadTimeline()
+            }
+        }) {
             if let recommendation = appState.currentRecommendation {
                 RecommendationDetailView(recommendation: recommendation)
             }
@@ -68,6 +94,14 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showPaywall) {
             PaywallView()
+        }
+        .sheet(isPresented: Binding(
+            get: { selectedDay != nil },
+            set: { if !$0 { selectedDay = nil } }
+        )) {
+            if let selectedDay {
+                DayDetailView(date: selectedDay)
+            }
         }
     }
 
@@ -107,6 +141,47 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
+    private func todaysWorkoutCard(_ log: WorkoutLogEntry) -> some View {
+        CardView {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Today's workout")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(log.title)
+                        .font(.body.bold())
+                }
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+        }
+    }
+
+    /// What was actually recorded today, across every connected source --
+    /// distinct from `todaysWorkoutCard` above (which reflects what the
+    /// user told Soma they did). Merged client-side since HealthKit can
+    /// only be read on-device while Oura/Whoop are read server-side.
+    private var timelineCard: some View {
+        CardView {
+            Text("Today's timeline")
+                .font(.body.bold())
+            ForEach(timelineEntries) { entry in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.title)
+                            .font(.subheadline.bold())
+                        Text("\(entry.sourceDisplayName) — \(Self.timeString(entry.startTime)) — \(entry.durationMinutes) min\(entry.calories.map { " — \($0) kcal" } ?? "")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
     private var needsDataCard: some View {
         CardView {
             Text("Soma needs today's data")
@@ -127,23 +202,59 @@ struct HomeView: View {
         }
     }
 
-    /// Plain read on appear -- does NOT invoke the mutating function, so
-    /// opening the app doesn't generate a new recommendation every time.
+    /// Reads today's row first; if it doesn't exist yet, generates it on
+    /// the spot instead of leaving the user on a stale/empty state.
+    ///
+    /// BGAppRefreshTask timing is best-effort only (iOS decides whether it
+    /// runs at all some mornings), so a plain read alone means "opening
+    /// the app in the morning" and "having today's real recommendation"
+    /// aren't reliably the same thing. Falling back to the same call
+    /// "Check now" uses closes that gap -- every app open either shows an
+    /// already-generated row or generates one immediately.
     private func loadTodaysRecommendation() async {
         do {
             if let recommendation = try await SupabaseClient.shared.fetchTodaysRecommendation(date: Self.todayDateString()) {
                 appState.currentRecommendation = recommendation
+                return
             }
         } catch {
-            // Falls through to the "needs data" card -- covers the "zero
-            // daily_snapshot / no recommendation yet" no-crash case.
+            // Falls through to the generate-on-open path below.
         }
+        await checkNow()
     }
 
     /// Feeds the calendar strip -- silent on failure, same as the other
     /// plain reads (worst case the strip just shows neutral gray dots).
     private func loadRecentRecommendations() async {
         recentRecommendations = (try? await SupabaseClient.shared.fetchRecentRecommendations()) ?? recentRecommendations
+    }
+
+    /// Reflects "Mark Workout Complete" in RecommendationDetailView --
+    /// refreshed on appear, pull-to-refresh, and whenever the detail sheet
+    /// closes (that's the only place a log can be created).
+    private func loadTodaysWorkoutLog() async {
+        let logs = (try? await SupabaseClient.shared.fetchWorkoutLogs(date: Self.todayDateString())) ?? []
+        todaysWorkoutLog = logs.first
+    }
+
+    /// Feeds the calendar strip's crown badge -- silent on failure, same
+    /// as the other plain reads.
+    private func loadCompletedDates() async {
+        completedDates = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates()) ?? completedDates
+    }
+
+    /// Merges HealthKit's on-device workouts with Oura/Whoop's
+    /// server-fetched ones into one chronological timeline. Each half
+    /// fails independently (silent on failure) -- worst case the timeline
+    /// just shows whichever source actually responded.
+    private func loadTimeline() async {
+        async let healthKitEntries: [WorkoutTimelineEntry] = HealthKitManager.isAvailable
+            ? await HealthKitManager.shared.fetchTodaysWorkouts()
+            : []
+        async let providerEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchProviderWorkoutTimeline(date: Self.todayDateString())) ?? []
+
+        let merged = await (healthKitEntries + providerEntries)
+        timelineEntries = merged.sorted { $0.startTime < $1.startTime }
     }
 
     /// Manual fallback ("Check now" / pull-to-refresh) -- calls the same
@@ -176,6 +287,13 @@ struct HomeView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             orbState = .idle
         }
+    }
+
+    private static func timeString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     private static func todayDateString() -> String {

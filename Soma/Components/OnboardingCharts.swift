@@ -140,7 +140,7 @@ struct ComparisonBarView: View {
     private func column(label: String, height: CGFloat, color: Color, icon: String, iconIsLight: Bool) -> some View {
         VStack(spacing: 8) {
             Image(systemName: icon)
-                .foregroundStyle(iconIsLight ? .secondary : .white)
+                .foregroundStyle(iconIsLight ? Color.secondary : Color.white)
                 .frame(width: 28, height: 28)
                 .background(Circle().fill(iconIsLight ? Color.white : color))
             RoundedRectangle(cornerRadius: 12, style: .continuous)

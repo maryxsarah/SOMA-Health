@@ -156,7 +156,7 @@ final class SupabaseClient {
 
     /// Plain read via RLS -- used by ProfileView on appear.
     func fetchProfile(id: String) async throws -> UserProfile {
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_notes&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_notes,experience_level&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -177,6 +177,7 @@ final class SupabaseClient {
         body["other_goal_notes"] = profile.otherGoalNotes ?? NSNull()
         body["other_equipment_notes"] = profile.otherEquipmentNotes ?? NSNull()
         body["injury_notes"] = profile.injuryNotes ?? NSNull()
+        body["experience_level"] = profile.experienceLevel?.rawValue ?? NSNull()
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
@@ -236,7 +237,7 @@ final class SupabaseClient {
     /// Plain read via RLS -- used by HomeView on appear so opening the app
     /// doesn't invoke the mutating generate-recommendation function every time.
     func fetchTodaysRecommendation(date: String) async throws -> DailyRecommendation? {
-        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,sleep_cap_applied,injury_cap_applied&limit=1"
+        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,sleep_cap_applied,injury_cap_applied,load_cap_applied&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -257,7 +258,7 @@ final class SupabaseClient {
         let startStr = formatter.string(from: start)
         let endStr = formatter.string(from: end)
 
-        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,sleep_cap_applied,injury_cap_applied&order=date.asc"
+        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,sleep_cap_applied,injury_cap_applied,load_cap_applied&order=date.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -276,7 +277,144 @@ final class SupabaseClient {
         return try JSONDecoder().decode([DailySnapshotRow].self, from: data)
     }
 
+    // MARK: - workout_log
+
+    /// Marks a suggestion as done for the day -- client-writable directly
+    /// via RLS (`workout_log_insert_own`), same pattern as the `users`
+    /// profile writes; no Edge Function needed for user-entered content.
+    /// `feedback` is optional free-text the user can leave when marking a
+    /// workout done (e.g. "I like a 5-10min incline treadmill warm-up") --
+    /// generate-workout-plan folds recent feedback into future plans for a
+    /// similar workout.
+    func logWorkout(date: String, title: String, bodyPart: String, category: String, feedback: String? = nil) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var body: [String: Any] = [
+            "user_id": userId,
+            "date": date,
+            "title": title,
+            "body_part": bodyPart,
+            "category": category,
+        ]
+        if let feedback, !feedback.isEmpty {
+            body["feedback"] = feedback
+        }
+        var request = try await authorizedRequest(path: "rest/v1/workout_log", method: "POST")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// Plain read via RLS -- used both by RecommendationDetailView (to show
+    /// which of today's/yesterday's suggestions are already logged) and
+    /// DayDetailView (calendar day drill-down).
+    func fetchWorkoutLogs(date: String) async throws -> [WorkoutLogEntry] {
+        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback&order=completed_at.asc"
+        var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([WorkoutLogEntry].self, from: data)
+    }
+
+    /// Turns freeform post-workout feedback into 3 concrete add-on
+    /// suggestions for future similar workouts (e.g. a specific warm-up
+    /// variation) -- a small, uncached Claude Haiku call since feedback is
+    /// occasional and low-cost, not a once-a-day-capped generation like
+    /// the AI workout plan.
+    func fetchWorkoutAddonSuggestions(feedback: String, workoutTitle: String, bodyPart: String) async throws -> [String] {
+        var request = try await authorizedRequest(path: "functions/v1/suggest-workout-addons", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "feedback": feedback,
+            "workoutTitle": workoutTitle,
+            "bodyPart": bodyPart,
+        ])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct Response: Decodable { let suggestions: [String] }
+        return try JSONDecoder().decode(Response.self, from: data).suggestions
+    }
+
+    /// Plain read via RLS -- feeds Home's calendar strip crown badge (any
+    /// day with at least one logged workout gets a crown). Distinct dates
+    /// only; the strip doesn't care how many workouts were logged in a day.
+    func fetchRecentWorkoutLogDates(days: Int = 7) async throws -> Set<String> {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+
+        let end = Date()
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
+        let path = "rest/v1/workout_log?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&select=date"
+        var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct Row: Decodable { let date: String }
+        let rows = try JSONDecoder().decode([Row].self, from: data)
+        return Set(rows.map(\.date))
+    }
+
+    /// Today's actual recorded workout sessions from connected wearables
+    /// (Oura/Whoop) -- distinct from workout_log (what the user told Soma
+    /// they did). HealthKit's own workouts are read separately, on-device,
+    /// via HealthKitManager -- the caller merges both into one timeline.
+    func fetchProviderWorkoutTimeline(date: String) async throws -> [WorkoutTimelineEntry] {
+        var request = try await authorizedRequest(path: "functions/v1/fetch-workout-timeline", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["date": date])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct DTO: Decodable {
+            let source: String
+            let title: String
+            let start_time: String
+            let duration_minutes: Int
+            let calories: Int?
+        }
+        struct Response: Decodable { let entries: [DTO] }
+
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plainFormatter = ISO8601DateFormatter()
+
+        return decoded.entries.compactMap { dto in
+            guard let start = formatter.date(from: dto.start_time) ?? plainFormatter.date(from: dto.start_time) else {
+                return nil
+            }
+            return WorkoutTimelineEntry(
+                source: dto.source,
+                title: dto.title,
+                startTime: start,
+                durationMinutes: dto.duration_minutes,
+                calories: dto.calories
+            )
+        }
+    }
+
     // MARK: - Edge Functions
+
+    /// Cached server-side (one Claude call per user per day) -- safe to
+    /// call every time the user opens the AI plan section, not just once.
+    /// `selectedTitle`/`selectedBodyPart` are the workout the user checked
+    /// in RecommendationDetailView -- the plan is built around that pick,
+    /// not a generic "some workout for today's category" choice.
+    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String) async throws -> AIWorkoutPlan {
+        var request = try await authorizedRequest(path: "functions/v1/generate-workout-plan", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "date": date,
+            "selection": ["title": selectedTitle, "bodyPart": selectedBodyPart],
+        ])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode(AIWorkoutPlan.self, from: data)
+    }
 
     func invokeGenerateRecommendation(date: String, healthkit: HealthKitSnapshot?) async throws -> DailyRecommendation {
         var body: [String: Any] = ["date": date]
@@ -294,6 +432,26 @@ final class SupabaseClient {
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
         return try JSONDecoder().decode(DailyRecommendation.self, from: data)
+    }
+
+    /// Backfills the last N days right after a wearable is connected, so
+    /// the calendar strip and HRV baseline aren't stuck waiting day-by-day
+    /// for history to accumulate -- reuses generate-recommendation itself
+    /// (it already accepts any `date`, not just "today"), since Whoop/Oura
+    /// both expose historical recovery/readiness/sleep/workout data via
+    /// the same endpoints. Best-effort and silent: a failed day just stays
+    /// a gray dot, same as before the device was connected. Sequential
+    /// (not parallel) to stay well under Whoop/Oura per-user rate limits.
+    func backfillRecentHistory(days: Int = 14) async {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+
+        for offset in 1...days {
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: Date()) else { continue }
+            _ = try? await invokeGenerateRecommendation(date: formatter.string(from: date), healthkit: nil)
+        }
     }
 
     func exchangeAndStoreWearableToken(

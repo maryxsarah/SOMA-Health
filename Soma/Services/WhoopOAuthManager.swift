@@ -11,7 +11,10 @@ final class WhoopOAuthManager: NSObject, ASWebAuthenticationPresentationContextP
     // NOTE: verify this path against the current Whoop developer dashboard
     // at setup time -- Whoop has changed API generation prefixes before.
     private static let authorizeURL = "https://api.prod.whoop.com/oauth/oauth2/auth"
-    private static let scopes = "read:recovery read:cycles offline"
+    // recovery -> band; cycles -> day strain (recent training load cap);
+    // sleep -> real sleep hours for the sleep safety cap; workout -> recent
+    // high-strain session detection (also feeds the load cap).
+    private static let scopes = "read:recovery read:cycles read:sleep read:workout offline"
 
     private var activeSession: ASWebAuthenticationSession?
 

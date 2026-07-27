@@ -66,8 +66,10 @@ struct ConnectDeviceView: View {
                     try await HealthKitManager.shared.requestAuthorization()
                 case .whoop:
                     try await WhoopOAuthManager.shared.connect()
+                    Task { await SupabaseClient.shared.backfillRecentHistory() }
                 case .oura:
                     try await OuraOAuthManager.shared.connect()
+                    Task { await SupabaseClient.shared.backfillRecentHistory() }
                 }
                 appState.markProviderConnected(provider)
             } catch {

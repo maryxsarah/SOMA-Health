@@ -3,6 +3,7 @@
 *.xcworkspace
 DerivedData/
 xcuserdata/
+build/
 
 # Pinned XcodeGen binary (machine-local tool, not source) -- see SETUP.md
 .xcodegen-2.42.0/

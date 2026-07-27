@@ -47,11 +47,21 @@ targets:
         # Bump this before every new archive you upload to App Store
         # Connect -- Apple rejects re-uploading the same build number
         # under the same version, even for internal/bug-fix changes.
-        CFBundleVersion: "2"
+        CFBundleVersion: "3"
+        # Declares Soma only uses exempt encryption (standard HTTPS via
+        # URLSession -- no bundled/custom crypto) so every future archive
+        # skips the "Missing Compliance" App Store Connect dialog
+        # entirely, instead of having to answer it by hand each time.
+        ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Apple now requires either all 4 orientations (for iPad
+        # multitasking) or an explicit opt-out via UIRequiresFullScreen --
+        # Soma is a portrait-only phone app by design, so opt out rather
+        # than add rotation support that was never part of the spec.
+        UIRequiresFullScreen: true
         # HealthKit read-permission usage strings (spec requires both keys
         # even though Soma never writes health data).
         NSHealthShareUsageDescription: "Soma reads your sleep, heart rate, HRV, and activity data to tell you how hard to train each day."
@@ -96,3 +106,30 @@ targets:
     # adding HealthKit, Background Modes, and Sign in with Apple via the
     # "+ Capability" button (with automatic signing on) so Xcode can
     # provision them for your Team. See SETUP.md.
+
+# Explicit scheme -- without this block, this XcodeGen version does not
+# auto-generate one, so Xcode's Run button (and a physical device target)
+# has nothing to build against and shows "No scheme".
+schemes:
+  Soma:
+    build:
+      targets:
+        Soma: all
+    run:
+      config: Debug
+      # Without this, the scheme has no StoreKit Configuration set (this
+      # key isn't preserved across `xcodegen generate` -- adding the
+      # explicit `schemes:` block above to fix "No scheme" silently wiped
+      # out the one previously set by hand in Xcode's UI), so
+      # Product.products(for:) queries the real App Store instead of the
+      # local test config and finds nothing -- "Subscription products not
+      # found" even though Soma.storekit is correctly set up.
+      storeKitConfiguration: Soma/Soma.storekit
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

@@ -9,10 +9,11 @@ final class OuraOAuthManager: NSObject, ASWebAuthenticationPresentationContextPr
     static let shared = OuraOAuthManager()
 
     private static let authorizeURL = "https://cloud.ouraring.com/oauth/authorize"
-    // "daily" scope covers the daily_readiness endpoint used by
-    // generate-recommendation. Verify against the current Oura developer
-    // portal at setup time if this changes.
-    private static let scopes = "daily"
+    // "daily" covers daily_readiness + sleep summaries used by
+    // generate-recommendation; "workout" covers the workout collection
+    // used for the recent-training-load cap. Verify against the current
+    // Oura developer portal at setup time if this changes.
+    private static let scopes = "daily workout"
 
     private var activeSession: ASWebAuthenticationSession?
 

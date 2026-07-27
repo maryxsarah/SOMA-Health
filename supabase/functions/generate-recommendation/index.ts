@@ -18,12 +18,23 @@ import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
-// NOTE: verify this path against the current Whoop developer dashboard at
-// setup time -- Whoop has changed API generation prefixes before.
+// NOTE: verify these paths against the current Whoop developer dashboard
+// at setup time -- Whoop has changed API generation prefixes before.
 const WHOOP_RECOVERY_URL = "https://api.prod.whoop.com/developer/v1/recovery";
+const WHOOP_CYCLE_URL = "https://api.prod.whoop.com/developer/v1/cycle";
+const WHOOP_SLEEP_URL = "https://api.prod.whoop.com/developer/v1/activity/sleep";
+const WHOOP_WORKOUT_URL = "https://api.prod.whoop.com/developer/v1/activity/workout";
 
 const OURA_READINESS_URL =
   "https://api.ouraring.com/v2/usercollection/daily_readiness";
+const OURA_SLEEP_URL = "https://api.ouraring.com/v2/usercollection/sleep";
+const OURA_WORKOUT_URL = "https://api.ouraring.com/v2/usercollection/workout";
+const OURA_STRESS_URL = "https://api.ouraring.com/v2/usercollection/daily_stress";
+
+// Whoop's own strain scale is 0-21; 15+ is what Whoop classifies as
+// "strenuous". Used as a "trained hard very recently" signal for the load
+// cap below, not as a recovery metric.
+const WHOOP_HIGH_STRAIN_THRESHOLD = 15;
 
 type Band = "high" | "medium_high" | "medium" | "low";
 type Category = "rest" | "light" | "moderate" | "push_hard";
@@ -76,25 +87,61 @@ Deno.serve(async (req: Request) => {
 
     let whoopRecovery: { recoveryScore: number; hrvMs?: number; restingHr?: number } | null = null;
     let ouraReadiness: number | null = null;
+    // True if either provider shows a strenuous session in roughly the
+    // last day -- feeds the recent-training-load cap alongside the
+    // existing sleep/injury caps.
+    let recentHighStrain = false;
 
     const whoopToken = (tokens ?? []).find((t: WearableTokenRow) => t.provider === "whoop");
     if (whoopToken) {
-      whoopRecovery = await fetchWhoopRecovery(supabase, whoopToken, date);
-      if (whoopRecovery) {
+      const [recovery, whoopSleepHours, whoopLoad] = await Promise.all([
+        safely("whoop recovery", null, () => fetchWhoopRecovery(supabase, whoopToken, date)),
+        safely("whoop sleep", null, () => fetchWhoopSleepHours(supabase, whoopToken, date)),
+        safely(
+          "whoop training load",
+          { strainScore: null, recentHighStrain: false },
+          () => fetchWhoopTrainingLoad(supabase, whoopToken, date),
+        ),
+      ]);
+      whoopRecovery = recovery;
+      if (whoopLoad.recentHighStrain) recentHighStrain = true;
+      if (recovery || whoopSleepHours !== null || whoopLoad.strainScore !== null) {
         await upsertSnapshot(supabase, userId, date, "whoop", {
-          recovery_score: whoopRecovery.recoveryScore,
-          hrv_ms: whoopRecovery.hrvMs,
-          resting_hr: whoopRecovery.restingHr,
+          recovery_score: recovery?.recoveryScore,
+          hrv_ms: recovery?.hrvMs,
+          resting_hr: recovery?.restingHr,
+          sleep_hours: whoopSleepHours ?? undefined,
+          strain_score: whoopLoad.strainScore ?? undefined,
         });
       }
     }
 
     const ouraToken = (tokens ?? []).find((t: WearableTokenRow) => t.provider === "oura");
     if (ouraToken) {
-      ouraReadiness = await fetchOuraReadiness(supabase, ouraToken, date);
-      if (ouraReadiness !== null) {
+      const emptySleepData = { sleepHours: null, hrvMs: null, restingHr: null };
+      const [readiness, ouraSleep, ouraLoad, ouraStress] = await Promise.all([
+        safely("oura readiness", null, () => fetchOuraReadiness(supabase, ouraToken, date)),
+        safely("oura sleep", emptySleepData, () => fetchOuraSleepData(supabase, ouraToken, date)),
+        safely(
+          "oura training load",
+          { strainScore: null, recentHighStrain: false },
+          () => fetchOuraTrainingLoad(supabase, ouraToken, date),
+        ),
+        safely("oura stress", null, () => fetchOuraStress(supabase, ouraToken, date)),
+      ]);
+      ouraReadiness = readiness;
+      if (ouraLoad.recentHighStrain) recentHighStrain = true;
+      if (
+        readiness !== null || ouraSleep.sleepHours !== null || ouraLoad.strainScore !== null ||
+        ouraStress !== null
+      ) {
         await upsertSnapshot(supabase, userId, date, "oura", {
-          readiness_score: ouraReadiness,
+          readiness_score: readiness ?? undefined,
+          sleep_hours: ouraSleep.sleepHours ?? undefined,
+          hrv_ms: ouraSleep.hrvMs ?? undefined,
+          resting_hr: ouraSleep.restingHr ?? undefined,
+          strain_score: ouraLoad.strainScore ?? undefined,
+          stress_score: ouraStress ?? undefined,
         });
       }
     }
@@ -157,11 +204,12 @@ Deno.serve(async (req: Request) => {
     // downgraded the final category. Matches the check constraint on
     // daily_recommendation.reason.
     const reason = `${source}_${band}`;
-    const { category, sleepCapApplied, injuryCapApplied } = mapBandToCategory(
+    const { category, sleepCapApplied, injuryCapApplied, loadCapApplied } = mapBandToCategory(
       band,
       sleepHours,
       clearlyPoorRecovery,
       hasInjury,
+      recentHighStrain,
     );
     const message = MESSAGES[category];
 
@@ -176,6 +224,7 @@ Deno.serve(async (req: Request) => {
           reason,
           sleep_cap_applied: sleepCapApplied,
           injury_cap_applied: injuryCapApplied,
+          load_cap_applied: loadCapApplied,
         },
         { onConflict: "user_id,date" },
       );
@@ -190,6 +239,7 @@ Deno.serve(async (req: Request) => {
       reason,
       sleep_cap_applied: sleepCapApplied,
       injury_cap_applied: injuryCapApplied,
+      load_cap_applied: loadCapApplied,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -238,10 +288,12 @@ function mapBandToCategory(
   sleepHours: number | null,
   clearlyPoorRecovery: boolean,
   hasInjury: boolean,
-): { category: Category; sleepCapApplied: boolean; injuryCapApplied: boolean } {
+  recentHighStrain: boolean,
+): { category: Category; sleepCapApplied: boolean; injuryCapApplied: boolean; loadCapApplied: boolean } {
   let effectiveBand = band;
   let sleepCapApplied = false;
   let injuryCapApplied = false;
+  let loadCapApplied = false;
 
   // Sleep safety cap: never push_hard on severe sleep deprivation.
   if (effectiveBand === "high" && sleepHours !== null && sleepHours < 5.5) {
@@ -256,17 +308,26 @@ function mapBandToCategory(
     injuryCapApplied = true;
   }
 
+  // Recent training load cap: never push_hard the day right after a
+  // strenuous Whoop workout or an Oura "hard"-intensity session, even if
+  // this morning's recovery/readiness looks strong -- avoids stacking two
+  // max-effort days back to back. Independent of the other two caps.
+  if (effectiveBand === "high" && recentHighStrain) {
+    effectiveBand = "medium";
+    loadCapApplied = true;
+  }
+
   if (effectiveBand === "high") {
-    return { category: "push_hard", sleepCapApplied, injuryCapApplied };
+    return { category: "push_hard", sleepCapApplied, injuryCapApplied, loadCapApplied };
   }
   if (effectiveBand === "medium_high" || effectiveBand === "medium") {
-    return { category: "moderate", sleepCapApplied, injuryCapApplied };
+    return { category: "moderate", sleepCapApplied, injuryCapApplied, loadCapApplied };
   }
 
   // effectiveBand === "low": split into light vs rest.
   const severelyShortSleep = sleepHours !== null && sleepHours < 5.5;
   const category = severelyShortSleep || clearlyPoorRecovery ? "rest" : "light";
-  return { category, sleepCapApplied, injuryCapApplied };
+  return { category, sleepCapApplied, injuryCapApplied, loadCapApplied };
 }
 
 function pickSleepHours(
@@ -310,6 +371,46 @@ async function fetchHrvBaseline(
   return sum / data.length;
 }
 
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// Every external Whoop/Oura call goes through this. Before this file grew
+// to 3 calls per provider (recovery/readiness + sleep + workout/cycle, all
+// via Promise.all), a single slow call just meant a slightly slower
+// response. Now, with nothing bounding any individual call, ONE hanging or
+// slow endpoint blocks the whole Promise.all -- and by extension the
+// user's entire "Check now" -- until Supabase's own function timeout
+// kills it. A hard per-call timeout, paired with the try/catch wrapper
+// below, means a single misbehaving endpoint degrades gracefully (that
+// one signal is just missing) instead of stalling or failing everything.
+const PROVIDER_FETCH_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/// Runs a provider-fetch function and swallows ANY failure (timeout,
+/// network error, malformed JSON) into the given fallback, logging the
+/// cause -- one provider signal being unavailable should never crash or
+/// stall the whole recommendation.
+async function safely<T>(label: string, fallback: T, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`${label} failed, continuing without it:`, err instanceof Error ? err.message : err);
+    return fallback;
+  }
+}
+
 // -- Provider fetch/refresh -------------------------------------------------
 
 async function fetchWhoopRecovery(
@@ -323,7 +424,7 @@ async function fetchWhoopRecovery(
 
   const start = `${date}T00:00:00.000Z`;
   const end = `${date}T23:59:59.999Z`;
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${WHOOP_RECOVERY_URL}?start=${start}&end=${end}&limit=1`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
@@ -337,6 +438,78 @@ async function fetchWhoopRecovery(
     hrvMs: record.score.hrv_rmssd_milli,
     restingHr: record.score.resting_heart_rate,
   };
+}
+
+/// Real sleep hours from Whoop's own sleep data, used instead of relying
+/// on an on-device HealthKit reading for Whoop users -- feeds the same
+/// sleep safety cap as HealthKit/Oura sleep does.
+async function fetchWhoopSleepHours(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  token: WearableTokenRow,
+  date: string,
+): Promise<number | null> {
+  const accessToken = await ensureFreshWhoopToken(supabase, token);
+  if (!accessToken) return null;
+
+  const start = `${addDays(date, -1)}T00:00:00.000Z`;
+  const end = `${date}T23:59:59.999Z`;
+  const res = await fetchWithTimeout(
+    `${WHOOP_SLEEP_URL}?start=${start}&end=${end}&limit=5`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!res.ok) return null;
+  const json = await res.json();
+  const record = (json?.records ?? json ?? [])[0];
+  const stages = record?.score?.stage_summary;
+  if (!stages) return null;
+
+  const totalMs = (stages.total_light_sleep_time_milli ?? 0) +
+    (stages.total_slow_wave_sleep_time_milli ?? 0) +
+    (stages.total_rem_sleep_time_milli ?? 0);
+  return totalMs > 0 ? totalMs / 3_600_000 : null;
+}
+
+/// Yesterday's Whoop day strain (from the cycle endpoint) plus whether any
+/// logged workout in the last ~day crossed the "strenuous" threshold --
+/// together these feed the recent-training-load cap.
+async function fetchWhoopTrainingLoad(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  token: WearableTokenRow,
+  date: string,
+): Promise<{ strainScore: number | null; recentHighStrain: boolean }> {
+  const accessToken = await ensureFreshWhoopToken(supabase, token);
+  if (!accessToken) return { strainScore: null, recentHighStrain: false };
+
+  const start = `${addDays(date, -1)}T00:00:00.000Z`;
+  const end = `${date}T23:59:59.999Z`;
+
+  const [cycleRes, workoutRes] = await Promise.all([
+    fetchWithTimeout(`${WHOOP_CYCLE_URL}?start=${start}&end=${end}&limit=2`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }),
+    fetchWithTimeout(`${WHOOP_WORKOUT_URL}?start=${start}&end=${end}&limit=5`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }),
+  ]);
+
+  let strainScore: number | null = null;
+  if (cycleRes.ok) {
+    const cycleJson = await cycleRes.json();
+    const record = (cycleJson?.records ?? cycleJson ?? [])[0];
+    strainScore = record?.score?.strain ?? null;
+  }
+
+  let recentHighStrain = false;
+  if (workoutRes.ok) {
+    const workoutJson = await workoutRes.json();
+    const records = workoutJson?.records ?? workoutJson ?? [];
+    // deno-lint-ignore no-explicit-any
+    recentHighStrain = records.some((r: any) => (r?.score?.strain ?? 0) >= WHOOP_HIGH_STRAIN_THRESHOLD);
+  }
+
+  return { strainScore, recentHighStrain };
 }
 
 async function ensureFreshWhoopToken(
@@ -353,7 +526,7 @@ async function ensureFreshWhoopToken(
   const clientId = Deno.env.get("WHOOP_CLIENT_ID")!;
   const clientSecret = Deno.env.get("WHOOP_CLIENT_SECRET")!;
 
-  const res = await fetch(WHOOP_TOKEN_URL, {
+  const res = await fetchWithTimeout(WHOOP_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -388,7 +561,7 @@ async function fetchOuraReadiness(
   const accessToken = await ensureFreshOuraToken(supabase, token);
   if (!accessToken) return null;
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${OURA_READINESS_URL}?start_date=${date}&end_date=${date}`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
@@ -396,6 +569,94 @@ async function fetchOuraReadiness(
   const json = await res.json();
   const record = json?.data?.[0];
   return record?.score ?? null;
+}
+
+/// Real sleep hours PLUS HRV and resting HR from Oura's sleep collection
+/// (the longest session in the window, i.e. last night's main sleep) --
+/// sleep feeds the same safety cap as HealthKit/Whoop sleep does; HRV and
+/// resting HR were previously never populated for Oura snapshot rows at
+/// all (only Whoop's recovery endpoint provided those).
+async function fetchOuraSleepData(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  token: WearableTokenRow,
+  date: string,
+): Promise<{ sleepHours: number | null; hrvMs: number | null; restingHr: number | null }> {
+  const empty = { sleepHours: null, hrvMs: null, restingHr: null };
+  const accessToken = await ensureFreshOuraToken(supabase, token);
+  if (!accessToken) return empty;
+
+  const startDate = addDays(date, -1);
+  const res = await fetchWithTimeout(
+    `${OURA_SLEEP_URL}?start_date=${startDate}&end_date=${date}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!res.ok) return empty;
+  const json = await res.json();
+  const records = json?.data ?? [];
+  if (records.length === 0) return empty;
+
+  // deno-lint-ignore no-explicit-any
+  const longest = records.reduce((a: any, b: any) =>
+    (b.total_sleep_duration ?? 0) > (a.total_sleep_duration ?? 0) ? b : a
+  );
+  return {
+    sleepHours: longest.total_sleep_duration ? longest.total_sleep_duration / 3600 : null,
+    hrvMs: longest.average_hrv ?? null,
+    // Lowest overnight HR is the standard resting-HR proxy; Oura's sleep
+    // endpoint doesn't expose a separately-labeled "resting_heart_rate".
+    restingHr: longest.lowest_heart_rate ?? null,
+  };
+}
+
+/// Minutes spent in a high-stress state today -- Oura-specific; Whoop has
+/// no equivalent metric.
+async function fetchOuraStress(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  token: WearableTokenRow,
+  date: string,
+): Promise<number | null> {
+  const accessToken = await ensureFreshOuraToken(supabase, token);
+  if (!accessToken) return null;
+
+  const res = await fetchWithTimeout(
+    `${OURA_STRESS_URL}?start_date=${date}&end_date=${date}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!res.ok) return null;
+  const json = await res.json();
+  const record = json?.data?.[0];
+  if (!record?.stress_high) return null;
+  // stress_high is reported in seconds; store as minutes for readability.
+  return Math.round(record.stress_high / 60);
+}
+
+/// Oura doesn't expose a single 0-21 strain number the way Whoop does, so
+/// the count of recent "hard"-intensity workouts is used as a rough load
+/// proxy; a hard-intensity session in the last ~day also feeds the
+/// recent-training-load cap directly.
+async function fetchOuraTrainingLoad(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  token: WearableTokenRow,
+  date: string,
+): Promise<{ strainScore: number | null; recentHighStrain: boolean }> {
+  const accessToken = await ensureFreshOuraToken(supabase, token);
+  if (!accessToken) return { strainScore: null, recentHighStrain: false };
+
+  const startDate = addDays(date, -1);
+  const res = await fetchWithTimeout(
+    `${OURA_WORKOUT_URL}?start_date=${startDate}&end_date=${date}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!res.ok) return { strainScore: null, recentHighStrain: false };
+  const json = await res.json();
+  const records = json?.data ?? [];
+
+  // deno-lint-ignore no-explicit-any
+  const hardCount = records.filter((r: any) => r?.intensity === "hard").length;
+  return { strainScore: hardCount || null, recentHighStrain: hardCount > 0 };
 }
 
 async function ensureFreshOuraToken(
@@ -412,7 +673,7 @@ async function ensureFreshOuraToken(
   const clientId = Deno.env.get("OURA_CLIENT_ID")!;
   const clientSecret = Deno.env.get("OURA_CLIENT_SECRET")!;
 
-  const res = await fetch("https://api.ouraring.com/oauth/token", {
+  const res = await fetchWithTimeout("https://api.ouraring.com/oauth/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({

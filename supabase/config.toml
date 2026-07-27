@@ -35,3 +35,12 @@ verify_jwt = true
 
 [functions.redeem-referral-code]
 verify_jwt = true
+
+[functions.generate-workout-plan]
+verify_jwt = true
+
+[functions.suggest-workout-addons]
+verify_jwt = true
+
+[functions.fetch-workout-timeline]
+verify_jwt = true

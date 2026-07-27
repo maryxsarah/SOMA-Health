@@ -21,6 +21,7 @@ struct ProfileView: View {
     @State private var otherGoalText = ""
     @State private var otherEquipmentText = ""
     @State private var injuryNotesText = ""
+    @State private var experienceLevel: ExperienceLevel?
 
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -74,6 +75,21 @@ struct ProfileView: View {
                         .keyboardType(.emailAddress)
                         .autocorrectionDisabled()
                         .textFieldStyle(.roundedBorder)
+                }
+
+                CardView {
+                    Text("Training experience")
+                        .font(.body.bold())
+                    Text("Adjusts the AI workout plan's structure -- how many blocks, whether it uses supersets, and rest periods.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    FlowLayout {
+                        ForEach(ExperienceLevel.allCases) { level in
+                            ChipToggle(title: level.displayName, isSelected: experienceLevel == level) {
+                                experienceLevel = experienceLevel == level ? nil : level
+                            }
+                        }
+                    }
                 }
 
                 CardView {
@@ -211,6 +227,7 @@ struct ProfileView: View {
         otherEquipmentText = profile.otherEquipmentNotes ?? ""
         injuryTags = Set(profile.injuryTags)
         injuryNotesText = profile.injuryNotes ?? ""
+        experienceLevel = profile.experienceLevel
     }
 
     private func save() {
@@ -226,7 +243,8 @@ struct ProfileView: View {
             equipment: Array(equipment),
             otherEquipmentNotes: otherEquipmentText.isEmpty ? nil : otherEquipmentText,
             injuryTags: Array(injuryTags),
-            injuryNotes: injuryNotesText.isEmpty ? nil : injuryNotesText
+            injuryNotes: injuryNotesText.isEmpty ? nil : injuryNotesText,
+            experienceLevel: experienceLevel
         )
 
         Task {

@@ -18,6 +18,7 @@ final class HealthKitManager {
         HKObjectType.quantityType(forIdentifier: .stepCount)!,
         HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
         HKObjectType.quantityType(forIdentifier: .appleExerciseTime)!,
+        HKObjectType.workoutType(),
     ]
 
     /// Requests read access for all 7 types in one sheet.
@@ -70,6 +71,57 @@ final class HealthKitManager {
                 continuation.resume(returning: total / Double(days))
             }
             store.execute(query)
+        }
+    }
+
+    /// Today's workout sessions actually recorded in Apple Health -- feeds
+    /// Home's workout timeline alongside the server-fetched Oura/Whoop
+    /// sessions (HealthKit can only be read on-device, never from a
+    /// server, so this half of the timeline has to come from here).
+    func fetchTodaysWorkouts() async -> [WorkoutTimelineEntry] {
+        guard Self.isAvailable else { return [] }
+        let workoutType = HKObjectType.workoutType()
+        let now = Date()
+        let startOfDay = Calendar.current.startOfDay(for: now)
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: workoutType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, _ in
+                let entries = (samples as? [HKWorkout])?.map { workout in
+                    WorkoutTimelineEntry(
+                        source: "apple_health",
+                        title: Self.displayName(for: workout.workoutActivityType),
+                        startTime: workout.startDate,
+                        durationMinutes: Int(workout.duration / 60),
+                        calories: workout.totalEnergyBurned.map { Int($0.doubleValue(for: .kilocalorie())) }
+                    )
+                } ?? []
+                continuation.resume(returning: entries)
+            }
+            store.execute(query)
+        }
+    }
+
+    private static func displayName(for type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .running: "Running"
+        case .walking: "Walking"
+        case .cycling: "Cycling"
+        case .swimming: "Swimming"
+        case .traditionalStrengthTraining, .functionalStrengthTraining: "Strength Training"
+        case .yoga: "Yoga"
+        case .highIntensityIntervalTraining: "HIIT"
+        case .coreTraining: "Core Training"
+        case .flexibility: "Flexibility"
+        case .hiking: "Hiking"
+        case .rowing: "Rowing"
+        case .elliptical: "Elliptical"
+        default: "Workout"
         }
     }
 

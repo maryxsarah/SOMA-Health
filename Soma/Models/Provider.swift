@@ -24,12 +24,5 @@ enum Provider: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Whoop doesn't have a registered developer app yet -- shown as
-    /// "Coming Soon" and non-interactive until it does.
-    var isAvailable: Bool {
-        switch self {
-        case .whoop: false
-        case .appleHealth, .oura: true
-        }
-    }
+    var isAvailable: Bool { true }
 }

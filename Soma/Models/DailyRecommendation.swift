@@ -28,42 +28,70 @@ enum RecommendationCategory: String, Codable {
 
     /// Fixed, specific suggestions per category -- concrete activity +
     /// duration, no AI generation, same pattern as the existing 4 message
-    /// templates. Each carries equipment/impact tags so the detail view
-    /// can prioritize/filter by the user's profile.
+    /// templates. Each carries equipment/impact/body-part tags so the
+    /// detail view can prioritize/filter by the user's profile and show
+    /// what today's session actually targets.
     var workoutSuggestions: [WorkoutSuggestion] {
         switch self {
         case .pushHard:
             [
-                WorkoutSuggestion(title: "50 min full-body strength training", equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false),
-                WorkoutSuggestion(title: "30 min HIIT circuit", equipment: .bodyweightOnly, goals: [.leanerToned, .moreSculpted, .cardioEndurance], highImpact: true),
-                WorkoutSuggestion(title: "45 min hard run", equipment: .bodyweightOnly, goals: [.cardioEndurance, .leanerToned], highImpact: true),
-                WorkoutSuggestion(title: "45 min hard bike ride", equipment: .bike, goals: [.cardioEndurance], highImpact: false),
-                WorkoutSuggestion(title: "40 min resistance band strength circuit", equipment: .resistanceBands, goals: [.buildStrength, .gainMuscle], highImpact: false),
+                WorkoutSuggestion(title: "50 min full-body strength training", equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .fullBody),
+                WorkoutSuggestion(title: "40 min upper body strength (chest, back, shoulders, arms)", equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .upperBody),
+                WorkoutSuggestion(title: "40 min lower body strength (quads, hamstrings, glutes)", equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .lowerBody),
+                WorkoutSuggestion(title: "30 min HIIT circuit", equipment: .bodyweightOnly, goals: [.leanerToned, .moreSculpted, .cardioEndurance], highImpact: true, bodyPart: .fullBody),
+                WorkoutSuggestion(title: "45 min hard run", equipment: .bodyweightOnly, goals: [.cardioEndurance, .leanerToned], highImpact: true, bodyPart: .cardio),
+                WorkoutSuggestion(title: "45 min hard bike ride", equipment: .bike, goals: [.cardioEndurance], highImpact: false, bodyPart: .cardio),
+                WorkoutSuggestion(title: "40 min resistance band strength circuit", equipment: .resistanceBands, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .fullBody),
             ]
         case .moderate:
             [
-                WorkoutSuggestion(title: "40 min moderate strength training", equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false),
-                WorkoutSuggestion(title: "35 min steady-state run", equipment: .bodyweightOnly, goals: [.cardioEndurance], highImpact: true),
-                WorkoutSuggestion(title: "30 min swim", equipment: .pool, goals: [.cardioEndurance, .generalFitness], highImpact: false),
-                WorkoutSuggestion(title: "45 min moderate bike ride", equipment: .bike, goals: [.cardioEndurance], highImpact: false),
-                WorkoutSuggestion(title: "30 min resistance band circuit", equipment: .resistanceBands, goals: [.buildStrength, .moreSculpted, .generalFitness], highImpact: false),
-                WorkoutSuggestion(title: "45 min vinyasa or power yoga", equipment: .yogaStudio, goals: [.improveFlexibility, .generalFitness], highImpact: false),
+                WorkoutSuggestion(title: "40 min moderate strength training", equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false, bodyPart: .fullBody),
+                WorkoutSuggestion(title: "35 min upper body strength", equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false, bodyPart: .upperBody),
+                WorkoutSuggestion(title: "35 min lower body strength", equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false, bodyPart: .lowerBody),
+                WorkoutSuggestion(title: "35 min steady-state run", equipment: .bodyweightOnly, goals: [.cardioEndurance], highImpact: true, bodyPart: .cardio),
+                WorkoutSuggestion(title: "30 min swim", equipment: .pool, goals: [.cardioEndurance, .generalFitness], highImpact: false, bodyPart: .cardio),
+                WorkoutSuggestion(title: "45 min moderate bike ride", equipment: .bike, goals: [.cardioEndurance], highImpact: false, bodyPart: .cardio),
+                WorkoutSuggestion(title: "30 min resistance band circuit", equipment: .resistanceBands, goals: [.buildStrength, .moreSculpted, .generalFitness], highImpact: false, bodyPart: .fullBody),
+                WorkoutSuggestion(title: "45 min vinyasa or power yoga", equipment: .yogaStudio, goals: [.improveFlexibility, .generalFitness], highImpact: false, bodyPart: .core),
             ]
         case .light:
             [
-                WorkoutSuggestion(title: "30 min yoga session", equipment: .yogaStudio, goals: [.improveFlexibility, .activeRecovery], highImpact: false),
-                WorkoutSuggestion(title: "25 min easy bike ride", equipment: .bike, goals: [.activeRecovery], highImpact: false),
-                WorkoutSuggestion(title: "20–30 min easy walk", equipment: .bodyweightOnly, goals: [.activeRecovery, .generalFitness], highImpact: false),
-                WorkoutSuggestion(title: "20 min light mobility work", equipment: .bodyweightOnly, goals: [.improveFlexibility, .activeRecovery], highImpact: false),
-                WorkoutSuggestion(title: "20 min easy swim", equipment: .pool, goals: [.activeRecovery], highImpact: false),
+                WorkoutSuggestion(title: "30 min yoga session", equipment: .yogaStudio, goals: [.improveFlexibility, .activeRecovery], highImpact: false, bodyPart: .core),
+                WorkoutSuggestion(title: "25 min easy bike ride", equipment: .bike, goals: [.activeRecovery], highImpact: false, bodyPart: .cardio),
+                WorkoutSuggestion(title: "20–30 min easy walk", equipment: .bodyweightOnly, goals: [.activeRecovery, .generalFitness], highImpact: false, bodyPart: .cardio),
+                WorkoutSuggestion(title: "20 min light mobility work", equipment: .bodyweightOnly, goals: [.improveFlexibility, .activeRecovery], highImpact: false, bodyPart: .core),
+                WorkoutSuggestion(title: "20 min easy swim", equipment: .pool, goals: [.activeRecovery], highImpact: false, bodyPart: .cardio),
             ]
         case .rest:
             [
-                WorkoutSuggestion(title: "15–20 min gentle walk", equipment: .bodyweightOnly, goals: [.activeRecovery, .betterSleep], highImpact: false),
-                WorkoutSuggestion(title: "15 min restorative yoga or stretching", equipment: .yogaStudio, goals: [.improveFlexibility, .activeRecovery, .betterSleep], highImpact: false),
-                WorkoutSuggestion(title: "10 min foam rolling / mobility", equipment: .bodyweightOnly, goals: [.activeRecovery], highImpact: false),
-                WorkoutSuggestion(title: "Full rest day", equipment: .bodyweightOnly, goals: [.activeRecovery, .betterSleep], highImpact: false),
+                WorkoutSuggestion(title: "15–20 min gentle walk", equipment: .bodyweightOnly, goals: [.activeRecovery, .betterSleep], highImpact: false, bodyPart: .cardio),
+                WorkoutSuggestion(title: "15 min restorative yoga or stretching", equipment: .yogaStudio, goals: [.improveFlexibility, .activeRecovery, .betterSleep], highImpact: false, bodyPart: .core),
+                WorkoutSuggestion(title: "10 min foam rolling / mobility", equipment: .bodyweightOnly, goals: [.activeRecovery], highImpact: false, bodyPart: .core),
+                WorkoutSuggestion(title: "Full rest day", equipment: .bodyweightOnly, goals: [.activeRecovery, .betterSleep], highImpact: false, bodyPart: .recovery),
             ]
+        }
+    }
+}
+
+/// What today's suggested session actually targets -- shown alongside the
+/// suggestion, and used to deprioritize repeating the same body part on
+/// consecutive days once a workout has been logged.
+enum BodyPartFocus: String, Codable {
+    case fullBody = "full_body"
+    case upperBody = "upper_body"
+    case lowerBody = "lower_body"
+    case core
+    case cardio
+    case recovery
+
+    var displayName: String {
+        switch self {
+        case .fullBody: "Full Body"
+        case .upperBody: "Upper Body"
+        case .lowerBody: "Lower Body"
+        case .core: "Abs & Core"
+        case .cardio: "Cardio"
+        case .recovery: "Recovery"
         }
     }
 }
@@ -160,6 +188,7 @@ struct WorkoutSuggestion: Identifiable {
     let equipment: EquipmentTag
     let goals: Set<GoalTag>
     let highImpact: Bool
+    let bodyPart: BodyPartFocus
 }
 
 /// Which provider/band drove today's category -- lets the app show a
@@ -222,10 +251,12 @@ struct DailyRecommendation: Codable, Equatable {
     let reason: RecommendationReason
     let sleepCapApplied: Bool
     let injuryCapApplied: Bool
+    let loadCapApplied: Bool
 
     enum CodingKeys: String, CodingKey {
         case date, category, message, reason
         case sleepCapApplied = "sleep_cap_applied"
         case injuryCapApplied = "injury_cap_applied"
+        case loadCapApplied = "load_cap_applied"
     }
 }

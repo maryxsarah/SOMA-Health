@@ -28,6 +28,26 @@ enum InjuryTag: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Training experience -- feeds AI workout plan generation (block count,
+/// superset usage, rest periods) so the same category/day produces
+/// meaningfully different structure for a newbie vs. an advanced lifter,
+/// not just the same template with adjusted numbers.
+enum ExperienceLevel: String, Codable, CaseIterable, Identifiable {
+    case newbie
+    case moderate
+    case advanced
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .newbie: "Newbie"
+        case .moderate: "Moderate"
+        case .advanced: "Advanced"
+        }
+    }
+}
+
 /// Mirrors the profile-related columns on `users`. Contact email is
 /// display-only profile info -- the app still signs in only via Sign in
 /// with Apple, this never becomes a password/login credential.
@@ -39,6 +59,7 @@ struct UserProfile: Codable, Equatable {
     var otherEquipmentNotes: String?
     var injuryTags: [InjuryTag]
     var injuryNotes: String?
+    var experienceLevel: ExperienceLevel?
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
@@ -48,6 +69,7 @@ struct UserProfile: Codable, Equatable {
         case otherEquipmentNotes = "other_equipment_notes"
         case injuryTags = "injury_tags"
         case injuryNotes = "injury_notes"
+        case experienceLevel = "experience_level"
     }
 
     static let empty = UserProfile(
@@ -57,6 +79,7 @@ struct UserProfile: Codable, Equatable {
         equipment: [],
         otherEquipmentNotes: nil,
         injuryTags: [],
-        injuryNotes: nil
+        injuryNotes: nil,
+        experienceLevel: nil
     )
 }
