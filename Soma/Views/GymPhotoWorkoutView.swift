@@ -13,8 +13,15 @@ private enum GymPhotoStep {
 /// `date` is the only thing passed in -- category/profile/readiness are
 /// all re-derived server-side, since template selection is a
 /// safety-relevant decision that shouldn't trust client-supplied state.
+///
+/// `onGenerated` fires as soon as a plan comes back (not only when the
+/// sheet closes) so RecommendationDetailView's AI-generated-workout card
+/// is already showing it the moment the user dismisses this sheet --
+/// there's no separate "gym photo result" display, it's the same card the
+/// normal picker flow populates.
 struct GymPhotoWorkoutView: View {
     let date: String
+    var onGenerated: (AIWorkoutPlan, String, String) -> Void = { _, _, _ in }
 
     @Environment(\.dismiss) private var dismiss
 
@@ -31,32 +38,39 @@ struct GymPhotoWorkoutView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    switch step {
-                    case .pickPhoto:
-                        pickPhotoContent
-                    case .analyzing:
-                        loadingContent(text: "Looking at your photo…")
-                    case .confirmingEquipment:
-                        confirmingEquipmentContent
-                    case .generating:
-                        loadingContent(text: "Building your workout…")
-                    case .result:
-                        resultContent
-                    }
+            Group {
+                if step == .result {
+                    resultOverlayContent
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 20) {
+                            switch step {
+                            case .pickPhoto:
+                                pickPhotoContent
+                            case .analyzing:
+                                loadingContent(text: "Looking at your photo…")
+                            case .confirmingEquipment:
+                                confirmingEquipmentContent
+                            case .generating:
+                                loadingContent(text: "Building your workout…")
+                            case .result:
+                                EmptyView()
+                            }
 
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                            if let errorMessage {
+                                Text(errorMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        .padding(20)
                     }
+                    .somaBackground()
                 }
-                .padding(20)
             }
-            .somaBackground()
-            .navigationTitle("Scan your gym")
+            .navigationTitle(step == .result ? "" : "Scan your gym")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(step == .result ? .hidden : .visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
@@ -150,20 +164,104 @@ struct GymPhotoWorkoutView: View {
         }
     }
 
-    private var resultContent: some View {
-        Group {
-            if let resultPlan {
-                AIWorkoutPlanView(plan: resultPlan)
-            } else if let safetyMessage {
-                CardView {
-                    Text("Let's check in first")
-                        .font(.body.bold())
+    /// The "wow moment" result screen -- the captured gym photo fills the
+    /// background, with a rounded, frosted card floating up over its
+    /// bottom portion (same visual language as an AR-style analysis
+    /// overlay) holding the actual workout. A safety-guardrail block gets
+    /// the same treatment but with the fixed message instead of a plan.
+    private var resultOverlayContent: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .bottom) {
+                Group {
+                    if let selectedImage {
+                        Image(uiImage: selectedImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Color(.systemGray5)
+                    }
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+                .clipped()
+
+                // Darkens the lower portion of the photo so the card's
+                // top edge reads clearly even where it hasn't fully
+                // covered the image yet.
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.35)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+
+                resultCard
+                    .frame(height: geo.size.height * 0.62)
+            }
+            .ignoresSafeArea()
+            .overlay(alignment: .top) {
+                HStack {
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.body.bold())
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .background(Circle().fill(.black.opacity(0.35)))
+                    }
+                    .padding(.trailing, 16)
+                }
+                .padding(.top, 8)
+            }
+        }
+    }
+
+    private var resultCard: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                    Text("SOMA AI ANALYSIS")
+                        .font(.caption.bold())
+                        .tracking(1)
+                }
+                .foregroundStyle(Theme.pillFill)
+
+                Text(resultPlan != nil
+                    ? "Based on your setup and health, here's today's workout to reach your goal:"
+                    : "Let's check in first")
+                    .font(.body.bold())
+
+                if let resultPlan {
+                    AIWorkoutPlanView(plan: resultPlan)
+                } else if let safetyMessage {
                     Text(safetyMessage)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                if resultPlan != nil {
+                    Button {
+                        step = .confirmingEquipment
+                    } label: {
+                        Text("Adjust manually")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 4)
+                }
             }
+            .padding(20)
+            .padding(.bottom, 24)
         }
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
     }
 
     private func equipmentChip(_ item: String) -> some View {
@@ -214,9 +312,10 @@ struct GymPhotoWorkoutView: View {
         do {
             let outcome = try await SupabaseClient.shared.generateGymWorkout(date: date, confirmedEquipment: equipment)
             switch outcome {
-            case .plan(let plan):
+            case .plan(let plan, let title, let bodyPart):
                 resultPlan = plan
                 safetyMessage = nil
+                onGenerated(plan, title, bodyPart)
             case .safetyBlocked(let message):
                 safetyMessage = message
                 resultPlan = nil

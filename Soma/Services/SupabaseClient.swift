@@ -437,12 +437,17 @@ final class SupabaseClient {
     /// `selectedTitle`/`selectedBodyPart` are the workout the user checked
     /// in RecommendationDetailView -- the plan is built around that pick,
     /// not a generic "some workout for today's category" choice.
-    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String) async throws -> AIWorkoutPlan {
+    /// `notes` is optional freeform text the user typed right after
+    /// checking a workout (e.g. "sore shoulder today") -- folded into the
+    /// generation prompt for this call only, not persisted.
+    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, notes: String? = nil) async throws -> AIWorkoutPlan {
         var request = try await authorizedRequest(path: "functions/v1/generate-workout-plan", method: "POST")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
+        var body: [String: Any] = [
             "date": date,
             "selection": ["title": selectedTitle, "bodyPart": selectedBodyPart],
-        ])
+        ]
+        if let notes { body["notes"] = notes }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -483,7 +488,10 @@ final class SupabaseClient {
         if let safety = try? JSONDecoder().decode(SafetyResponse.self, from: data), safety.safety_flag {
             return .safetyBlocked(message: safety.message ?? "Please check with a healthcare professional before starting a new workout.")
         }
-        return .plan(try JSONDecoder().decode(AIWorkoutPlan.self, from: data))
+        struct TitleDTO: Decodable { let title: String; let bodyPart: String }
+        let titleInfo = try JSONDecoder().decode(TitleDTO.self, from: data)
+        let plan = try JSONDecoder().decode(AIWorkoutPlan.self, from: data)
+        return .plan(plan, title: titleInfo.title, bodyPart: titleInfo.bodyPart)
     }
 
     func invokeGenerateRecommendation(date: String, healthkit: HealthKitSnapshot?) async throws -> DailyRecommendation {

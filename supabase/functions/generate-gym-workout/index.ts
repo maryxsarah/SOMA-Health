@@ -107,7 +107,20 @@ Deno.serve(async (req: Request) => {
     const wording = await callLunaForWording(template, goals, (snapshots ?? []) as SnapshotRow[]);
     const plan = mergeWording(template, wording);
 
-    return jsonResponse({ date, category, safety_flag: false, ...plan });
+    // Cache into the same ai_workout_plan table generate-workout-plan
+    // uses, keyed by selected_title = template.title -- this is what lets
+    // the app show today's gym-photo workout as "today's AI plan" (same
+    // card the normal picker flow populates) if the user leaves and
+    // reopens the detail sheet, instead of it only existing for the
+    // lifetime of this one response.
+    await supabase
+      .from("ai_workout_plan")
+      .upsert(
+        { user_id: userId, date, category, plan, selected_title: template.title },
+        { onConflict: "user_id,date" },
+      );
+
+    return jsonResponse({ date, category, safety_flag: false, title: template.title, bodyPart: template.bodyPart, ...plan });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const status = msg === "unauthorized" ? 401 : 500;
@@ -125,13 +138,15 @@ async function callLunaForWording(
     throw new Error("OPENAI_API_KEY is not set as a Supabase secret -- run `supabase secrets set OPENAI_API_KEY=...`");
   }
 
-  const allExerciseNames = [
-    ...template.warm_up.map((e) => e.name),
-    ...template.blocks.flatMap((b) => b.exercises.map((e) => e.name)),
-    ...template.cool_down.map((e) => e.name),
+  const allExercises = [
+    ...template.warm_up,
+    ...template.blocks.flatMap((b) => b.exercises),
+    ...template.cool_down,
   ];
+  const exerciseList = allExercises.map((e) => `${e.name} (targets: ${e.target_area})`).join("; ");
   const readinessSummary = describeSnapshots(snapshots);
-  const prompt = `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, and structure are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise. Only write clear, encouraging "instructions" text (2-3 sentences, plain language, real form cues) for each of these exercises, in this exact order: ${allExerciseNames.join(", ")}. User's goals: ${goals.length ? goals.join(", ") : "general fitness"}. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
+  const goalsText = goals.length ? goals.join(", ") : "general fitness";
+  const prompt = `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, structure, and target muscle areas are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise, and do not change which muscles it targets. Write "instructions" text (2-3 sentences) for each of these exercises, in this exact order: ${exerciseList}. Open each one by briefly naming what it targets and why that supports the user's goal (${goalsText}), then give plain-language form cues. User's goals: ${goalsText}. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
 
   const res = await fetch(OPENAI_URL, {
     method: "POST",

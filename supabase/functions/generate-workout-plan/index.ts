@@ -3,7 +3,10 @@
 // AI-generated exercise plan -- warm-up, one or more named blocks making
 // up the selected workout (which may include supersets/circuits), and a
 // cool-down -- using Claude Haiku. Body:
-// { date: "YYYY-MM-DD", selection: { title, bodyPart } }.
+// { date: "YYYY-MM-DD", selection: { title, bodyPart }, notes?: string }.
+// `notes` is optional freeform text the user typed right after checking a
+// workout (e.g. "sore shoulder today", "keep it under 30 min") -- folded
+// into the prompt for THIS generation only, not persisted anywhere.
 //
 // Cost control: capped at one generation per user per (day, selection).
 // The first call for a given date + selection calls the Anthropic API and
@@ -122,6 +125,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const date: string | undefined = body.date;
     const selection: Selection | undefined = body.selection;
+    const notes: string | undefined = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : undefined;
     if (!date) {
       return jsonResponse({ error: "missing 'date' (YYYY-MM-DD)" }, 400);
     }
@@ -183,6 +187,7 @@ Deno.serve(async (req: Request) => {
       userRow as UserRow | null,
       (snapshots ?? []) as SnapshotRow[],
       (recentLogs ?? []) as WorkoutLogRow[],
+      notes,
     );
     const plan = await callClaude(prompt);
 
@@ -216,6 +221,7 @@ function buildPrompt(
   userRow: UserRow | null,
   snapshots: SnapshotRow[],
   recentLogs: WorkoutLogRow[],
+  notes: string | undefined,
 ): string {
   const goals = userRow?.goals?.length ? userRow.goals.join(", ") : "general fitness";
   const equipment = userRow?.equipment?.length
@@ -253,6 +259,10 @@ ${historyLines}
 ${
     feedbackLines
       ? `\nFeedback the user left on recent workouts -- these are standing preferences, not one-off comments. Honor anything still relevant to today's session (same body part or workout type especially) rather than treating it as a single past instance:\n${feedbackLines}\n`
+      : ""
+  }${
+    notes
+      ? `\nThe user added this note specifically for TODAY's session -- factor it in directly (e.g. a specific constraint, preference, or how they're feeling right now), even if it means adjusting an exercise choice within the workout above:\n"${notes}"\n`
       : ""
   }
 Return the full session as:
