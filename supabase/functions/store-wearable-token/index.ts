@@ -45,10 +45,6 @@ Deno.serve(async (req: Request) => {
         ? await exchangeWhoop(code, codeVerifier, redirectUri)
         : await exchangeOura(code, codeVerifier, redirectUri);
 
-    if (!tokenResponse) {
-      return jsonResponse({ error: "token exchange failed" }, 502);
-    }
-
     const supabase = serviceRoleClient();
     const expiresAt = new Date(
       Date.now() + tokenResponse.expires_in * 1000,
@@ -87,9 +83,14 @@ async function exchangeWhoop(
   code: string,
   codeVerifier: string | undefined,
   redirectUri: string,
-): Promise<TokenResponse | null> {
-  const clientId = Deno.env.get("WHOOP_CLIENT_ID")!;
-  const clientSecret = Deno.env.get("WHOOP_CLIENT_SECRET")!;
+): Promise<TokenResponse> {
+  const clientId = Deno.env.get("WHOOP_CLIENT_ID");
+  const clientSecret = Deno.env.get("WHOOP_CLIENT_SECRET");
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "WHOOP_CLIENT_ID/WHOOP_CLIENT_SECRET are not set as Supabase secrets -- run `supabase secrets set WHOOP_CLIENT_ID=... WHOOP_CLIENT_SECRET=...`",
+    );
+  }
 
   const params = new URLSearchParams({
     grant_type: "authorization_code",
@@ -105,7 +106,10 @@ async function exchangeWhoop(
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params,
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Whoop token exchange failed (${res.status}): ${errBody}`);
+  }
   return await res.json();
 }
 
@@ -113,9 +117,14 @@ async function exchangeOura(
   code: string,
   codeVerifier: string | undefined,
   redirectUri: string,
-): Promise<TokenResponse | null> {
-  const clientId = Deno.env.get("OURA_CLIENT_ID")!;
-  const clientSecret = Deno.env.get("OURA_CLIENT_SECRET")!;
+): Promise<TokenResponse> {
+  const clientId = Deno.env.get("OURA_CLIENT_ID");
+  const clientSecret = Deno.env.get("OURA_CLIENT_SECRET");
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "OURA_CLIENT_ID/OURA_CLIENT_SECRET are not set as Supabase secrets -- run `supabase secrets set OURA_CLIENT_ID=... OURA_CLIENT_SECRET=...`",
+    );
+  }
 
   const params = new URLSearchParams({
     grant_type: "authorization_code",
@@ -131,6 +140,9 @@ async function exchangeOura(
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params,
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Oura token exchange failed (${res.status}): ${errBody}`);
+  }
   return await res.json();
 }

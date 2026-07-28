@@ -60,6 +60,9 @@ struct UserProfile: Codable, Equatable {
     var injuryTags: [InjuryTag]
     var injuryNotes: String?
     var experienceLevel: ExperienceLevel?
+    /// Self-reported only, never assumed -- one of the deterministic
+    /// safety-guardrail triggers for the gym-photo-workout feature.
+    var pregnancy: Bool?
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
@@ -70,6 +73,7 @@ struct UserProfile: Codable, Equatable {
         case injuryTags = "injury_tags"
         case injuryNotes = "injury_notes"
         case experienceLevel = "experience_level"
+        case pregnancy
     }
 
     static let empty = UserProfile(
@@ -80,6 +84,7 @@ struct UserProfile: Codable, Equatable {
         otherEquipmentNotes: nil,
         injuryTags: [],
         injuryNotes: nil,
-        experienceLevel: nil
+        experienceLevel: nil,
+        pregnancy: nil
     )
 }

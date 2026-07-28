@@ -22,6 +22,7 @@ struct ProfileView: View {
     @State private var otherEquipmentText = ""
     @State private var injuryNotesText = ""
     @State private var experienceLevel: ExperienceLevel?
+    @State private var pregnancy: Bool?
 
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -144,6 +145,19 @@ struct ProfileView: View {
                         .lineLimit(2...5)
                 }
 
+                CardView {
+                    Text("Pregnancy")
+                        .font(.body.bold())
+                    Text("Optional -- helps Soma keep workout suggestions safe. Never assumed; only set if you tell us.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    FlowLayout {
+                        ChipToggle(title: "I'm currently pregnant", isSelected: pregnancy == true) {
+                            pregnancy = (pregnancy == true) ? nil : true
+                        }
+                    }
+                }
+
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
@@ -228,6 +242,7 @@ struct ProfileView: View {
         injuryTags = Set(profile.injuryTags)
         injuryNotesText = profile.injuryNotes ?? ""
         experienceLevel = profile.experienceLevel
+        pregnancy = profile.pregnancy
     }
 
     private func save() {
@@ -244,7 +259,8 @@ struct ProfileView: View {
             otherEquipmentNotes: otherEquipmentText.isEmpty ? nil : otherEquipmentText,
             injuryTags: Array(injuryTags),
             injuryNotes: injuryNotesText.isEmpty ? nil : injuryNotesText,
-            experienceLevel: experienceLevel
+            experienceLevel: experienceLevel,
+            pregnancy: pregnancy
         )
 
         Task {

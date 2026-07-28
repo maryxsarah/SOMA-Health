@@ -151,7 +151,7 @@ enum BlockerTag: String, Codable, CaseIterable, Identifiable {
 enum DietType: String, Codable, CaseIterable, Identifiable {
     case balanced, wholeFood = "whole_food", mediterranean
     case pescatarian, flexitarian, vegetarian, vegan
-    case lowCarb = "low_carb", keto, paleo
+    case lowCarb = "low_carb", keto, paleo, none = "none"
     var id: String { rawValue }
     var displayName: String {
         switch self {
@@ -165,16 +165,23 @@ enum DietType: String, Codable, CaseIterable, Identifiable {
         case .lowCarb: "Low-carb"
         case .keto: "Keto"
         case .paleo: "Paleo"
+        case .none: "I don't follow any diet"
         }
     }
 }
 
+/// Provisional: `buildStrength` was added as the clearest gap against the
+/// original 5 options (none of which covered a strength/performance
+/// outcome), per a tester-feedback brief that flagged this screen as
+/// needing expansion without specifying the exact missing option(s).
+/// Revisit the full set once real tester feedback names what's missing.
 enum AccomplishmentGoal: String, Codable, CaseIterable, Identifiable {
     case boostEnergy = "boost_energy"
     case stayMotivated = "stay_motivated"
     case feelBetterBody = "feel_better_body"
     case knowWorkout = "know_workout"
     case understandBody = "understand_body"
+    case buildStrength = "build_strength_muscle"
     var id: String { rawValue }
     var displayName: String {
         switch self {
@@ -183,6 +190,7 @@ enum AccomplishmentGoal: String, Codable, CaseIterable, Identifiable {
         case .feelBetterBody: "Feel better about my body"
         case .knowWorkout: "Know exactly what workout to do every day"
         case .understandBody: "Understand my body better"
+        case .buildStrength: "Build strength and muscle"
         }
     }
     var systemImageName: String {
@@ -192,6 +200,7 @@ enum AccomplishmentGoal: String, Codable, CaseIterable, Identifiable {
         case .feelBetterBody: "heart.fill"
         case .knowWorkout: "checklist"
         case .understandBody: "waveform.path.ecg"
+        case .buildStrength: "dumbbell.fill"
         }
     }
 }

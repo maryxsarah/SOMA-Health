@@ -156,7 +156,7 @@ final class SupabaseClient {
 
     /// Plain read via RLS -- used by ProfileView on appear.
     func fetchProfile(id: String) async throws -> UserProfile {
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_notes,experience_level&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_notes,experience_level,pregnancy&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -178,6 +178,7 @@ final class SupabaseClient {
         body["other_equipment_notes"] = profile.otherEquipmentNotes ?? NSNull()
         body["injury_notes"] = profile.injuryNotes ?? NSNull()
         body["experience_level"] = profile.experienceLevel?.rawValue ?? NSNull()
+        body["pregnancy"] = profile.pregnancy ?? NSNull()
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
@@ -397,6 +398,38 @@ final class SupabaseClient {
         }
     }
 
+    /// Best-effort upload of HealthKit's on-device workouts so they persist
+    /// server-side -- previously HomeView only ever held these in-memory
+    /// (see loadTimeline()), so they vanished on every app relaunch and
+    /// never showed up in the backend at all. Silent on failure, same
+    /// pattern as loadCompletedDates() -- worst case this day's HealthKit
+    /// workouts just don't sync, no user-visible impact since the timeline
+    /// itself is still built locally either way.
+    func syncHealthKitWorkouts(_ entries: [WorkoutTimelineEntry]) async throws {
+        guard let userId = currentUserID, !entries.isEmpty else { return }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let rows: [[String: Any]] = entries.map { entry in
+            var row: [String: Any] = [
+                "user_id": userId,
+                "source": entry.source,
+                "start_time": formatter.string(from: entry.startTime),
+                "title": entry.title,
+                "duration_minutes": entry.durationMinutes,
+            ]
+            if let calories = entry.calories { row["calories"] = calories }
+            return row
+        }
+
+        var request = try await authorizedRequest(path: "rest/v1/healthkit_workout_sync", method: "POST")
+        request.setValue("resolution=ignore-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: rows)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
     // MARK: - Edge Functions
 
     /// Cached server-side (one Claude call per user per day) -- safe to
@@ -414,6 +447,43 @@ final class SupabaseClient {
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
         return try JSONDecoder().decode(AIWorkoutPlan.self, from: data)
+    }
+
+    /// Step 1 of the gym-photo-workout flow -- sends a client-compressed
+    /// gym photo for equipment recognition. `imageData` should already be
+    /// resized/compressed (~1024px longest edge, JPEG quality ~0.6) by the
+    /// caller before this is invoked.
+    func analyzeGymPhoto(imageData: Data) async throws -> GymPhotoEquipmentResult {
+        var request = try await authorizedRequest(path: "functions/v1/analyze-gym-photo", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "imageBase64": imageData.base64EncodedString(),
+        ])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode(GymPhotoEquipmentResult.self, from: data)
+    }
+
+    /// Steps 3+4 of the gym-photo-workout flow, combined -- deterministic
+    /// template selection (server-side, gated by the safety guardrail)
+    /// plus Luna's wording pass. `date` is used server-side to look up
+    /// today's already-computed category and readiness data; that
+    /// safety-relevant decision is never trusted from the client.
+    func generateGymWorkout(date: String, confirmedEquipment: [String]) async throws -> GymWorkoutOutcome {
+        var request = try await authorizedRequest(path: "functions/v1/generate-gym-workout", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "date": date,
+            "confirmedEquipment": confirmedEquipment,
+        ])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct SafetyResponse: Decodable { let safety_flag: Bool; let message: String? }
+        if let safety = try? JSONDecoder().decode(SafetyResponse.self, from: data), safety.safety_flag {
+            return .safetyBlocked(message: safety.message ?? "Please check with a healthcare professional before starting a new workout.")
+        }
+        return .plan(try JSONDecoder().decode(AIWorkoutPlan.self, from: data))
     }
 
     func invokeGenerateRecommendation(date: String, healthkit: HealthKitSnapshot?) async throws -> DailyRecommendation {

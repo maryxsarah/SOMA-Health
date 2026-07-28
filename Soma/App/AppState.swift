@@ -83,6 +83,13 @@ final class AppState: ObservableObject {
     func refreshReferralBonus() async {
         guard let userId = SupabaseClient.shared.currentUserID else { return }
         referralBonusUntil = try? await SupabaseClient.shared.fetchReferralBonusUntil(id: userId)
+        // Scheduling here (rather than only at the Paywall's own redeem
+        // call site) means the onboarding-step redemption path
+        // (ReferralCodeEntryStepView, via PostSetupFlowView's onRedeemed)
+        // gets the reminder too, without duplicating the offset math.
+        if let bonusUntil = referralBonusUntil {
+            await NotificationManager.shared.scheduleUpgradeReminder(bonusUntil: bonusUntil)
+        }
     }
 
     /// Clears the local session and resets onboarding state so the app

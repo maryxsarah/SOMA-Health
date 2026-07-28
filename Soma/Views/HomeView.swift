@@ -253,7 +253,12 @@ struct HomeView: View {
             : []
         async let providerEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchProviderWorkoutTimeline(date: Self.todayDateString())) ?? []
 
-        let merged = await (healthKitEntries + providerEntries)
+        let hkEntries = await healthKitEntries
+        if !hkEntries.isEmpty {
+            Task { try? await SupabaseClient.shared.syncHealthKitWorkouts(hkEntries) }
+        }
+
+        let merged = await (hkEntries + providerEntries)
         timelineEntries = merged.sorted { $0.startTime < $1.startTime }
     }
 

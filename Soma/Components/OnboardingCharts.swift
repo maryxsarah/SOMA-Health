@@ -20,58 +20,6 @@ struct TrendLineShape: Shape {
     }
 }
 
-/// "Designed to help you stay on track" -- two animated trend lines over a
-/// 6-month span: favorable with Soma, unfavorable without a plan.
-struct DualTrendChartView: View {
-    @State private var drawProgress: CGFloat = 0
-
-    private let withSomaPoints: [CGPoint] = [
-        CGPoint(x: 0.0, y: 0.82), CGPoint(x: 0.2, y: 0.68), CGPoint(x: 0.4, y: 0.53),
-        CGPoint(x: 0.6, y: 0.37), CGPoint(x: 0.8, y: 0.22), CGPoint(x: 1.0, y: 0.1),
-    ]
-    private let withoutPlanPoints: [CGPoint] = [
-        CGPoint(x: 0.0, y: 0.78), CGPoint(x: 0.2, y: 0.8), CGPoint(x: 0.4, y: 0.76),
-        CGPoint(x: 0.6, y: 0.84), CGPoint(x: 0.8, y: 0.9), CGPoint(x: 1.0, y: 0.95),
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 16) {
-                legend(color: Theme.pillFill, label: "With Soma")
-                legend(color: .orange, label: "Without a plan")
-            }
-
-            ZStack {
-                TrendLineShape(points: withoutPlanPoints)
-                    .trim(from: 0, to: drawProgress)
-                    .stroke(Color.orange.opacity(0.8), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                TrendLineShape(points: withSomaPoints)
-                    .trim(from: 0, to: drawProgress)
-                    .stroke(Theme.pillFill, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-            }
-            .frame(height: 160)
-
-            HStack {
-                Text("Month 1").font(.caption2).foregroundStyle(.secondary)
-                Spacer()
-                Text("Month 6").font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-        .padding(20)
-        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(.systemGray6)))
-        .onAppear {
-            withAnimation(.easeOut(duration: 1.6)) { drawProgress = 1 }
-        }
-    }
-
-    private func legend(color: Color, label: String) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(label).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-}
-
 /// Single upward trend line -- "you're right on track" (survey) and the
 /// plan-summary screen both reuse this.
 struct UpwardTrendChartView: View {

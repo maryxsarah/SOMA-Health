@@ -44,3 +44,9 @@ verify_jwt = true
 
 [functions.fetch-workout-timeline]
 verify_jwt = true
+
+[functions.analyze-gym-photo]
+verify_jwt = true
+
+[functions.generate-gym-workout]
+verify_jwt = true

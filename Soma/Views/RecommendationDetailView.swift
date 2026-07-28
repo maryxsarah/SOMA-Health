@@ -23,6 +23,8 @@ struct RecommendationDetailView: View {
     @State private var addonSuggestions: [String] = []
     @State private var isFetchingAddons = false
 
+    @State private var showingGymPhotoFlow = false
+
     /// True once the user has explicitly logged today's workout as done
     /// (via "Mark Workout Complete") -- generating/viewing an AI plan does
     /// NOT complete it, only tapping that button does. Only one workout is
@@ -72,6 +74,13 @@ struct RecommendationDetailView: View {
                     ForEach(filteredWorkoutSuggestions) { suggestion in
                         workoutRow(suggestion)
                     }
+                    Button {
+                        showingGymPhotoFlow = true
+                    } label: {
+                        Label("Or scan your gym →", systemImage: "camera.fill")
+                            .font(.caption.bold())
+                    }
+                    .padding(.top, 6)
                 }
 
                 CardView {
@@ -82,14 +91,7 @@ struct RecommendationDetailView: View {
                         .foregroundStyle(.secondary)
 
                     if let aiPlan {
-                        Text(aiPlan.focus)
-                            .font(.subheadline.bold())
-                            .padding(.top, 4)
-                        aiPhaseSection(title: "Warm-up", exercises: aiPlan.warmUp)
-                        ForEach(aiPlan.blocks) { block in
-                            aiBlockSection(block)
-                        }
-                        aiPhaseSection(title: "Cool-down", exercises: aiPlan.coolDown)
+                        AIWorkoutPlanView(plan: aiPlan)
 
                         if isCompletedToday {
                             Label("Workout completed today", systemImage: "crown.fill")
@@ -196,6 +198,9 @@ struct RecommendationDetailView: View {
         .task {
             await loadContext()
         }
+        .sheet(isPresented: $showingGymPhotoFlow) {
+            GymPhotoWorkoutView(date: recommendation.date)
+        }
     }
 
     private var explanationText: String {
@@ -287,57 +292,6 @@ struct RecommendationDetailView: View {
             let rhsRepeatsYesterday = yesterdayBodyParts.contains(rhs.bodyPart)
             return !lhsRepeatsYesterday && rhsRepeatsYesterday
         }
-    }
-
-    private func aiPhaseSection(title: String, exercises: [AIExercise]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-                .padding(.top, 10)
-            ForEach(exercises) { exercise in
-                aiExerciseRow(exercise)
-            }
-        }
-    }
-
-    private func aiBlockSection(_ block: AIWorkoutBlock) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(block.name)
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                if block.rounds > 1 {
-                    Text("\(block.rounds) rounds, rest \(block.restBetweenRounds)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.top, 10)
-            ForEach(block.exercises) { exercise in
-                aiExerciseRow(exercise)
-            }
-        }
-    }
-
-    private func aiExerciseRow(_ exercise: AIExercise) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(exercise.name)
-                    .font(.subheadline.bold())
-                Spacer()
-                Text("\(exercise.durationMinutes) min")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)")
-                .font(.caption)
-                .foregroundStyle(Theme.pillFill)
-            Text(exercise.instructions)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 6)
     }
 
     /// Generates (or fetches the cached) AI plan around whatever's checked

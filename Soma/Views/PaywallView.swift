@@ -134,6 +134,21 @@ struct PaywallView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .somaBackground()
+        .task {
+            checkReferralBonusSkip()
+        }
+    }
+
+    /// Mirrors HomeView.hasDetailAccess's bonus check -- if a referral
+    /// bonus is currently active, skip the paywall entirely rather than
+    /// showing "Pay Now"/"Start Free Trial" to someone who already has
+    /// free access (previously this view never checked the bonus at all,
+    /// so redeeming "somafirst" earlier in onboarding still ended in a
+    /// payment prompt).
+    private func checkReferralBonusSkip() {
+        if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
+            finish()
+        }
     }
 
     private var selectedProduct: Product? {
@@ -224,7 +239,7 @@ struct PaywallView: View {
                 // No payment method needed during the bonus period -- this
                 // is the only nudge to actually subscribe, fired once the
                 // bonus runs out.
-                await NotificationManager.shared.scheduleUpgradeReminder(at: bonusUntil)
+                await NotificationManager.shared.scheduleUpgradeReminder(bonusUntil: bonusUntil)
                 redeemSuccessMessage = "Applied! Free access extended."
                 try? await Task.sleep(for: .seconds(1))
                 finish()

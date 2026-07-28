@@ -37,6 +37,8 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Soma uses your camera to see what gym equipment is available so it can build a matching workout.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Soma reads your sleep, heart rate, HRV, and activity data to tell you how hard to train each day.</string>
 	<key>NSHealthUpdateUsageDescription</key>

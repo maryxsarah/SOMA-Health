@@ -31,6 +31,16 @@ export function serviceRoleClient(): SupabaseClient {
   });
 }
 
+/**
+ * Standing rule: NEVER use Supabase Auth's `user_metadata` / `app_metadata`
+ * (fields embedded in the JWT) for any server-side authorization or
+ * eligibility decision (subscription status, referral bonus, safety
+ * flags, etc.). Both are client-settable via `supabase.auth.updateUser`
+ * and must be treated as untrusted input. Every such decision in this
+ * codebase reads instead from the `users`/`daily_snapshot`/etc. Postgres
+ * tables via `serviceRoleClient()` above, which only Edge Functions can
+ * write -- that's the actual source of truth.
+ */
 export async function requireUser(req: Request): Promise<string> {
   const { data, error } = await callerClient(req).auth.getUser();
   if (error || !data.user) {

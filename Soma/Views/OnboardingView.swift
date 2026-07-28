@@ -38,7 +38,7 @@ struct OnboardingView: View {
                 VStack(spacing: 10) {
                     Text("Consistency compounds")
                         .font(.body.bold())
-                    DualTrendChartView()
+                    UpwardTrendChartView(xAxisLabels: ["Month 1", "Month 3", "Month 6"])
                 }
                 .padding(.horizontal, 20)
 

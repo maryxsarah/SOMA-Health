@@ -66,6 +66,12 @@ targets:
         # even though Soma never writes health data).
         NSHealthShareUsageDescription: "Soma reads your sleep, heart rate, HRV, and activity data to tell you how hard to train each day."
         NSHealthUpdateUsageDescription: "Soma does not write to Health, but iOS requires this description alongside read access."
+        # Camera access for the gym-photo-workout feature (photograph your
+        # gym/equipment to get a matched workout). Note: choosing from the
+        # library uses PhotosPicker, which needs no usage-description key
+        # (it runs out-of-process and never grants the app broad library
+        # access).
+        NSCameraUsageDescription: "Soma uses your camera to see what gym equipment is available so it can build a matching workout."
         # Background Modes: "fetch" is what BGAppRefreshTaskRequest relies
         # on; "processing" matches the Xcode capability checklist in the spec.
         UIBackgroundModes:

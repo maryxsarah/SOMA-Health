@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// "Designed to help you stay on track" -- the dual downward/upward trend
-/// chart screen.
+/// "Designed to help you stay on track" -- the upward trend chart screen.
 struct TrustChartStepView: View {
     let progress: Double
     let onBack: () -> Void
@@ -19,7 +18,7 @@ struct TrustChartStepView: View {
                 .padding(.top, 24)
                 .padding(.bottom, 20)
 
-            DualTrendChartView()
+            UpwardTrendChartView(xAxisLabels: ["Month 1", "Month 3", "Month 6"])
                 .padding(.horizontal, 24)
 
             Text("Tailor your plan and stay consistent over time.")

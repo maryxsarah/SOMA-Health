@@ -29,18 +29,19 @@ final class NotificationManager {
         }
     }
 
-    /// Schedules a one-time reminder to upgrade, fired when a referral
-    /// code's free-access bonus period ends (e.g. "somafirst" grants 3
-    /// weeks with no payment method required, then this nudges them to
-    /// subscribe). Re-redeeming another code reschedules this same
-    /// notification rather than stacking multiple reminders, since the
-    /// identifier is fixed.
-    func scheduleUpgradeReminder(at date: Date) async {
-        let interval = date.timeIntervalSinceNow
+    /// Schedules a one-time reminder 2 days BEFORE a referral code's
+    /// free-access bonus ends (not at expiry itself) -- e.g. "somafirst"
+    /// grants 14 days with no payment method required; this fires on day
+    /// 12, giving a 2-day heads-up rather than a same-day surprise.
+    /// Re-redeeming another code reschedules this same notification rather
+    /// than stacking multiple reminders, since the identifier is fixed.
+    func scheduleUpgradeReminder(bonusUntil: Date) async {
+        let reminderDate = Calendar.current.date(byAdding: .day, value: -2, to: bonusUntil) ?? bonusUntil
+        let interval = reminderDate.timeIntervalSinceNow
         guard interval > 0 else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Your free access is ending"
+        content.title = "Your free access ends in 2 days"
         content.body = "Subscribe to Soma Premium to keep getting your full daily plan -- workouts, step targets, and more."
         content.sound = .default
 

@@ -21,8 +21,10 @@ struct PostSetupFlowView: View {
                 ReferralCodeEntryStepView(
                     onSkip: advance,
                     onRedeemed: {
-                        Task { await appState.refreshReferralBonus() }
-                        advance()
+                        Task {
+                            await appState.refreshReferralBonus()
+                            advance()
+                        }
                     }
                 )
             case .loading:
