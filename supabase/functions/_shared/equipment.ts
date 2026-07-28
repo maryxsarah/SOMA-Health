@@ -51,17 +51,63 @@ export const EQUIPMENT_VOCABULARY = [
 
 export type EquipmentItem = typeof EQUIPMENT_VOCABULARY[number];
 
+/// Common ways people write the same thing. The vision model is constrained
+/// to the vocabulary by schema, but the CLIENT also lets users type equipment
+/// by hand -- and it does so precisely when recognition failed, i.e. exactly
+/// when getting it right matters most. Someone typing "dumbbell", "bench" or
+/// "pull up bar" was silently dropped to a bodyweight workout while standing
+/// in a fully equipped gym, having just listed its contents.
+///
+/// Singular/plural and hyphen/space variants are handled generically below;
+/// this map is only for genuine synonyms.
+const ALIASES: Record<string, string> = {
+  "free weights": "dumbbells",
+  "hand weights": "dumbbells",
+  "bench": "weight bench",
+  "flat bench": "weight bench",
+  "power rack": "squat rack",
+  "rack": "squat rack",
+  "chin up bar": "pull-up bar",
+  "bar": "barbell",
+  "plates": "weight plates",
+  "kettle bell": "kettlebells",
+  "bands": "resistance bands",
+  "exercise bands": "resistance bands",
+  "rower": "rowing machine",
+  "erg": "rowing machine",
+  "exercise bike": "stationary bike",
+  "spin bike": "stationary bike",
+  "cross trainer": "elliptical",
+  "trx": "suspension trainer",
+  "skipping rope": "jump rope",
+  "mat": "yoga mat",
+  "box": "plyo box",
+};
+
+/// Collapses punctuation and plural forms so "Pull Up Bar", "pull-up bars"
+/// and "pull-up bar" all land on the same key.
+function canonical(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/s\b/g, "");
+}
+
 /// Normalizes a caller-supplied list down to known vocabulary entries.
-/// The client lets users edit the detected list before confirming, so
-/// unknown strings can still arrive here -- they are dropped rather than
-/// trusted, since nothing downstream can act on a value no template
-/// references.
+/// Unknown strings are dropped rather than trusted, since nothing downstream
+/// can act on a value no template references.
 export function normalizeEquipment(input: string[]): Set<string> {
-  const known = new Set<string>(EQUIPMENT_VOCABULARY);
+  const byCanonical = new Map<string, string>();
+  for (const item of EQUIPMENT_VOCABULARY) byCanonical.set(canonical(item), item);
+  for (const [alias, target] of Object.entries(ALIASES)) {
+    byCanonical.set(canonical(alias), target);
+  }
+
   const out = new Set<string>();
   for (const raw of input) {
-    const value = raw.toLowerCase().trim();
-    if (known.has(value)) out.add(value);
+    const match = byCanonical.get(canonical(raw));
+    if (match) out.add(match);
   }
   return out;
 }

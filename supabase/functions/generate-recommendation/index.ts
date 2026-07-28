@@ -186,13 +186,40 @@ Deno.serve(async (req: Request) => {
       source = "oura";
       clearlyPoorRecovery = ouraReadiness < 50;
     } else if (healthkit) {
-      const [hrvBaseline, rhrBaseline] = await Promise.all([
+      // Firm baselines first; if there is not enough history yet, fall back
+      // to a provisional one built from as little as two days.
+      //
+      // Requiring 5 days outright had a nasty side effect: on days 2-5 both
+      // baselines were null, so nothing but sleep could move the band AND
+      // `clearlyPoorRecovery` was pinned false -- meaning a new user whose
+      // HRV had collapsed to half its usual value was told "moderate". The
+      // conservative rest override disappeared during precisely the window
+      // in which someone decides whether to trust the app. A provisional
+      // baseline restores the protective direction; assessHealthKit refuses
+      // to award positive points from it, so thin data can only hold someone
+      // back, never push them.
+      const [hrvFirm, rhrFirm] = await Promise.all([
         fetchMetricBaseline(supabase, userId, date, "hrv_ms"),
         fetchMetricBaseline(supabase, userId, date, "resting_hr"),
       ]);
-      const assessment = assessHealthKit(healthkit, hrvBaseline, rhrBaseline);
+      let hrvBaseline = hrvFirm;
+      let rhrBaseline = rhrFirm;
+      let provisional = false;
+      if (hrvBaseline === null && rhrBaseline === null) {
+        const [hrvProv, rhrProv] = await Promise.all([
+          fetchMetricBaseline(supabase, userId, date, "hrv_ms", PROVISIONAL_BASELINE_DAYS),
+          fetchMetricBaseline(supabase, userId, date, "resting_hr", PROVISIONAL_BASELINE_DAYS),
+        ]);
+        hrvBaseline = hrvProv;
+        rhrBaseline = rhrProv;
+        provisional = hrvBaseline !== null || rhrBaseline !== null;
+      }
+
+      const assessment = assessHealthKit(healthkit, hrvBaseline, rhrBaseline, provisional);
       band = assessment.band;
-      dataConfidence = assessment.confidence;
+      // A provisional baseline is exactly the "thin read" the caveat exists
+      // for, regardless of how many signals were present.
+      dataConfidence = provisional ? "low" : assessment.confidence;
       source = "healthkit";
       clearlyPoorRecovery = hrvBaseline !== null && healthkit.hrvMs != null
         ? healthkit.hrvMs < hrvBaseline * 0.6
@@ -338,6 +365,11 @@ function pickSleepHours(
 /// 1.0 by construction. Combined with the client submitting a stale value
 /// every day, this locked users into a permanent "medium".
 const MIN_BASELINE_DAYS = 5;
+/// Floor for the provisional baseline described at the call site. Two days is
+/// the minimum at which a comparison says anything at all -- one day would be
+/// comparing today against itself, which is the bug this constant's larger
+/// sibling was introduced to fix.
+const PROVISIONAL_BASELINE_DAYS = 2;
 const BASELINE_WINDOW_DAYS = 30;
 
 /// Median, not mean, of the trailing window. A single artefact reading -- and
@@ -349,6 +381,7 @@ async function fetchMetricBaseline(
   userId: string,
   date: string,
   column: "hrv_ms" | "resting_hr",
+  minDays: number = MIN_BASELINE_DAYS,
 ): Promise<number | null> {
   const end = new Date(date);
   const start = new Date(end);
@@ -365,13 +398,13 @@ async function fetchMetricBaseline(
     .lte("date", endStr)
     .not(column, "is", null);
 
-  if (!data || data.length < MIN_BASELINE_DAYS) return null;
+  if (!data || data.length < minDays) return null;
 
   const values = (data as Record<string, number>[])
     .map((r) => r[column])
     .filter((v): v is number => typeof v === "number")
     .sort((a, b) => a - b);
-  if (values.length < MIN_BASELINE_DAYS) return null;
+  if (values.length < minDays) return null;
 
   const mid = Math.floor(values.length / 2);
   return values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];

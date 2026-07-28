@@ -10,18 +10,75 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
     @Published var isSigningIn = false
     @Published var errorMessage: String?
 
+    /// Set when the failure looks like "no Apple ID on this device", which is
+    /// the one case the user can actually resolve themselves. Drives an
+    /// "Open Settings" affordance.
+    ///
+    /// That button can only open Settings at THIS APP's page --
+    /// `openSettingsURLString` is the only public entry point, and the
+    /// private `prefs:root=APPLE_ACCOUNT` scheme that would land directly on
+    /// the Apple ID screen is grounds for App Store rejection. One step up
+    /// from the app's page is the Settings root, where "Sign in to your
+    /// iPhone" sits at the very top.
+    @Published var needsAppleIDSetup = false
+
     private var currentNonce: String?
     private var continuation: CheckedContinuation<Void, Error>?
 
-    func signInWithApple() async {
+    /// True only when a session was actually established.
+    ///
+    /// Callers must branch on this return value, NOT on `errorMessage == nil`.
+    /// Cancelling is a silent non-error, so "no message" and "signed in" are
+    /// no longer the same thing -- treating them as equivalent would let a
+    /// user who tapped Cancel straight into the app.
+    @discardableResult
+    func signInWithApple() async -> Bool {
         isSigningIn = true
         errorMessage = nil
+        needsAppleIDSetup = false
         defer { isSigningIn = false }
 
         do {
             try await performSignIn()
+            return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = Self.userFacingMessage(for: error)
+            if let authError = error as? ASAuthorizationError {
+                needsAppleIDSetup = authError.code == .unknown || authError.code == .notHandled
+            }
+            return false
+        }
+    }
+
+    /// Turns an authorization failure into something a person can act on.
+    ///
+    /// This used to be `error.localizedDescription`, which for
+    /// ASAuthorizationError renders as "The operation couldn't be completed.
+    /// (com.apple.AuthenticationServices.AuthorizationError error 1000.)" --
+    /// text that tells the user nothing and, worse, appeared even when they
+    /// had simply tapped Cancel. Cancelling is not a failure and now shows
+    /// nothing at all.
+    ///
+    /// The technical detail still goes to the console, since that is where it
+    /// is useful and where it cannot mislead anyone.
+    private static func userFacingMessage(for error: Error) -> String? {
+        guard let authError = error as? ASAuthorizationError else {
+            return error.localizedDescription
+        }
+
+        print("[SignInWithApple] \(authError.code.rawValue): \(authError.localizedDescription)")
+
+        switch authError.code {
+        case .canceled:
+            return nil
+        case .notHandled, .unknown:
+            // Overwhelmingly this means no Apple ID is signed in on the
+            // device, so name that rather than making the user guess.
+            return "Couldn't sign in with Apple. Check that you're signed in to an Apple ID in Settings, then try again."
+        case .invalidResponse, .failed:
+            return "Apple couldn't complete the sign-in. Please try again in a moment."
+        default:
+            return "Couldn't sign in with Apple. Please try again."
         }
     }
 

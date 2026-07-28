@@ -71,10 +71,18 @@ Deno.test("an injury excludes high-impact templates in every category", () => {
 });
 
 Deno.test("unknown equipment strings are ignored, not matched", () => {
-  // The client lets users edit the detected list, so free text can still
-  // arrive. "free weights" must not open a barbell template.
-  const template = selectTemplate("moderate", new Set(["free weights", "dumbbell"]), []);
+  // Genuinely unrecognisable input must not open any equipment template.
+  // Note "free weights" and "dumbbell" are NOT examples of this any more --
+  // they are recognised synonyms (see equipment_test.ts); using them here
+  // was the test asserting the very bug that silently dropped hand-typed
+  // equipment.
+  const template = selectTemplate("moderate", new Set(["a swimming pool", "vibes"]), []);
   assertEquals(template.requiredEquipment.length, 0);
+});
+
+Deno.test("synonyms typed by hand still reach the right template", () => {
+  const template = selectTemplate("light", new Set(["dumbbell"]), []);
+  assertEquals(template.id, "light_dumbbells_full_body");
 });
 
 Deno.test("equipment matching is case- and whitespace-insensitive", () => {
@@ -95,6 +103,11 @@ Deno.test("every exercise is performable with the declared equipment", () => {
   // Catches the class of bug where a barbell-only template prescribed
   // pull-ups and a dumbbell carry. Keyword-based and deliberately narrow --
   // it only knows about equipment nouns that appear in exercise names.
+  // Every equipment noun that can appear in an exercise name needs an entry
+  // here, or the check silently passes over it. The map originally had no
+  // "treadmill" key, so the shared moderate warm-up prescribed an incline
+  // treadmill walk inside zero-equipment templates and this test stayed
+  // green -- a test that could not fail on the case it was written for.
   const IMPLIED: Record<string, string> = {
     dumbbell: "dumbbells",
     barbell: "barbell",
@@ -102,7 +115,16 @@ Deno.test("every exercise is performable with the declared equipment", () => {
     "pull-up": "pull-up bar",
     "cable ": "cable machine",
     rowing: "rowing machine",
+    treadmill: "treadmill",
+    elliptical: "elliptical",
     cycling: "stationary bike",
+    "smith machine": "smith machine",
+    "leg press": "leg press",
+    "lat pulldown": "lat pulldown",
+    "medicine ball": "medicine ball",
+    "jump rope": "jump rope",
+    "plyo box": "plyo box",
+    "battle rope": "battle ropes",
     "foam roll": "foam roller",
     band: "resistance bands",
   };

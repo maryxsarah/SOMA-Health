@@ -321,6 +321,10 @@ struct RecommendationDetailView: View {
                 selectedTitle: suggestion.title,
                 selectedBodyPart: suggestion.bodyPart.rawValue
             )
+        } catch SupabaseError.safetyBlocked(let message) {
+            // Shown verbatim. A generic "try again in a moment" would be a
+            // lie -- retrying cannot help, and the user would keep tapping.
+            aiPlanError = message
         } catch {
             aiPlanError = "Couldn't generate a plan right now. Try again in a moment."
         }

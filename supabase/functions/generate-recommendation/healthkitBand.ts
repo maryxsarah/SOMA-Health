@@ -46,36 +46,55 @@ export function assessHealthKit(
   hk: HealthKitPayload,
   baselineHrvMs: number | null,
   baselineRestingHr: number | null,
+  // True when the baselines come from fewer days than we would like. Thin
+  // history may then only make us MORE cautious: negative points still count,
+  // positive ones are dropped. Asymmetric on purpose -- a shaky baseline is
+  // reason enough to hold someone back, never to tell them to push hard.
+  baselinesAreProvisional = false,
 ): { band: Band; confidence: DataConfidence } {
   const sleep = hk.sleepHours ?? null;
   let score = 0;
   let signals = 0;
 
-  // Resting HR vs personal baseline. Lower than usual is a good sign;
-  // meaningfully elevated is the clearest "back off" signal available here.
+  // Positive points are what a provisional baseline may not award.
+  const credit = (points: number) => {
+    score += baselinesAreProvisional && points > 0 ? 0 : points;
+  };
+
+  // Resting HR vs personal baseline -- the heaviest signal here, and the only
+  // one allowed to reach the -2 that decides a band on its own. Recorded
+  // daily, far more stable than SDNN, and elevation above personal baseline
+  // is a well-established fatigue/illness marker.
   if (baselineRestingHr !== null && hk.restingHr != null) {
     signals++;
     const delta = (hk.restingHr - baselineRestingHr) / baselineRestingHr;
-    if (delta >= 0.07) score -= 2;
-    else if (delta >= 0.03) score -= 1;
-    else if (delta <= -0.03) score += 1;
+    if (delta >= 0.07) credit(-2);
+    else if (delta >= 0.03) credit(-1);
+    else if (delta <= -0.03) credit(+1);
   }
 
-  // HRV vs personal baseline.
+  // HRV vs personal baseline, capped at +/-1 so it can never decide the band
+  // alone -- it has to be corroborated by resting HR or sleep.
+  //
+  // It used to carry the same +/-2 as the other two, which contradicted this
+  // function's own docblock and had a real consequence: Apple reports SDNN
+  // (not the RMSSD every other recovery tracker uses), sampled passively and
+  // noisily, so a single artefact reading at 0.55x baseline was enough to
+  // force a rest day off one bad sample.
   if (baselineHrvMs !== null && hk.hrvMs != null) {
     signals++;
     const ratio = hk.hrvMs / baselineHrvMs;
-    if (ratio < 0.8) score -= 2;
-    else if (ratio < 0.9) score -= 1;
-    else if (ratio >= 1.05) score += 1;
+    if (ratio < 0.8) credit(-1);
+    else if (ratio < 0.9) credit(-1);
+    else if (ratio >= 1.05) credit(+1);
   }
 
   // Sleep, when we have it.
   if (sleep !== null) {
     signals++;
-    if (sleep < 6) score -= 2;
-    else if (sleep < 7) score -= 1;
-    else if (sleep >= 7.5) score += 1;
+    if (sleep < 6) credit(-2);
+    else if (sleep < 7) credit(-1);
+    else if (sleep >= 7.5) credit(+1);
   }
 
   // Nothing usable -- typically the first days before any baseline exists.

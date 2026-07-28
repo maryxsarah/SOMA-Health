@@ -58,8 +58,14 @@ const WARM_UP_LIGHT: TemplateExercise[] = [
   { name: "Arm circles", sets: 1, reps: "20 total", weight_guidance: "N/A", intensity: "easy", duration_minutes: 1 },
 ];
 
+// Equipment-free by necessity: this warm-up is shared by every moderate and
+// push_hard template, INCLUDING the zero-equipment ones. It used to open with
+// an incline treadmill walk, so a user who photographed an empty living room
+// was told to start on a treadmill they had just demonstrated they lacked.
+// Nothing in a shared warm-up may assume equipment that individual templates
+// do not require.
 const WARM_UP_MODERATE: TemplateExercise[] = [
-  { name: "Incline treadmill walk", sets: 1, reps: "5 min", weight_guidance: "N/A", intensity: "easy", duration_minutes: 5 },
+  { name: "Brisk march in place", sets: 1, reps: "5 min", weight_guidance: "N/A", intensity: "easy", duration_minutes: 5 },
   { name: "Bodyweight squats", sets: 1, reps: "10", weight_guidance: "N/A", intensity: "easy", duration_minutes: 2 },
   { name: "Shoulder rolls", sets: 1, reps: "10 each direction", weight_guidance: "N/A", intensity: "easy", duration_minutes: 1 },
 ];

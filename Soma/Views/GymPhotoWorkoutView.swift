@@ -252,7 +252,13 @@ private struct CameraPicker: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
-        picker.sourceType = .camera
+        // Guard, not an assumption: assigning an unavailable source type
+        // throws NSInvalidArgumentException and takes the app down. The
+        // camera is unavailable under Screen Time restrictions, MDM policy,
+        // and in the Simulator -- one tap was enough to crash.
+        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera)
+            ? .camera
+            : .photoLibrary
         picker.delegate = context.coordinator
         return picker
     }

@@ -96,9 +96,36 @@ Deno.test("confidence reflects how many signals were available", () => {
 });
 
 Deno.test("thresholds are relative to the user's own baseline", () => {
-  // Same absolute HRV, different people: 40ms is poor for someone whose
-  // baseline is 60 and excellent for someone whose baseline is 30. Absolute
-  // SDNN cutoffs from population data would get both of these wrong.
-  assertEquals(assessHealthKit({ hrvMs: 40 }, 60, null).band, "low");
-  assertEquals(assessHealthKit({ hrvMs: 40 }, 30, null).band, "medium");
+  // Same absolute HRV, different people: 40ms is poor against a baseline of
+  // 60 and fine against 30. Absolute SDNN cutoffs from population data would
+  // get both of these wrong. Here it shows up as a point difference (-1 vs
+  // +0) rather than a band change, since HRV alone can no longer move a band.
+  const poor = assessHealthKit({ hrvMs: 40, sleepHours: 6.5 }, 60, null);
+  const fine = assessHealthKit({ hrvMs: 40, sleepHours: 6.5 }, 30, null);
+  assertEquals(poor.band, "low");
+  assertEquals(fine.band, "medium");
+});
+
+Deno.test("REGRESSION: HRV alone cannot decide the band", () => {
+  // HRV used to carry the same +/-2 as resting HR, contradicting the
+  // function's own docblock. Apple reports SDNN, sampled passively and
+  // noisily, so one artefact reading at half baseline was enough to force a
+  // rest day. It is now capped at +/-1 and must be corroborated.
+  assertEquals(assessHealthKit({ hrvMs: 20 }, 60, null).band, "medium");
+  assertEquals(assessHealthKit({ hrvMs: 90 }, 60, null).band, "medium");
+});
+
+Deno.test("resting HR is the one signal allowed to decide alone", () => {
+  assertEquals(assessHealthKit({ restingHr: 75 }, null, 67).band, "low");
+});
+
+Deno.test("REGRESSION: a provisional baseline may only hold the user back", () => {
+  // Thin history is reason enough to be cautious, never to promote someone
+  // to "push hard". Negative points still count; positive ones are dropped.
+  const good = { hrvMs: 60, restingHr: 62, sleepHours: 8 };
+  assertEquals(assessHealthKit(good, 52.8, 67, false).band, "high");
+  assertEquals(assessHealthKit(good, 52.8, 67, true).band, "medium");
+
+  const bad = { restingHr: 75, sleepHours: 5 };
+  assertEquals(assessHealthKit(bad, null, 67, true).band, "low");
 });

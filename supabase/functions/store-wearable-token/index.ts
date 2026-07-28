@@ -68,10 +68,36 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ provider, connected: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const status = msg === "unauthorized" ? 401 : 500;
-    return jsonResponse({ error: msg }, status);
+    if (msg === "unauthorized") return jsonResponse({ error: msg }, 401);
+
+    // Upstream failures answer 502 with a sanitized message. The detail goes
+    // to the function log, never to the client: SupabaseClient.assertSuccess
+    // puts the whole response body into the error it throws, and ProfileView
+    // interpolates that straight into on-screen text. Without this the user
+    // saw a raw nested OAuth JSON blob, and a misconfigured deployment
+    // handed any authenticated caller the internal hint naming the exact
+    // secrets that were missing.
+    //
+    // The 502-vs-500 split also matters operationally: 502 means Whoop/Oura
+    // failed, 500 means we did. Collapsing them made provider outages
+    // indistinguishable from our own bugs in monitoring.
+    if (err instanceof UpstreamError) {
+      console.error(`[store-wearable-token] ${msg}`);
+      return jsonResponse(
+        { error: "Couldn't connect that device right now. Please try again." },
+        502,
+      );
+    }
+
+    console.error(`[store-wearable-token] ${msg}`);
+    return jsonResponse({ error: "Something went wrong storing that connection." }, 500);
   }
 });
+
+/// Marks a failure that originated with Whoop or Oura rather than with us,
+/// so the handler can answer 502 and keep the upstream body out of the
+/// client-visible response.
+class UpstreamError extends Error {}
 
 interface TokenResponse {
   access_token: string;
@@ -87,6 +113,8 @@ async function exchangeWhoop(
   const clientId = Deno.env.get("WHOOP_CLIENT_ID");
   const clientSecret = Deno.env.get("WHOOP_CLIENT_SECRET");
   if (!clientId || !clientSecret) {
+    // Deliberately NOT an UpstreamError: this is our misconfiguration, so it
+    // answers 500. The actionable text stays in the function log.
     throw new Error(
       "WHOOP_CLIENT_ID/WHOOP_CLIENT_SECRET are not set as Supabase secrets -- run `supabase secrets set WHOOP_CLIENT_ID=... WHOOP_CLIENT_SECRET=...`",
     );
@@ -108,7 +136,7 @@ async function exchangeWhoop(
   });
   if (!res.ok) {
     const errBody = await res.text();
-    throw new Error(`Whoop token exchange failed (${res.status}): ${errBody}`);
+    throw new UpstreamError(`Whoop token exchange failed (${res.status}): ${errBody}`);
   }
   return await res.json();
 }
@@ -142,7 +170,7 @@ async function exchangeOura(
   });
   if (!res.ok) {
     const errBody = await res.text();
-    throw new Error(`Oura token exchange failed (${res.status}): ${errBody}`);
+    throw new UpstreamError(`Oura token exchange failed (${res.status}): ${errBody}`);
   }
   return await res.json();
 }

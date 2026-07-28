@@ -105,7 +105,13 @@ Deno.serve(async (req: Request) => {
     // Sorted + joined server-side so the client cannot influence cache
     // identity by reordering the list it sends.
     const equipmentSet = normalizeEquipment(confirmedEquipment);
-    const equipmentSignature = Array.from(equipmentSet).sort().join("|");
+    // The injury state belongs in the cache key. Without it, a plan generated
+    // in the morning with no injury noted was replayed unchanged after the
+    // user added an injury tag -- serving them back the high-impact jumping
+    // session that safety.excludeHighImpact exists to withhold, because the
+    // cache hit returns before selectTemplate is ever consulted.
+    const equipmentSignature = Array.from(equipmentSet).sort().join("|") +
+      (safety.excludeHighImpact ? "|no-impact" : "");
 
     // Same setup, same day -> same answer, so serve it rather than paying
     // for the wording pass again. A different setup is a different
@@ -217,16 +223,31 @@ function mergeWording(
   template: GymWorkoutTemplate,
   wording: { focus: string; exercises: { name: string; instructions: string }[] },
 ) {
-  const instructionsByName = new Map(wording.exercises.map((e) => [e.name, e.instructions]));
-  const withWording = (name: string, fallback: string) => instructionsByName.get(name) ?? fallback;
+  // Two-step lookup. Exact-name matching alone was brittle: the model
+  // returning "Cat-Cow Stretch" for "Cat-cow stretch", or "Push Up" for
+  // "Push-up", missed and fell back to an empty string -- so the user got a
+  // workout with blank instructions, which is the entire point of this step,
+  // and the blank version was then cached for the rest of the day.
+  //
+  // Normalized name first, then position. The prompt fixes the order and the
+  // schema enforces it, so index N of the response corresponds to index N of
+  // the flattened template; position is a sound fallback, not a guess.
+  const normalize = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const byName = new Map(wording.exercises.map((e) => [normalize(e.name), e.instructions]));
+
+  let position = 0;
+  const withWording = (name: string) => {
+    const byPosition = wording.exercises[position++];
+    return byName.get(normalize(name)) || byPosition?.instructions || "";
+  };
 
   return {
     focus: wording.focus || template.focus,
-    warm_up: template.warm_up.map((e) => ({ ...e, instructions: withWording(e.name, "") })),
+    warm_up: template.warm_up.map((e) => ({ ...e, instructions: withWording(e.name) })),
     blocks: template.blocks.map((b) => ({
       ...b,
-      exercises: b.exercises.map((e) => ({ ...e, instructions: withWording(e.name, "") })),
+      exercises: b.exercises.map((e) => ({ ...e, instructions: withWording(e.name) })),
     })),
-    cool_down: template.cool_down.map((e) => ({ ...e, instructions: withWording(e.name, "") })),
+    cool_down: template.cool_down.map((e) => ({ ...e, instructions: withWording(e.name) })),
   };
 }

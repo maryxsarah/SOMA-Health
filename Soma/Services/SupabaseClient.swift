@@ -421,16 +421,68 @@ final class SupabaseClient {
                 "title": entry.title,
                 "duration_minutes": entry.durationMinutes,
             ]
-            if let calories = entry.calories { row["calories"] = calories }
+            // NSNull rather than omitting the key: PostgREST requires every
+            // object in a bulk insert to have identical keys and answers 400
+            // PGRST102 otherwise. A day mixing a run (has calories) with a
+            // yoga session (has none) therefore synced NOTHING -- and since
+            // the call site uses `try?`, silently.
+            row["calories"] = entry.calories ?? NSNull()
             return row
         }
 
-        var request = try await authorizedRequest(path: "rest/v1/healthkit_workout_sync", method: "POST")
+        // on_conflict names the real constraint. Without it PostgREST targets
+        // the primary key, which never conflicts (no id is sent), so the
+        // second sync of the day hit unique (user_id, source, start_time),
+        // returned 409, and -- because a multi-row INSERT aborts as a unit --
+        // dropped every row in the batch including workouts not yet stored.
+        var request = try await authorizedRequest(
+            path: "rest/v1/healthkit_workout_sync?on_conflict=user_id,source,start_time",
+            method: "POST"
+        )
         request.setValue("resolution=ignore-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
         request.httpBody = try JSONSerialization.data(withJSONObject: rows)
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
+    }
+
+    /// Reads back what previous syncs stored, so a workout recorded on one
+    /// device shows up on another.
+    ///
+    /// Without this the table was write-only: rows were uploaded on every
+    /// Home appear and never read by anything, while the privacy policy told
+    /// the user their history "persists across devices". Collecting health
+    /// data that nothing consumes is the wrong side of data minimisation as
+    /// well as an unmet promise.
+    func fetchSyncedHealthKitWorkouts(date: String) async throws -> [WorkoutTimelineEntry] {
+        let path = "rest/v1/healthkit_workout_sync?select=source,title,start_time,duration_minutes,calories&start_time=gte.\(date)T00:00:00&start_time=lt.\(date)T23:59:59.999&order=start_time.asc"
+        var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct Row: Decodable {
+            let source: String
+            let title: String
+            let start_time: String
+            let duration_minutes: Int
+            let calories: Int?
+        }
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+
+        return try JSONDecoder().decode([Row].self, from: data).compactMap { row in
+            guard let start = withFractional.date(from: row.start_time) ?? plain.date(from: row.start_time) else {
+                return nil
+            }
+            return WorkoutTimelineEntry(
+                source: row.source,
+                title: row.title,
+                startTime: start,
+                durationMinutes: row.duration_minutes,
+                calories: row.calories
+            )
+        }
     }
 
     // MARK: - Edge Functions
@@ -449,6 +501,17 @@ final class SupabaseClient {
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
+
+        // The guardrail answers 200 with a flag rather than an error status,
+        // since being withheld is a normal outcome, not a failure. Checked
+        // before decoding the plan: that decode would throw on this shape and
+        // surface as "couldn't generate a plan", hiding the real reason.
+        struct SafetyResponse: Decodable { let safety_flag: Bool; let message: String? }
+        if let safety = try? JSONDecoder().decode(SafetyResponse.self, from: data), safety.safety_flag {
+            throw SupabaseError.safetyBlocked(
+                message: safety.message ?? "Please check with a healthcare professional before starting a new workout."
+            )
+        }
         return try JSONDecoder().decode(AIWorkoutPlan.self, from: data)
     }
 
@@ -582,11 +645,17 @@ private struct AuthResponse: Decodable {
 enum SupabaseError: LocalizedError {
     case notSignedIn
     case requestFailed(status: Int, message: String)
+    /// The server's safety guardrail withheld generation. Its message is
+    /// authored server-side and shown verbatim -- never reworded here, and
+    /// never made specific about which condition triggered it.
+    case safetyBlocked(message: String)
 
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
             return "Not signed in."
+        case .safetyBlocked(let message):
+            return message
         case .requestFailed(let status, let message):
             return "Request failed (\(status)): \(message)"
         }

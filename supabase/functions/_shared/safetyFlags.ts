@@ -47,11 +47,21 @@ export async function checkSafetyFlags(
   userId: string,
   date: string,
 ): Promise<SafetyCheckResult> {
-  const { data: userRow } = await supabase
+  // Errors are thrown, never swallowed. This used to destructure only
+  // `data`, so a failing query -- functions deployed before the pregnancy
+  // migration landed, a transient PostgREST error -- left `data` null, which
+  // reads exactly like "not pregnant, no injuries" and silently switched the
+  // whole guardrail off with nothing logged. A safety control has to fail
+  // CLOSED: the caller turns a throw into a 500 and generates nothing, which
+  // is the correct outcome when we cannot establish whether it is safe.
+  const { data: userRow, error: userError } = await supabase
     .from("users")
     .select("injury_tags, pregnancy")
     .eq("id", userId)
     .maybeSingle();
+  if (userError) {
+    throw new Error(`safety check could not read users: ${userError.message}`);
+  }
 
   if (userRow?.pregnancy === true) {
     await logFlag(supabase, userId, date, "pregnancy", null);
@@ -64,11 +74,21 @@ export async function checkSafetyFlags(
     await logFlag(supabase, userId, date, "injury_high_impact_excluded", injuryTags.join(", "));
   }
 
-  const { data: todayRows } = await supabase
+  // Pinned to HealthKit, like fetchMetricBaseline in generate-recommendation.
+  // Whoop reports a sleep-derived resting HR and Apple Health a daytime
+  // estimate; they differ by 10bpm or more for the same person. Mixing them
+  // produced a baseline belonging to neither, and `todayRestingHr` took
+  // whichever row the query happened to return first -- so the same user
+  // could be told to see a doctor or not depending on row order.
+  const { data: todayRows, error: todayError } = await supabase
     .from("daily_snapshot")
     .select("resting_hr")
     .eq("user_id", userId)
+    .eq("source", "healthkit")
     .eq("date", date);
+  if (todayError) {
+    throw new Error(`safety check could not read today's snapshot: ${todayError.message}`);
+  }
   const todayRestingHr = (todayRows ?? [])
     .map((r: { resting_hr: number | null }) => r.resting_hr)
     .find((v): v is number => v !== null);
@@ -83,7 +103,7 @@ export async function checkSafetyFlags(
           userId,
           date,
           "abnormal_resting_hr",
-          `today ${todayRestingHr}bpm vs 14-day baseline ${baseline.toFixed(1)}bpm`,
+          `today ${todayRestingHr}bpm vs ${MIN_BASELINE_DAYS}+ day median ${baseline.toFixed(1)}bpm`,
         );
         return { flagged: true, message: SAFETY_MESSAGE, excludeHighImpact };
       }
@@ -103,7 +123,17 @@ async function logFlag(
   await supabase.from("safety_flag_log").insert({ user_id: userId, date, flag_type: flagType, detail });
 }
 
-/// Trailing 14-day resting-HR average, excluding today.
+/// Days of history required before the deviation check is allowed to fire.
+/// Matches generate-recommendation's constant deliberately. With a one-day
+/// "baseline", ordinary day-to-day resting-HR variance clears the 20% gate
+/// routinely -- so the users most likely to be told to see a physician were
+/// the newest ones, on no evidence at all.
+const MIN_BASELINE_DAYS = 5;
+const BASELINE_WINDOW_DAYS = 14;
+
+/// Trailing median resting HR, excluding today. Median rather than mean: one
+/// artefact reading should not move the threshold that decides whether we
+/// refuse to generate a workout.
 async function fetchRestingHrBaseline(
   supabase: SupabaseClient,
   userId: string,
@@ -111,21 +141,28 @@ async function fetchRestingHrBaseline(
 ): Promise<number | null> {
   const end = new Date(`${date}T00:00:00.000Z`);
   const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - 14);
+  start.setUTCDate(start.getUTCDate() - BASELINE_WINDOW_DAYS);
   const startStr = start.toISOString().slice(0, 10);
   const endStr = new Date(end.getTime() - 86400000).toISOString().slice(0, 10);
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("daily_snapshot")
     .select("resting_hr")
     .eq("user_id", userId)
+    .eq("source", "healthkit")
     .gte("date", startStr)
     .lte("date", endStr)
     .not("resting_hr", "is", null);
+  if (error) {
+    throw new Error(`safety check could not read resting-HR history: ${error.message}`);
+  }
 
   const values = (data ?? [])
     .map((r: { resting_hr: number | null }) => r.resting_hr)
-    .filter((v): v is number => v !== null);
-  if (values.length === 0) return null;
-  return values.reduce((a, b) => a + b, 0) / values.length;
+    .filter((v): v is number => v !== null)
+    .sort((a, b) => a - b);
+  if (values.length < MIN_BASELINE_DAYS) return null;
+
+  const mid = Math.floor(values.length / 2);
+  return values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
 }
