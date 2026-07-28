@@ -12,11 +12,17 @@ struct AIExercise: Codable, Identifiable {
     let intensity: String
     let durationMinutes: Int
     let instructions: String
+    /// Which muscles/body area this exercise targets -- currently only
+    /// populated by the gym-photo-workout flow (deterministic, set per
+    /// exercise in the template, never LLM-guessed); nil for the normal
+    /// generate-workout-plan flow, which doesn't send this field.
+    let targetArea: String?
 
     enum CodingKeys: String, CodingKey {
         case name, sets, reps, intensity, instructions
         case weightGuidance = "weight_guidance"
         case durationMinutes = "duration_minutes"
+        case targetArea = "target_area"
     }
 }
 

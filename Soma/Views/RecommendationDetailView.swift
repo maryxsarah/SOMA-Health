@@ -14,6 +14,8 @@ struct RecommendationDetailView: View {
     @State private var yesterdayBodyParts: Set<BodyPartFocus> = []
     @State private var shuffleSeed: UInt64 = 0
     @State private var selectedTitle: String?
+    @State private var selectedBodyPart: String?
+    @State private var preGenerationNotes = ""
     @State private var aiPlan: AIWorkoutPlan?
     @State private var isLoadingAIPlan = false
     @State private var aiPlanError: String?
@@ -153,6 +155,11 @@ struct RecommendationDetailView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .padding(.top, 4)
+                        } else {
+                            TextField("Anything Soma should know for today's workout? (optional)", text: $preGenerationNotes, axis: .vertical)
+                                .textFieldStyle(.roundedBorder)
+                                .lineLimit(2...4)
+                                .padding(.top, 4)
                         }
                         PillButton(title: "Generate AI Workout", isEnabled: selectedTitle != nil && !isLoadingAIPlan) {
                             Task { await loadAIPlan() }
@@ -207,7 +214,17 @@ struct RecommendationDetailView: View {
             await loadContext()
         }
         .sheet(isPresented: $showingGymPhotoFlow) {
-            GymPhotoWorkoutView(date: recommendation.date)
+            // A gym-photo-generated workout is handed straight into the
+            // same aiPlan/selectedTitle/selectedBodyPart state the normal
+            // "Generate AI Workout" flow uses, so it shows up in the
+            // AI-generated workout card above exactly like any other
+            // generation -- no separate display path to keep in sync.
+            GymPhotoWorkoutView(date: recommendation.date) { plan, title, bodyPart in
+                aiPlan = plan
+                selectedTitle = title
+                selectedBodyPart = bodyPart
+                aiPlanError = nil
+            }
         }
     }
 
@@ -237,6 +254,7 @@ struct RecommendationDetailView: View {
         let isSelected = selectedTitle == suggestion.title
         return Button {
             selectedTitle = suggestion.title
+            selectedBodyPart = suggestion.bodyPart.rawValue
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
@@ -307,19 +325,24 @@ struct RecommendationDetailView: View {
     /// workout done. Completion is a separate explicit step
     /// (`markWorkoutComplete`), so the user can review the plan before
     /// committing to having done it.
+    ///
+    /// Reads `selectedTitle`/`selectedBodyPart` directly rather than
+    /// looking the title up in `recommendation.category.workoutSuggestions`
+    /// -- a gym-photo-generated workout's title/bodyPart aren't in that
+    /// fixed list, so a lookup would silently fail for it.
     private func loadAIPlan() async {
-        guard let selectedTitle,
-              let suggestion = recommendation.category.workoutSuggestions.first(where: { $0.title == selectedTitle })
-        else { return }
+        guard let selectedTitle, let selectedBodyPart else { return }
 
         isLoadingAIPlan = true
         aiPlanError = nil
         defer { isLoadingAIPlan = false }
+        let trimmedNotes = preGenerationNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             aiPlan = try await SupabaseClient.shared.fetchOrGenerateAIWorkoutPlan(
                 date: recommendation.date,
-                selectedTitle: suggestion.title,
-                selectedBodyPart: suggestion.bodyPart.rawValue
+                selectedTitle: selectedTitle,
+                selectedBodyPart: selectedBodyPart,
+                notes: trimmedNotes.isEmpty ? nil : trimmedNotes
             )
         } catch SupabaseError.safetyBlocked(let message) {
             // Shown verbatim. A generic "try again in a moment" would be a
@@ -333,9 +356,7 @@ struct RecommendationDetailView: View {
     /// The explicit "I finished this" step -- creates the workout_log row
     /// that Home's calendar strip renders as a crown for the day.
     private func markWorkoutComplete() async {
-        guard let selectedTitle,
-              let suggestion = recommendation.category.workoutSuggestions.first(where: { $0.title == selectedTitle })
-        else { return }
+        guard let selectedTitle, let selectedBodyPart else { return }
 
         isMarkingComplete = true
         aiPlanError = nil
@@ -344,14 +365,14 @@ struct RecommendationDetailView: View {
         do {
             try await SupabaseClient.shared.logWorkout(
                 date: recommendation.date,
-                title: suggestion.title,
-                bodyPart: suggestion.bodyPart.rawValue,
+                title: selectedTitle,
+                bodyPart: selectedBodyPart,
                 category: recommendation.category.rawValue,
                 feedback: trimmedFeedback.isEmpty ? nil : trimmedFeedback
             )
-            loggedTitlesToday.insert(suggestion.title)
+            loggedTitlesToday.insert(selectedTitle)
             if !trimmedFeedback.isEmpty {
-                await fetchAddonSuggestions(feedback: trimmedFeedback, suggestion: suggestion)
+                await fetchAddonSuggestions(feedback: trimmedFeedback, title: selectedTitle, bodyPart: selectedBodyPart)
             }
         } catch {
             aiPlanError = "Couldn't log this workout. Try again."
@@ -360,13 +381,14 @@ struct RecommendationDetailView: View {
 
     /// Best-effort -- if this fails, the workout is still logged fine, the
     /// user just doesn't see follow-up ideas this time.
-    private func fetchAddonSuggestions(feedback: String, suggestion: WorkoutSuggestion) async {
+    private func fetchAddonSuggestions(feedback: String, title: String, bodyPart: String) async {
         isFetchingAddons = true
         defer { isFetchingAddons = false }
+        let bodyPartDisplay = BodyPartFocus(rawValue: bodyPart)?.displayName ?? bodyPart
         addonSuggestions = (try? await SupabaseClient.shared.fetchWorkoutAddonSuggestions(
             feedback: feedback,
-            workoutTitle: suggestion.title,
-            bodyPart: suggestion.bodyPart.displayName
+            workoutTitle: title,
+            bodyPart: bodyPartDisplay
         )) ?? []
     }
 
@@ -389,6 +411,7 @@ struct RecommendationDetailView: View {
         // blank as if nothing had been done yet.
         if selectedTitle == nil, let alreadyLogged = todaysLogs.first {
             selectedTitle = alreadyLogged.title
+            selectedBodyPart = alreadyLogged.bodyPart
             await loadAIPlan()
         }
     }

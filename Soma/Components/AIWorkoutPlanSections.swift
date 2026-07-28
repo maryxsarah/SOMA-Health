@@ -64,6 +64,13 @@ struct AIWorkoutPlanView: View {
             Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)")
                 .font(.caption)
                 .foregroundStyle(Theme.pillFill)
+            // Only populated by the gym-photo-workout flow -- nil for the
+            // normal generate-workout-plan flow.
+            if let targetArea = exercise.targetArea {
+                Text("Targets: \(targetArea)")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
+            }
             Text(exercise.instructions)
                 .font(.caption)
                 .foregroundStyle(.secondary)

@@ -124,6 +124,22 @@ Deno.serve(async (req: Request) => {
       .eq("equipment_signature", equipmentSignature)
       .maybeSingle();
     if (cached) {
+      // Refresh the display row too: without this, a user who retakes a
+      // photo of a setup they already used today sees the AI-plan card
+      // still showing whichever plan was generated most recently, not the
+      // one they are looking at.
+      await supabase
+        .from("ai_workout_plan")
+        .upsert(
+          {
+            user_id: userId,
+            date,
+            category: cached.category,
+            plan: cached.plan,
+            selected_title: cached.plan.title,
+          },
+          { onConflict: "user_id,date" },
+        );
       return jsonResponse({ date, category: cached.category, safety_flag: false, ...cached.plan });
     }
 
@@ -135,15 +151,38 @@ Deno.serve(async (req: Request) => {
       (snapshots ?? []) as SnapshotRow[],
       equipmentSet,
     );
-    const plan = mergeWording(template, wording);
+    // title/bodyPart travel inside the cached object so a cache hit can
+    // return them without re-running selection.
+    const plan = { ...mergeWording(template, wording), title: template.title, bodyPart: template.bodyPart };
 
+    // Two writes, two different jobs -- not a duplicate.
+    //
+    // gym_workout_plan is the cost cache: keyed on (user, date, equipment,
+    // injury state) so retaking a photo of a DIFFERENT setup regenerates
+    // while reopening the SAME one is free, and so a plan made before an
+    // injury was noted is never replayed after it.
+    //
+    // ai_workout_plan is the display integration: keyed (user, date) and
+    // read by the normal AI-plan card, which is what lets today's
+    // gym-photo workout survive closing and reopening the detail sheet.
+    // It is deliberately overwritten each time, since the user only has
+    // one plan for the day -- whichever they generated last.
     await supabase
       .from("gym_workout_plan")
       .upsert(
         { user_id: userId, date, equipment_signature: equipmentSignature, category, plan },
         { onConflict: "user_id,date,equipment_signature" },
       );
+    await supabase
+      .from("ai_workout_plan")
+      .upsert(
+        { user_id: userId, date, category, plan, selected_title: template.title },
+        { onConflict: "user_id,date" },
+      );
 
+    // title/bodyPart arrive via ...plan -- they are stored inside the
+    // cached object so the cache-hit path returns them too, without having
+    // to re-run selection just to recover two strings.
     return jsonResponse({ date, category, safety_flag: false, ...plan });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -163,26 +202,24 @@ async function callLunaForWording(
     throw new Error("OPENAI_API_KEY is not set as a Supabase secret -- run `supabase secrets set OPENAI_API_KEY=...`");
   }
 
-  const allExerciseNames = [
-    ...template.warm_up.map((e) => e.name),
-    ...template.blocks.flatMap((b) => b.exercises.map((e) => e.name)),
-    ...template.cool_down.map((e) => e.name),
+  const allExercises = [
+    ...template.warm_up,
+    ...template.blocks.flatMap((b) => b.exercises),
+    ...template.cool_down,
   ];
+  const exerciseList = allExercises.map((e) => `${e.name} (targets: ${e.target_area})`).join("; ");
   const readinessSummary = describeSnapshots(snapshots);
-  // The equipment list is the whole point of having taken a photo, and it
-  // previously never reached the model -- it was reduced to keywords for
-  // template matching and then dropped, so the instructions read like a
-  // generic plan. Passing it lets cues reference what the user is actually
-  // standing in front of, without licence to change the prescription.
+  // Their target-area framing plus the equipment context. Both matter: the
+  // target areas are what the redesigned result screen explains, and the
+  // equipment list is the whole point of having taken a photo -- it used to
+  // be reduced to matching keywords and then dropped, so the instructions
+  // read like a generic plan.
+  const goalsText = goals.length ? goals.join(", ") : "general fitness";
   const equipmentSummary = equipment.size > 0
     ? Array.from(equipment).sort().join(", ")
     : "no equipment -- bodyweight only";
   const prompt =
-    `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, and structure are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise. Only write clear, encouraging "instructions" text (2-3 sentences, plain language, real form cues) for each of these exercises, in this exact order: ${
-      allExerciseNames.join(", ")
-    }. The user confirmed they have this equipment available right now: ${equipmentSummary}. Where it helps, make the cues concrete about that setup (e.g. which implement to pick up, how to set it up) -- but never substitute a different exercise or suggest equipment not in that list. User's goals: ${
-      goals.length ? goals.join(", ") : "general fitness"
-    }. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
+    `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, structure, and target muscle areas are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise, and do not change which muscles it targets. Write "instructions" text (2-3 sentences) for each of these exercises, in this exact order: ${exerciseList}. Open each one by briefly naming what it targets and why that supports the user's goal (${goalsText}), then give plain-language form cues. The user confirmed they have this equipment available right now: ${equipmentSummary} -- make the cues concrete about that setup where it helps, but never substitute a different exercise or suggest equipment not in that list. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
 
   const res = await fetch(OPENAI_URL, {
     method: "POST",
