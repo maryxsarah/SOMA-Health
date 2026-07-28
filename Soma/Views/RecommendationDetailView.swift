@@ -189,6 +189,14 @@ struct RecommendationDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
+                    // Says out loud when the read is thin. Without this a run
+                    // of identical days is indistinguishable from the app
+                    // being broken -- which is exactly how testers read it.
+                    if let caveat = recommendation.dataConfidence?.caveat {
+                        Text(caveat)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 CardView {
@@ -336,6 +344,10 @@ struct RecommendationDetailView: View {
                 selectedBodyPart: selectedBodyPart,
                 notes: trimmedNotes.isEmpty ? nil : trimmedNotes
             )
+        } catch SupabaseError.safetyBlocked(let message) {
+            // Shown verbatim. A generic "try again in a moment" would be a
+            // lie -- retrying cannot help, and the user would keep tapping.
+            aiPlanError = message
         } catch {
             aiPlanError = "Couldn't generate a plan right now. Try again in a moment."
         }
@@ -443,7 +455,8 @@ private struct SeededGenerator: RandomNumberGenerator {
             reason: .healthkitMedium,
             sleepCapApplied: false,
             injuryCapApplied: false,
-            loadCapApplied: false
+            loadCapApplied: false,
+            dataConfidence: .low
         )
     )
 }

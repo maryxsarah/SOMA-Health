@@ -244,6 +244,27 @@ enum RecommendationReason: String, Codable {
 }
 
 /// Mirrors a `daily_recommendation` row (only the fields the app reads).
+/// How much the day's band actually rests on. `.low` means one signal or
+/// none -- the HealthKit-only path when the watch wasn't worn overnight, or
+/// before there's enough history for a baseline. Optional because rows
+/// written before the column existed have genuinely unknown confidence, and
+/// those show no caveat rather than a made-up one.
+enum DataConfidence: String, Codable {
+    case high
+    case low
+
+    /// Shown under the explanation on the detail screen. Naming the gap turns
+    /// a run of identical days from "this app is broken" into something the
+    /// user can act on.
+    var caveat: String? {
+        switch self {
+        case .high: nil
+        case .low:
+            "Today's read is based on limited data — Apple Health didn't record much to go on. Wearing your watch overnight, or connecting Whoop or Oura, makes this more precise."
+        }
+    }
+}
+
 struct DailyRecommendation: Codable, Equatable {
     let date: String
     let category: RecommendationCategory
@@ -252,9 +273,11 @@ struct DailyRecommendation: Codable, Equatable {
     let sleepCapApplied: Bool
     let injuryCapApplied: Bool
     let loadCapApplied: Bool
+    let dataConfidence: DataConfidence?
 
     enum CodingKeys: String, CodingKey {
         case date, category, message, reason
+        case dataConfidence = "data_confidence"
         case sleepCapApplied = "sleep_cap_applied"
         case injuryCapApplied = "injury_cap_applied"
         case loadCapApplied = "load_cap_applied"

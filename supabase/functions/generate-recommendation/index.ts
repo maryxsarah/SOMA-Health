@@ -16,6 +16,7 @@
 
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
+import { assessHealthKit } from "./healthkitBand.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -36,7 +37,7 @@ const OURA_STRESS_URL = "https://api.ouraring.com/v2/usercollection/daily_stress
 // cap below, not as a recovery metric.
 const WHOOP_HIGH_STRAIN_THRESHOLD = 15;
 
-type Band = "high" | "medium_high" | "medium" | "low";
+import type { Band, DataConfidence, HealthKitPayload } from "./healthkitBand.ts";
 type Category = "rest" | "light" | "moderate" | "push_hard";
 type Source = "whoop" | "oura" | "healthkit";
 
@@ -49,12 +50,6 @@ const MESSAGES: Record<Category, string> = {
     "Take it easier today — a short walk, mobility work, or light yoga (20-30 min) is ideal.",
   rest: "Today's a recovery day. Keep movement light and let your body rest — a gentle walk is plenty.",
 };
-
-interface HealthKitPayload {
-  sleepHours?: number;
-  hrvMs?: number;
-  restingHr?: number;
-}
 
 interface WearableTokenRow {
   id: string;
@@ -176,6 +171,11 @@ Deno.serve(async (req: Request) => {
     let band: Band;
     let source: Source;
     let clearlyPoorRecovery = false;
+    // Only the HealthKit path can be low-confidence. Whoop and Oura report a
+    // single authoritative recovery/readiness number, so there is nothing to
+    // be uncertain about; HealthKit is assembled from whatever the watch
+    // happened to record.
+    let dataConfidence: DataConfidence = "high";
 
     if (whoopRecovery) {
       band = bandFromWhoop(whoopRecovery.recoveryScore);
@@ -186,11 +186,43 @@ Deno.serve(async (req: Request) => {
       source = "oura";
       clearlyPoorRecovery = ouraReadiness < 50;
     } else if (healthkit) {
-      const baseline = await fetchHrvBaseline(supabase, userId, date);
-      band = bandFromHealthKit(healthkit, baseline);
+      // Firm baselines first; if there is not enough history yet, fall back
+      // to a provisional one built from as little as two days.
+      //
+      // Requiring 5 days outright had a nasty side effect: on days 2-5 both
+      // baselines were null, so nothing but sleep could move the band AND
+      // `clearlyPoorRecovery` was pinned false -- meaning a new user whose
+      // HRV had collapsed to half its usual value was told "moderate". The
+      // conservative rest override disappeared during precisely the window
+      // in which someone decides whether to trust the app. A provisional
+      // baseline restores the protective direction; assessHealthKit refuses
+      // to award positive points from it, so thin data can only hold someone
+      // back, never push them.
+      const [hrvFirm, rhrFirm] = await Promise.all([
+        fetchMetricBaseline(supabase, userId, date, "hrv_ms"),
+        fetchMetricBaseline(supabase, userId, date, "resting_hr"),
+      ]);
+      let hrvBaseline = hrvFirm;
+      let rhrBaseline = rhrFirm;
+      let provisional = false;
+      if (hrvBaseline === null && rhrBaseline === null) {
+        const [hrvProv, rhrProv] = await Promise.all([
+          fetchMetricBaseline(supabase, userId, date, "hrv_ms", PROVISIONAL_BASELINE_DAYS),
+          fetchMetricBaseline(supabase, userId, date, "resting_hr", PROVISIONAL_BASELINE_DAYS),
+        ]);
+        hrvBaseline = hrvProv;
+        rhrBaseline = rhrProv;
+        provisional = hrvBaseline !== null || rhrBaseline !== null;
+      }
+
+      const assessment = assessHealthKit(healthkit, hrvBaseline, rhrBaseline, provisional);
+      band = assessment.band;
+      // A provisional baseline is exactly the "thin read" the caveat exists
+      // for, regardless of how many signals were present.
+      dataConfidence = provisional ? "low" : assessment.confidence;
       source = "healthkit";
-      clearlyPoorRecovery = baseline !== null && healthkit.hrvMs !== undefined
-        ? healthkit.hrvMs < baseline * 0.6
+      clearlyPoorRecovery = hrvBaseline !== null && healthkit.hrvMs != null
+        ? healthkit.hrvMs < hrvBaseline * 0.6
         : false;
     } else {
       return jsonResponse(
@@ -225,6 +257,7 @@ Deno.serve(async (req: Request) => {
           sleep_cap_applied: sleepCapApplied,
           injury_cap_applied: injuryCapApplied,
           load_cap_applied: loadCapApplied,
+          data_confidence: dataConfidence,
         },
         { onConflict: "user_id,date" },
       );
@@ -240,6 +273,7 @@ Deno.serve(async (req: Request) => {
       sleep_cap_applied: sleepCapApplied,
       injury_cap_applied: injuryCapApplied,
       load_cap_applied: loadCapApplied,
+      data_confidence: dataConfidence,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -261,26 +295,6 @@ function bandFromOura(readinessScore: number): Band {
   if (readinessScore >= 70) return "medium_high";
   if (readinessScore >= 60) return "medium";
   return "low";
-}
-
-function bandFromHealthKit(
-  hk: HealthKitPayload,
-  baselineHrvMs: number | null,
-): Band {
-  const sleep = hk.sleepHours ?? null;
-
-  // No 30-day baseline yet (e.g. first few days of HealthKit-only data):
-  // default to a conservative "medium" rather than guessing push_hard.
-  if (baselineHrvMs === null || hk.hrvMs === undefined) {
-    if (sleep !== null && sleep < 6) return "low";
-    return "medium";
-  }
-
-  const hrvRatio = hk.hrvMs / baselineHrvMs;
-
-  if (hrvRatio >= 0.9 && sleep !== null && sleep >= 7) return "high";
-  if (hrvRatio < 0.8 || (sleep !== null && sleep < 6)) return "low";
-  return "medium";
 }
 
 function mapBandToCategory(
@@ -345,30 +359,55 @@ function pickSleepHours(
   );
 }
 
-async function fetchHrvBaseline(
+/// Minimum distinct days of history before a baseline means anything.
+/// Previously a single prior day was enough, which made the "baseline" just
+/// that day -- so today's value was compared against itself and the ratio was
+/// 1.0 by construction. Combined with the client submitting a stale value
+/// every day, this locked users into a permanent "medium".
+const MIN_BASELINE_DAYS = 5;
+/// Floor for the provisional baseline described at the call site. Two days is
+/// the minimum at which a comparison says anything at all -- one day would be
+/// comparing today against itself, which is the bug this constant's larger
+/// sibling was introduced to fix.
+const PROVISIONAL_BASELINE_DAYS = 2;
+const BASELINE_WINDOW_DAYS = 30;
+
+/// Median, not mean, of the trailing window. A single artefact reading -- and
+/// passive Apple Watch SDNN produces them -- drags a 30-point mean noticeably;
+/// it barely moves the median.
+async function fetchMetricBaseline(
   // deno-lint-ignore no-explicit-any
   supabase: any,
   userId: string,
   date: string,
+  column: "hrv_ms" | "resting_hr",
+  minDays: number = MIN_BASELINE_DAYS,
 ): Promise<number | null> {
   const end = new Date(date);
   const start = new Date(end);
-  start.setDate(start.getDate() - 30);
+  start.setDate(start.getDate() - BASELINE_WINDOW_DAYS);
   const startStr = start.toISOString().slice(0, 10);
   const endStr = new Date(end.getTime() - 86400000).toISOString().slice(0, 10);
 
   const { data } = await supabase
     .from("daily_snapshot")
-    .select("hrv_ms")
+    .select(column)
     .eq("user_id", userId)
     .eq("source", "healthkit")
     .gte("date", startStr)
     .lte("date", endStr)
-    .not("hrv_ms", "is", null);
+    .not(column, "is", null);
 
-  if (!data || data.length === 0) return null;
-  const sum = data.reduce((acc: number, r: { hrv_ms: number }) => acc + r.hrv_ms, 0);
-  return sum / data.length;
+  if (!data || data.length < minDays) return null;
+
+  const values = (data as Record<string, number>[])
+    .map((r) => r[column])
+    .filter((v): v is number => typeof v === "number")
+    .sort((a, b) => a - b);
+  if (values.length < minDays) return null;
+
+  const mid = Math.floor(values.length / 2);
+  return values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
 }
 
 function addDays(dateStr: string, days: number): string {

@@ -27,6 +27,7 @@
 
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
+import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -134,6 +135,25 @@ Deno.serve(async (req: Request) => {
     }
 
     const supabase = serviceRoleClient();
+
+    // Guardrail BEFORE the cache read, so a plan generated before the user
+    // reported a condition is not replayed back to them afterwards.
+    //
+    // ProfileView tells the user that while pregnancy is set "Soma won't
+    // auto-generate workouts for you" -- but only the gym-photo path honoured
+    // that, so the main Generate button handed them a full plan anyway. The
+    // promise was strengthened without checking every path that has to keep
+    // it.
+    //
+    // Only the hard-block tier applies here. An injury must NOT block this
+    // path: generate-recommendation already caps the day's category when one
+    // is noted, and RecommendationDetailView filters high-impact suggestions,
+    // so injured users are handled -- blocking them here would break the
+    // app's main feature for them.
+    const safety = await checkSafetyFlags(supabase, userId, date);
+    if (safety.flagged) {
+      return jsonResponse({ date, safety_flag: true, message: safety.message });
+    }
 
     // One generation per user per (day, selection): serve the cached plan
     // on repeat calls for the SAME selection instead of hitting the

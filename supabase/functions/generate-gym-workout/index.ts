@@ -22,6 +22,7 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { extractOutputText } from "../_shared/openai.ts";
 import { GymWorkoutTemplate, selectTemplate } from "./templates.ts";
+import { normalizeEquipment } from "../_shared/equipment.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MODEL = "gpt-5.6-luna";
@@ -101,18 +102,77 @@ Deno.serve(async (req: Request) => {
       .eq("user_id", userId)
       .eq("date", date);
 
-    const equipmentSet = new Set(confirmedEquipment);
-    const template = selectTemplate(category, equipmentSet, goals);
+    // Sorted + joined server-side so the client cannot influence cache
+    // identity by reordering the list it sends.
+    const equipmentSet = normalizeEquipment(confirmedEquipment);
+    // The injury state belongs in the cache key. Without it, a plan generated
+    // in the morning with no injury noted was replayed unchanged after the
+    // user added an injury tag -- serving them back the high-impact jumping
+    // session that safety.excludeHighImpact exists to withhold, because the
+    // cache hit returns before selectTemplate is ever consulted.
+    const equipmentSignature = Array.from(equipmentSet).sort().join("|") +
+      (safety.excludeHighImpact ? "|no-impact" : "");
 
-    const wording = await callLunaForWording(template, goals, (snapshots ?? []) as SnapshotRow[]);
-    const plan = mergeWording(template, wording);
+    // Same setup, same day -> same answer, so serve it rather than paying
+    // for the wording pass again. A different setup is a different
+    // signature and regenerates, which is what "retake photo" should do.
+    const { data: cached } = await supabase
+      .from("gym_workout_plan")
+      .select("category, plan")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .eq("equipment_signature", equipmentSignature)
+      .maybeSingle();
+    if (cached) {
+      // Refresh the display row too: without this, a user who retakes a
+      // photo of a setup they already used today sees the AI-plan card
+      // still showing whichever plan was generated most recently, not the
+      // one they are looking at.
+      await supabase
+        .from("ai_workout_plan")
+        .upsert(
+          {
+            user_id: userId,
+            date,
+            category: cached.category,
+            plan: cached.plan,
+            selected_title: cached.plan.title,
+          },
+          { onConflict: "user_id,date" },
+        );
+      return jsonResponse({ date, category: cached.category, safety_flag: false, ...cached.plan });
+    }
 
-    // Cache into the same ai_workout_plan table generate-workout-plan
-    // uses, keyed by selected_title = template.title -- this is what lets
-    // the app show today's gym-photo workout as "today's AI plan" (same
-    // card the normal picker flow populates) if the user leaves and
-    // reopens the detail sheet, instead of it only existing for the
-    // lifetime of this one response.
+    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact);
+
+    const wording = await callLunaForWording(
+      template,
+      goals,
+      (snapshots ?? []) as SnapshotRow[],
+      equipmentSet,
+    );
+    // title/bodyPart travel inside the cached object so a cache hit can
+    // return them without re-running selection.
+    const plan = { ...mergeWording(template, wording), title: template.title, bodyPart: template.bodyPart };
+
+    // Two writes, two different jobs -- not a duplicate.
+    //
+    // gym_workout_plan is the cost cache: keyed on (user, date, equipment,
+    // injury state) so retaking a photo of a DIFFERENT setup regenerates
+    // while reopening the SAME one is free, and so a plan made before an
+    // injury was noted is never replayed after it.
+    //
+    // ai_workout_plan is the display integration: keyed (user, date) and
+    // read by the normal AI-plan card, which is what lets today's
+    // gym-photo workout survive closing and reopening the detail sheet.
+    // It is deliberately overwritten each time, since the user only has
+    // one plan for the day -- whichever they generated last.
+    await supabase
+      .from("gym_workout_plan")
+      .upsert(
+        { user_id: userId, date, equipment_signature: equipmentSignature, category, plan },
+        { onConflict: "user_id,date,equipment_signature" },
+      );
     await supabase
       .from("ai_workout_plan")
       .upsert(
@@ -120,7 +180,10 @@ Deno.serve(async (req: Request) => {
         { onConflict: "user_id,date" },
       );
 
-    return jsonResponse({ date, category, safety_flag: false, title: template.title, bodyPart: template.bodyPart, ...plan });
+    // title/bodyPart arrive via ...plan -- they are stored inside the
+    // cached object so the cache-hit path returns them too, without having
+    // to re-run selection just to recover two strings.
+    return jsonResponse({ date, category, safety_flag: false, ...plan });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const status = msg === "unauthorized" ? 401 : 500;
@@ -132,6 +195,7 @@ async function callLunaForWording(
   template: GymWorkoutTemplate,
   goals: string[],
   snapshots: SnapshotRow[],
+  equipment: Set<string>,
 ): Promise<{ focus: string; exercises: { name: string; instructions: string }[] }> {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
@@ -145,8 +209,17 @@ async function callLunaForWording(
   ];
   const exerciseList = allExercises.map((e) => `${e.name} (targets: ${e.target_area})`).join("; ");
   const readinessSummary = describeSnapshots(snapshots);
+  // Their target-area framing plus the equipment context. Both matter: the
+  // target areas are what the redesigned result screen explains, and the
+  // equipment list is the whole point of having taken a photo -- it used to
+  // be reduced to matching keywords and then dropped, so the instructions
+  // read like a generic plan.
   const goalsText = goals.length ? goals.join(", ") : "general fitness";
-  const prompt = `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, structure, and target muscle areas are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise, and do not change which muscles it targets. Write "instructions" text (2-3 sentences) for each of these exercises, in this exact order: ${exerciseList}. Open each one by briefly naming what it targets and why that supports the user's goal (${goalsText}), then give plain-language form cues. User's goals: ${goalsText}. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
+  const equipmentSummary = equipment.size > 0
+    ? Array.from(equipment).sort().join(", ")
+    : "no equipment -- bodyweight only";
+  const prompt =
+    `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, structure, and target muscle areas are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise, and do not change which muscles it targets. Write "instructions" text (2-3 sentences) for each of these exercises, in this exact order: ${exerciseList}. Open each one by briefly naming what it targets and why that supports the user's goal (${goalsText}), then give plain-language form cues. The user confirmed they have this equipment available right now: ${equipmentSummary} -- make the cues concrete about that setup where it helps, but never substitute a different exercise or suggest equipment not in that list. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
 
   const res = await fetch(OPENAI_URL, {
     method: "POST",
@@ -187,16 +260,31 @@ function mergeWording(
   template: GymWorkoutTemplate,
   wording: { focus: string; exercises: { name: string; instructions: string }[] },
 ) {
-  const instructionsByName = new Map(wording.exercises.map((e) => [e.name, e.instructions]));
-  const withWording = (name: string, fallback: string) => instructionsByName.get(name) ?? fallback;
+  // Two-step lookup. Exact-name matching alone was brittle: the model
+  // returning "Cat-Cow Stretch" for "Cat-cow stretch", or "Push Up" for
+  // "Push-up", missed and fell back to an empty string -- so the user got a
+  // workout with blank instructions, which is the entire point of this step,
+  // and the blank version was then cached for the rest of the day.
+  //
+  // Normalized name first, then position. The prompt fixes the order and the
+  // schema enforces it, so index N of the response corresponds to index N of
+  // the flattened template; position is a sound fallback, not a guess.
+  const normalize = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const byName = new Map(wording.exercises.map((e) => [normalize(e.name), e.instructions]));
+
+  let position = 0;
+  const withWording = (name: string) => {
+    const byPosition = wording.exercises[position++];
+    return byName.get(normalize(name)) || byPosition?.instructions || "";
+  };
 
   return {
     focus: wording.focus || template.focus,
-    warm_up: template.warm_up.map((e) => ({ ...e, instructions: withWording(e.name, "") })),
+    warm_up: template.warm_up.map((e) => ({ ...e, instructions: withWording(e.name) })),
     blocks: template.blocks.map((b) => ({
       ...b,
-      exercises: b.exercises.map((e) => ({ ...e, instructions: withWording(e.name, "") })),
+      exercises: b.exercises.map((e) => ({ ...e, instructions: withWording(e.name) })),
     })),
-    cool_down: template.cool_down.map((e) => ({ ...e, instructions: withWording(e.name, "") })),
+    cool_down: template.cool_down.map((e) => ({ ...e, instructions: withWording(e.name) })),
   };
 }

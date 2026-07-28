@@ -16,6 +16,7 @@
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser } from "../_shared/clients.ts";
 import { extractOutputText } from "../_shared/openai.ts";
+import { EQUIPMENT_VOCABULARY, normalizeEquipment } from "../_shared/equipment.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 // Cheapest, high-volume vision tier -- fits this bounded classification
@@ -25,10 +26,17 @@ const MODEL_PRIMARY = "gpt-5.6-luna";
 const MODEL_RETRY = "gpt-5.6-terra";
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
+// Closed enum, not free text: template selection matches these values
+// exactly, so anything outside the vocabulary is unusable downstream. With
+// `strict: true` the model is forced to map what it sees onto a known
+// value instead of inventing a synonym that silently fails to match.
 const EQUIPMENT_SCHEMA = {
   type: "object",
   properties: {
-    equipment: { type: "array", items: { type: "string" } },
+    equipment: {
+      type: "array",
+      items: { type: "string", enum: [...EQUIPMENT_VOCABULARY] },
+    },
     confidence: { type: "number" },
   },
   required: ["equipment", "confidence"],
@@ -36,7 +44,9 @@ const EQUIPMENT_SCHEMA = {
 };
 
 const PROMPT =
-  "Identify every distinct piece of gym equipment visible in this photo. Return a concise list of equipment names (e.g. \"barbell\", \"squat rack\", \"dumbbells\", \"treadmill\", \"resistance bands\") and a confidence score from 0 to 1 reflecting how certain you are about the full list. Do not describe people, injuries, or anything unrelated to equipment.";
+  `Identify every distinct piece of gym equipment visible in this photo. Return only values from this list, choosing the closest match for what you see: ${
+    EQUIPMENT_VOCABULARY.join(", ")
+  }. Omit anything you cannot confidently map to one of those values rather than guessing. Also return a confidence score from 0 to 1 reflecting how certain you are about the full list. Do not describe people, injuries, or anything unrelated to equipment.`;
 
 interface EquipmentResult {
   equipment: string[];
@@ -64,8 +74,12 @@ Deno.serve(async (req: Request) => {
     }
 
     const lowConfidence = result.confidence < LOW_CONFIDENCE_THRESHOLD;
+    // Belt and braces: the schema already constrains the model, but a
+    // vendor-side schema regression would otherwise leak unmatched values
+    // through to selection, where they fail silently rather than loudly.
+    const equipment = Array.from(normalizeEquipment(result.equipment ?? []));
     return jsonResponse({
-      equipment: lowConfidence ? [] : result.equipment,
+      equipment: lowConfidence ? [] : equipment,
       confidence: result.confidence,
       lowConfidence,
     });

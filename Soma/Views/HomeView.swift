@@ -253,12 +253,23 @@ struct HomeView: View {
             : []
         async let providerEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchProviderWorkoutTimeline(date: Self.todayDateString())) ?? []
 
+        async let syncedEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchSyncedHealthKitWorkouts(date: Self.todayDateString())) ?? []
+
         let hkEntries = await healthKitEntries
         if !hkEntries.isEmpty {
             Task { try? await SupabaseClient.shared.syncHealthKitWorkouts(hkEntries) }
         }
 
-        let merged = await (hkEntries + providerEntries)
+        // Server-stored HealthKit workouts fill in what this device did not
+        // record itself -- a session logged on another phone or watch. Local
+        // wins on collision, since it is the source of truth for this device
+        // and may be newer than the last successful sync.
+        let localKeys = Set(hkEntries.map { "\($0.source)|\($0.startTime.timeIntervalSince1970)" })
+        let syncedOnly = await syncedEntries.filter {
+            !localKeys.contains("\($0.source)|\($0.startTime.timeIntervalSince1970)")
+        }
+
+        let merged = await (hkEntries + syncedOnly + providerEntries)
         timelineEntries = merged.sorted { $0.startTime < $1.startTime }
     }
 

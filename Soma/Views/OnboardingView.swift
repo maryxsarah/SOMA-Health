@@ -48,12 +48,23 @@ struct OnboardingView: View {
                             .font(.caption)
                             .foregroundStyle(.red)
                             .multilineTextAlignment(.center)
+
+                        if sessionManager.needsAppleIDSetup,
+                           let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                            Button("Open Settings") {
+                                UIApplication.shared.open(settingsURL)
+                            }
+                            .font(.caption.bold())
+                        }
                     }
 
                     PillButton(title: "Get Started", isEnabled: !sessionManager.isSigningIn) {
                         Task {
-                            await sessionManager.signInWithApple()
-                            if sessionManager.errorMessage == nil {
+                            // Branch on the returned value, never on
+                            // `errorMessage == nil` -- cancelling is a silent
+                            // non-error, so absence of a message no longer
+                            // means a session exists.
+                            if await sessionManager.signInWithApple() {
                                 appState.markSignedIn()
                             }
                         }

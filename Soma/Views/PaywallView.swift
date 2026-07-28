@@ -21,6 +21,15 @@ struct PaywallView: View {
     /// when nil, so the existing Home-screen sheet usage is unaffected.
     var onFinished: (() -> Void)?
 
+    /// True for the two *gating* presentations (onboarding's final step,
+    /// and tapping a locked detail view): someone who already has free
+    /// access via a referral bonus should not be asked to pay. False when
+    /// the user opened this deliberately to subscribe -- otherwise the
+    /// screen would close itself the instant they tried to buy, and since
+    /// this is the only purchase surface in the app, there would be no way
+    /// to subscribe at all during a 14-day bonus.
+    var autoDismissIfBonusActive: Bool = true
+
     @State private var selectedPlan: SubscriptionPlan = .annual
     @State private var referralCode = ""
     @State private var isRedeeming = false
@@ -146,6 +155,7 @@ struct PaywallView: View {
     /// so redeeming "somafirst" earlier in onboarding still ended in a
     /// payment prompt).
     private func checkReferralBonusSkip() {
+        guard autoDismissIfBonusActive else { return }
         if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
             finish()
         }

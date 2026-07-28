@@ -14,25 +14,37 @@
 </head>
 <body>
 <h1>Privacy Policy</h1>
-<p class="updated">Last updated: 21st of July 2026</p>
+<p class="updated">Last updated: 28th of July 2026</p>
 
 <p>Soma ("the app", "we", "our") helps you decide how hard to train each day by reading data from Apple Health, Whoop, and/or Oura. This policy explains what data we collect, how it's used, and your choices.</p>
 
 <h2>Information We Collect</h2>
 <ul>
-  <li>Health &amp; activity data, read-only, only with your permission: sleep, heart rate variability, resting heart rate, heart rate, step count, active energy, and exercise time from Apple Health; recovery scores from Whoop; readiness scores from Oura.</li>
-  <li>Account identifier from Sign in with Apple (a unique ID; we do not require or request your email address).</li>
-  <li>Your notification wake-time preference.</li>
+  <li>Health &amp; activity data, read-only, only with your permission: sleep, heart rate variability, resting heart rate, heart rate, step count, active energy, and exercise time from Apple Health; recovery, strain, and sleep data from Whoop; readiness, sleep, and stress data from Oura. Workouts recorded by Apple Health or a connected wearable are also stored so your history persists across devices.</li>
+  <li>Information you give us during onboarding and in your profile: sex, date of birth, current and target weight, training goals and pace, how often you train, whether you work with a trainer, how you heard about us, what gets in your way, diet preference, available equipment, training experience, and any injuries you choose to note (including free-text notes).</li>
+  <li>Pregnancy, only if you choose to tell us. This is never assumed or inferred, is entirely optional, and is used for one purpose: to withhold an automatically generated workout and suggest you speak to a qualified professional instead. You can clear it at any time in your profile.</li>
+  <li>Photographs you take of gym or workout equipment, if you use the gym-photo feature. These are sent for equipment recognition and are <strong>not</strong> stored by us — we keep only the resulting list of equipment after you confirm it.</li>
+  <li>Workouts you mark as complete, and any feedback you write about them.</li>
+  <li>Account identifier from Sign in with Apple (a unique ID). An email address only if Apple shares one with us and you allow it.</li>
+  <li>Your notification wake-time preference and marketing preference.</li>
 </ul>
 
 <h2>How We Use Your Information</h2>
-<p>Your health and activity data is used solely to compute a single daily training recommendation ("Rest", "Light Movement", "Moderate", or "Push Hard"). We do not use your health data for advertising, do not sell it, and do not share it with third parties except the service providers listed below, solely to operate the app.</p>
+<p>Your health and activity data is used to compute your daily training recommendation ("Rest", "Light Movement", "Moderate", or "Push Hard") and to generate the personalized workout plans you request in the app. Generating a plan means sending relevant context — your goals, available equipment, noted injuries, training experience, that day's health metrics, and your recent workout history — to the AI providers listed below, which return the plan text. Your data is not used to train their models. We do not use your health data for advertising, do not sell it, and do not share it with anyone except the service providers listed below, solely to operate the app.</p>
 
 <h2>Where Your Data Is Stored</h2>
 <p>Recommendation data and connection tokens are stored with our backend provider, Supabase, using industry-standard encryption in transit (HTTPS) and access controls that restrict every record to your own account. Whoop and Oura access tokens are never exposed to the app itself.</p>
 
 <h2>Third-Party Services</h2>
-<p>The app integrates with Apple HealthKit, Whoop, Oura, and Supabase. Each provider's use of data they process is governed by their own privacy policy in addition to this one.</p>
+<p>The app relies on the following providers, each of which processes some of your data on our behalf:</p>
+<ul>
+  <li>Apple — Sign in with Apple, HealthKit</li>
+  <li>Whoop and Oura, if you connect them</li>
+  <li>Supabase — backend, database, and hosting</li>
+  <li>Anthropic — generates workout plans and workout suggestions from the context described above</li>
+  <li>OpenAI — recognizes equipment in gym photos and writes exercise instructions</li>
+</ul>
+<p>Each provider's use of data they process is governed by their own privacy policy in addition to this one.</p>
 
 <h2>Data Retention &amp; Deletion</h2>
 <p>You can disconnect a wearable at any time from within the app. To request deletion of your account and associated data, contact us at the address below.</p>

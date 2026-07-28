@@ -7,6 +7,9 @@ import SwiftUI
 /// (generate-recommendation Edge Function).
 struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
+    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
+
+    @State private var showPaywall = false
 
     // Plain @State strings bound directly via `$` (not a computed
     // Binding(get:set:) built inline in the view body) -- the latter
@@ -148,7 +151,12 @@ struct ProfileView: View {
                 CardView {
                     Text("Pregnancy")
                         .font(.body.bold())
-                    Text("Optional -- helps Soma keep workout suggestions safe. Never assumed; only set if you tell us.")
+                    // States the actual consequence rather than a vague
+                    // "keeps things safe" -- this setting does not soften
+                    // the generated workout, it withholds it entirely, and
+                    // a user who discovers that only after setting it will
+                    // reasonably feel misled.
+                    Text("Optional, and never assumed -- only set if you tell us. While this is on, Soma won't auto-generate workouts for you and will point you to a qualified professional instead. Your daily recommendation keeps working as normal.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     FlowLayout {
@@ -171,6 +179,23 @@ struct ProfileView: View {
 
                 PillButton(title: "Save Profile", isEnabled: !isSaving, action: save)
 
+                // The only place to subscribe on purpose. Both other
+                // paywall presentations are gates that dismiss themselves
+                // while a referral bonus is active, so without this a user
+                // on a 14-day bonus who wants to pay early simply cannot.
+                CardView {
+                    Text("Subscription")
+                        .font(.body.bold())
+                    Text(subscriptionStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !subscriptionManager.isSubscribed {
+                        PillButton(title: "View Soma Premium") {
+                            showPaywall = true
+                        }
+                    }
+                }
+
                 CardView {
                     Text("Account")
                         .font(.body.bold())
@@ -184,6 +209,11 @@ struct ProfileView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .somaBackground()
+        .sheet(isPresented: $showPaywall) {
+            // autoDismissIfBonusActive: false -- opened deliberately, so it
+            // must not close itself just because a bonus is running.
+            PaywallView(autoDismissIfBonusActive: false)
+        }
         .task {
             await load()
         }
@@ -197,6 +227,21 @@ struct ProfileView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    /// Three distinct states worth telling apart: paying, on a referral
+    /// bonus (free, but ending), or neither.
+    private var subscriptionStatusText: String {
+        if subscriptionManager.isSubscribed {
+            return "Soma Premium is active."
+        }
+        if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            return "Free access until \(formatter.string(from: bonusUntil)). You can subscribe now if you'd rather not wait for it to end."
+        }
+        return "You're on the free plan -- today's category and message only."
     }
 
     private func connectDevice(_ provider: Provider) {

@@ -34,12 +34,29 @@ final class HealthKitManager {
         try await store.requestAuthorization(toShare: [], read: readTypes)
     }
 
-    /// Best-effort snapshot of today's metrics for the optional `healthkit`
-    /// payload sent to generate-recommendation.
+    /// Snapshot of today's metrics for the optional `healthkit` payload sent
+    /// to generate-recommendation.
+    ///
+    /// Every metric here is bounded to the last 24 hours and returns nil when
+    /// nothing was recorded in that window. That "nil rather than stale" rule
+    /// is the whole point: this used to read the most recent sample of ALL
+    /// TIME (HKSampleQuery with predicate: nil, limit: 1), so a user whose
+    /// watch had not logged HRV in a week submitted last week's number as
+    /// today's, every single day. The server then averaged those repeated
+    /// values into the baseline it compared them against, so the ratio came
+    /// out at exactly 1.0 forever and the user was pinned to "Moderate".
+    /// A missing metric is honest and the band logic handles it; a stale one
+    /// is a silent lie that also corrupts the baseline.
+    ///
+    /// Values are medians, not single samples. Apple Watch records SDNN
+    /// irregularly (roughly every 2-4h awake, ~1 min per 15 min overnight,
+    /// skipping on motion) and individual readings are famously noisy -- a
+    /// median over the window resists outliers without needing an outlier
+    /// model.
     func fetchTodaysMetrics() async -> HealthKitSnapshot {
         async let sleep = fetchSleepHours()
-        async let hrv = fetchLatestQuantity(.heartRateVariabilitySDNN, unit: .secondUnit(with: .milli))
-        async let restingHR = fetchLatestQuantity(
+        async let hrv = fetchMedianQuantity(.heartRateVariabilitySDNN, unit: .secondUnit(with: .milli))
+        async let restingHR = fetchMedianQuantity(
             .restingHeartRate,
             unit: HKUnit.count().unitDivided(by: .minute())
         )
@@ -174,27 +191,79 @@ final class HealthKitManager {
                 let asleepSamples = (samples as? [HKCategorySample])?.filter {
                     asleepValues.contains($0.value)
                 } ?? []
-                let totalSeconds = asleepSamples.reduce(0.0) { $0 + $1.endDate.timeIntervalSince($1.startDate) }
+                // Union of the intervals, not the sum of their durations --
+                // overlapping samples from different sources would otherwise
+                // be counted twice. See mergedDuration().
+                let totalSeconds = Self.mergedDuration(
+                    asleepSamples.map { (start: $0.startDate, end: $0.endDate) }
+                )
                 continuation.resume(returning: totalSeconds > 0 ? totalSeconds / 3600 : nil)
             }
             store.execute(query)
         }
     }
 
-    private func fetchLatestQuantity(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit) async -> Double? {
+    /// Median of every sample recorded in the trailing `hours` window, or nil
+    /// if there were none. See fetchTodaysMetrics() for why this must never
+    /// fall back to an older sample.
+    private func fetchMedianQuantity(
+        _ identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        hours: Double = 24
+    ) async -> Double? {
         guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { return nil }
-        let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        let now = Date()
+        let predicate = HKQuery.predicateForSamples(
+            withStart: now.addingTimeInterval(-hours * 3600),
+            end: now,
+            options: .strictStartDate
+        )
 
         return await withCheckedContinuation { continuation in
-            let query = HKSampleQuery(sampleType: type, predicate: nil, limit: 1, sortDescriptors: [sort]) { _, samples, _ in
-                guard let sample = samples?.first as? HKQuantitySample else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                continuation.resume(returning: sample.quantity.doubleValue(for: unit))
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, _ in
+                let values = (samples as? [HKQuantitySample])?
+                    .map { $0.quantity.doubleValue(for: unit) } ?? []
+                continuation.resume(returning: Self.median(values))
             }
             store.execute(query)
         }
+    }
+
+    static func median(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        let sorted = values.sorted()
+        let mid = sorted.count / 2
+        return sorted.count.isMultiple(of: 2)
+            ? (sorted[mid - 1] + sorted[mid]) / 2
+            : sorted[mid]
+    }
+
+    /// Total length covered by these intervals, counting any overlap once.
+    ///
+    /// HealthKit does not deduplicate across sources: an Apple Watch, a
+    /// third-party sleep app, and an iPhone can each write samples covering
+    /// the same minutes, and a sample query returns all of them. Summing
+    /// durations naively therefore inflates total sleep, sometimes to
+    /// physically impossible numbers.
+    static func mergedDuration(_ intervals: [(start: Date, end: Date)]) -> TimeInterval {
+        let sorted = intervals.filter { $0.end > $0.start }.sorted { $0.start < $1.start }
+        guard var current = sorted.first else { return 0 }
+
+        var total: TimeInterval = 0
+        for interval in sorted.dropFirst() {
+            if interval.start <= current.end {
+                current.end = max(current.end, interval.end)
+            } else {
+                total += current.end.timeIntervalSince(current.start)
+                current = interval
+            }
+        }
+        return total + current.end.timeIntervalSince(current.start)
     }
 }
 
