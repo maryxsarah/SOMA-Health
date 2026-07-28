@@ -24,5 +24,23 @@ supabase/.temp
 # Claude Code local settings -- machine-local, not shared project config
 .claude/settings.local.json
 
+# Internal engineering docs -- NOT published.
+#
+# docs/ is this repo's GitHub Pages root (main branch, /docs path) and the
+# repo is public, so anything committed under docs/ is served at
+# https://maryxsarah.github.io/SOMA-Health/ and readable by anyone. Only the
+# hosted legal pages (privacy.html, terms.html) belong there.
+#
+# Internal docs -- code reviews, feature specs, findings -- are ignored here
+# so they cannot be published by an absent-minded `git add .`. If the repo is
+# ever made private, delete this block to start tracking them.
+# Allowlist, not a blocklist: ignore everything under docs/ and name the
+# exceptions. The blocklist form listed each internal folder by hand, so any
+# new file added at docs/<something>.md was published by default -- the
+# failure mode was silent and pointed the wrong way.
+docs/*
+!docs/privacy.html
+!docs/terms.html
+
 # macOS
 .DS_Store

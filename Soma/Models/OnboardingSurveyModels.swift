@@ -149,9 +149,14 @@ enum BlockerTag: String, Codable, CaseIterable, Identifiable {
 }
 
 enum DietType: String, Codable, CaseIterable, Identifiable {
+    // `noDiet`, not `none`: this is consumed as `DietType?`, and a case
+    // literally named `none` would make `answers.dietType = .none` resolve
+    // to `Optional.none` -- i.e. nil -- silently discarding the user's
+    // answer, since saveOnboardingSurvey only writes diet_type under
+    // `if let`. The rawValue stays "none" so stored data is unaffected.
     case balanced, wholeFood = "whole_food", mediterranean
     case pescatarian, flexitarian, vegetarian, vegan
-    case lowCarb = "low_carb", keto, paleo, none = "none"
+    case lowCarb = "low_carb", keto, paleo, noDiet = "none"
     var id: String { rawValue }
     var displayName: String {
         switch self {
@@ -165,7 +170,7 @@ enum DietType: String, Codable, CaseIterable, Identifiable {
         case .lowCarb: "Low-carb"
         case .keto: "Keto"
         case .paleo: "Paleo"
-        case .none: "I don't follow any diet"
+        case .noDiet: "I don't follow any diet"
         }
     }
 }

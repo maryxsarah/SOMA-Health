@@ -167,6 +167,46 @@ background delivery meaningfully). On first launch:
   This forces the registered handler to run immediately without waiting
   for a real background window.
 
+## 8b. Running the test suites
+
+Two suites, split by where the logic lives. Both are fast and neither needs
+network access, a device, or Supabase credentials.
+
+**Swift — app-side pure logic** (`Tests/`):
+
+```
+xcodegen generate    # only if project.yml changed
+xcodebuild test -project Soma.xcodeproj -scheme Soma \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+```
+
+Covers HealthKit metric aggregation (median sampling, sleep interval union)
+and `DailyRecommendation` decoding, including rows written before
+`data_confidence` existed. Anything that needs a live `HKHealthStore` is out
+of scope -- HealthKit cannot be meaningfully faked in a unit test.
+
+**Deno — Edge Function decision logic**:
+
+```
+deno test supabase/functions/
+```
+
+Covers the two deterministic decisions that most affect what a user sees:
+`assessHealthKit` (which training band the day gets from Apple Health
+signals) and `selectTemplate` (which gym-photo workout is chosen), plus
+invariants over the template library itself.
+
+### Conventions
+
+Tests named `REGRESSION:` or `testX...` referencing a past failure exist
+because that exact bug shipped. Read the comment before changing the
+assertion -- several of them encode behaviour that looked wrong to a
+previous reader and was not.
+
+Tests named `INVARIANT:` guard properties the data must keep, not behaviour
+of a single function. If one fails, the fix is usually in the data (a
+template, the equipment vocabulary), not in the test.
+
 ## 9. TestFlight & App Store submission
 
 ### 9.1 App Store Connect setup (one-time)

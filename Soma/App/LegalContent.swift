@@ -1,13 +1,20 @@
 import Foundation
 
 /// Fixed, static legal copy -- required for App Store review since the app
-/// requests HealthKit and account data. Placeholder content: review with
-/// counsel and fill in the bracketed values before shipping.
+/// requests HealthKit and account data. NOT reviewed by counsel: this copy
+/// describes what the code actually does, which is the necessary starting
+/// point, but it is not a substitute for legal review before wider release.
+///
+/// IMPORTANT: this text is duplicated at docs/privacy.html, which is served
+/// publicly via GitHub Pages and linked from the App Store listing. The two
+/// must be changed together -- they have silently drifted from what the app
+/// does once already. Anything added here that touches data collection or
+/// third-party processors belongs in both files, plus a bumped date.
 enum LegalContent {
     static let privacyPolicyTitle = "Privacy Policy"
 
     static let privacyPolicyBody = """
-    Last updated: 21st of July 2026
+    Last updated: 28th of July 2026
 
     Soma ("the app", "we", "our") helps you decide how hard to train each \
     day by reading data from Apple Health, Whoop, and/or Oura. This policy \
@@ -16,17 +23,40 @@ enum LegalContent {
     Information We Collect
     - Health & activity data, read-only, only with your permission: sleep, \
     heart rate variability, resting heart rate, heart rate, step count, \
-    active energy, and exercise time from Apple Health; recovery scores \
-    from Whoop; readiness scores from Oura.
-    - Account identifier from Sign in with Apple (a unique ID; we do not \
-    require or request your email address).
-    - Your notification wake-time preference.
+    active energy, and exercise time from Apple Health; recovery, strain, \
+    and sleep data from Whoop; readiness, sleep, and stress data from Oura. \
+    Workouts recorded by Apple Health or a connected wearable are also \
+    stored so your history persists across devices.
+    - Information you give us during onboarding and in your profile: sex, \
+    date of birth, current and target weight, training goals and pace, how \
+    often you train, whether you work with a trainer, how you heard about \
+    us, what gets in your way, diet preference, available equipment, \
+    training experience, and any injuries you choose to note (including \
+    free-text notes).
+    - Pregnancy, only if you choose to tell us. This is never assumed or \
+    inferred, is entirely optional, and is used for one purpose: to \
+    withhold an automatically generated workout and suggest you speak to a \
+    qualified professional instead. You can clear it at any time in your \
+    profile.
+    - Photographs you take of gym or workout equipment, if you use the \
+    gym-photo feature. These are sent for equipment recognition and are \
+    NOT stored by us -- we keep only the resulting list of equipment after \
+    you confirm it.
+    - Workouts you mark as complete, and any feedback you write about them.
+    - Account identifier from Sign in with Apple (a unique ID). An email \
+    address only if Apple shares one with us and you allow it.
+    - Your notification wake-time preference and marketing preference.
 
     How We Use Your Information
-    Your health and activity data is used solely to compute a single daily \
-    training recommendation ("Rest", "Light Movement", "Moderate", or \
-    "Push Hard"). We do not use your health data for advertising, do not \
-    sell it, and do not share it with third parties except the service \
+    Your health and activity data is used to compute your daily training \
+    recommendation ("Rest", "Light Movement", "Moderate", or "Push Hard") \
+    and to generate the personalized workout plans you request in the app. \
+    Generating a plan means sending relevant context -- your goals, \
+    available equipment, noted injuries, training experience, that day's \
+    health metrics, and your recent workout history -- to the AI providers \
+    listed below, which return the plan text. Your data is not used to \
+    train their models. We do not use your health data for advertising, do \
+    not sell it, and do not share it with anyone except the service \
     providers listed below, solely to operate the app.
 
     Where Your Data Is Stored
@@ -37,7 +67,15 @@ enum LegalContent {
     itself.
 
     Third-Party Services
-    The app integrates with Apple HealthKit, Whoop, Oura, and Supabase. \
+    The app relies on the following providers, each of which processes some \
+    of your data on our behalf:
+    - Apple (Sign in with Apple, HealthKit)
+    - Whoop and Oura, if you connect them
+    - Supabase -- backend, database, and hosting
+    - Anthropic -- generates workout plans and workout suggestions from the \
+    context described above
+    - OpenAI -- recognizes equipment in gym photos and writes exercise \
+    instructions
     Each provider's use of data they process is governed by their own \
     privacy policy in addition to this one.
 
@@ -59,7 +97,7 @@ enum LegalContent {
     reflected by updating the "Last updated" date above.
 
     Contact Us
-    [team@soma4health.com]
+    team@soma4health.com
     """
 
     static let termsOfServiceTitle = "Terms of Service"

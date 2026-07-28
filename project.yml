@@ -113,6 +113,29 @@ targets:
     # "+ Capability" button (with automatic signing on) so Xcode can
     # provision them for your Team. See SETUP.md.
 
+  # Unit tests for the pure, non-UI logic that decisions actually hang on --
+  # sleep aggregation, metric medians, and the models the Edge Functions
+  # decode into. Anything needing a live HKHealthStore or network is out of
+  # scope here; the server-side decision logic is covered separately by
+  # `deno test supabase/functions/`.
+  #
+  # Run: xcodebuild test -project Soma.xcodeproj -scheme Soma \
+  #        -destination 'platform=iOS Simulator,name=iPhone 16'
+  SomaTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Soma
+    settings:
+      base:
+        # The host app carries the real bundle id; the test bundle needs its
+        # own, or both get com.skollnitzer.soma from the project-level
+        # setting and the test bundle fails to install.
+        PRODUCT_BUNDLE_IDENTIFIER: com.skollnitzer.soma.tests
+        GENERATE_INFOPLIST_FILE: true
+
 # Explicit scheme -- without this block, this XcodeGen version does not
 # auto-generate one, so Xcode's Run button (and a physical device target)
 # has nothing to build against and shows "No scheme".
@@ -121,6 +144,13 @@ schemes:
     build:
       targets:
         Soma: all
+        SomaTests: [test]
+    # Without this the scheme builds the test bundle but never runs it, so
+    # `xcodebuild test` reports success having executed nothing.
+    test:
+      config: Debug
+      targets:
+        - SomaTests
     run:
       config: Debug
       # Without this, the scheme has no StoreKit Configuration set (this
@@ -131,8 +161,6 @@ schemes:
       # local test config and finds nothing -- "Subscription products not
       # found" even though Soma.storekit is correctly set up.
       storeKitConfiguration: Soma/Soma.storekit
-    test:
-      config: Debug
     profile:
       config: Release
     analyze:

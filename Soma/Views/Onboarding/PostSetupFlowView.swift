@@ -46,6 +46,16 @@ struct PostSetupFlowView: View {
         }
         .transition(.opacity)
         .animation(.easeInOut(duration: 0.2), value: step)
+        // Load the bonus once for the whole flow, not just on the redeem
+        // path. `step` is @State, so relaunching mid-onboarding restarts at
+        // .referralCode; a user who already redeemed and now taps Skip would
+        // otherwise reach the paywall with referralBonusUntil still nil --
+        // which is exactly the "somafirst doesn't suppress the paywall" bug,
+        // reached by a different route. AppState holds it in memory only and
+        // nothing else loads it before Home.
+        .task {
+            await appState.refreshReferralBonus()
+        }
     }
 
     private func advance() {

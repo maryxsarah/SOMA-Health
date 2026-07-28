@@ -182,6 +182,14 @@ struct RecommendationDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
+                    // Says out loud when the read is thin. Without this a run
+                    // of identical days is indistinguishable from the app
+                    // being broken -- which is exactly how testers read it.
+                    if let caveat = recommendation.dataConfidence?.caveat {
+                        Text(caveat)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 CardView {
@@ -420,7 +428,8 @@ private struct SeededGenerator: RandomNumberGenerator {
             reason: .healthkitMedium,
             sleepCapApplied: false,
             injuryCapApplied: false,
-            loadCapApplied: false
+            loadCapApplied: false,
+            dataConfidence: .low
         )
     )
 }

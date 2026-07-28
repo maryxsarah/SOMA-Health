@@ -238,7 +238,7 @@ final class SupabaseClient {
     /// Plain read via RLS -- used by HomeView on appear so opening the app
     /// doesn't invoke the mutating generate-recommendation function every time.
     func fetchTodaysRecommendation(date: String) async throws -> DailyRecommendation? {
-        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,sleep_cap_applied,injury_cap_applied,load_cap_applied&limit=1"
+        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -259,7 +259,7 @@ final class SupabaseClient {
         let startStr = formatter.string(from: start)
         let endStr = formatter.string(from: end)
 
-        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,sleep_cap_applied,injury_cap_applied,load_cap_applied&order=date.asc"
+        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied&order=date.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -398,13 +398,16 @@ final class SupabaseClient {
         }
     }
 
-    /// Best-effort upload of HealthKit's on-device workouts so they persist
-    /// server-side -- previously HomeView only ever held these in-memory
-    /// (see loadTimeline()), so they vanished on every app relaunch and
-    /// never showed up in the backend at all. Silent on failure, same
-    /// pattern as loadCompletedDates() -- worst case this day's HealthKit
-    /// workouts just don't sync, no user-visible impact since the timeline
-    /// itself is still built locally either way.
+    /// Uploads HealthKit's on-device workouts so they persist server-side --
+    /// previously HomeView only ever held these in-memory (see
+    /// loadTimeline()), so they vanished on every app relaunch and never
+    /// showed up in the backend at all.
+    ///
+    /// Throws like every other call here; it is the *caller* that treats
+    /// this as best-effort (HomeView wraps it in `try?`), because a failed
+    /// sync has no user-visible impact -- the timeline is still built
+    /// locally either way. Kept throwing rather than swallowing internally
+    /// so a future caller that does care can handle the error.
     func syncHealthKitWorkouts(_ entries: [WorkoutTimelineEntry]) async throws {
         guard let userId = currentUserID, !entries.isEmpty else { return }
         let formatter = ISO8601DateFormatter()

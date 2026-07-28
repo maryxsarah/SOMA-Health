@@ -22,6 +22,7 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { extractOutputText } from "../_shared/openai.ts";
 import { GymWorkoutTemplate, selectTemplate } from "./templates.ts";
+import { normalizeEquipment } from "../_shared/equipment.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MODEL = "gpt-5.6-luna";
@@ -101,11 +102,41 @@ Deno.serve(async (req: Request) => {
       .eq("user_id", userId)
       .eq("date", date);
 
-    const equipmentSet = new Set(confirmedEquipment);
-    const template = selectTemplate(category, equipmentSet, goals);
+    // Sorted + joined server-side so the client cannot influence cache
+    // identity by reordering the list it sends.
+    const equipmentSet = normalizeEquipment(confirmedEquipment);
+    const equipmentSignature = Array.from(equipmentSet).sort().join("|");
 
-    const wording = await callLunaForWording(template, goals, (snapshots ?? []) as SnapshotRow[]);
+    // Same setup, same day -> same answer, so serve it rather than paying
+    // for the wording pass again. A different setup is a different
+    // signature and regenerates, which is what "retake photo" should do.
+    const { data: cached } = await supabase
+      .from("gym_workout_plan")
+      .select("category, plan")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .eq("equipment_signature", equipmentSignature)
+      .maybeSingle();
+    if (cached) {
+      return jsonResponse({ date, category: cached.category, safety_flag: false, ...cached.plan });
+    }
+
+    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact);
+
+    const wording = await callLunaForWording(
+      template,
+      goals,
+      (snapshots ?? []) as SnapshotRow[],
+      equipmentSet,
+    );
     const plan = mergeWording(template, wording);
+
+    await supabase
+      .from("gym_workout_plan")
+      .upsert(
+        { user_id: userId, date, equipment_signature: equipmentSignature, category, plan },
+        { onConflict: "user_id,date,equipment_signature" },
+      );
 
     return jsonResponse({ date, category, safety_flag: false, ...plan });
   } catch (err) {
@@ -119,6 +150,7 @@ async function callLunaForWording(
   template: GymWorkoutTemplate,
   goals: string[],
   snapshots: SnapshotRow[],
+  equipment: Set<string>,
 ): Promise<{ focus: string; exercises: { name: string; instructions: string }[] }> {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
@@ -131,7 +163,20 @@ async function callLunaForWording(
     ...template.cool_down.map((e) => e.name),
   ];
   const readinessSummary = describeSnapshots(snapshots);
-  const prompt = `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, and structure are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise. Only write clear, encouraging "instructions" text (2-3 sentences, plain language, real form cues) for each of these exercises, in this exact order: ${allExerciseNames.join(", ")}. User's goals: ${goals.length ? goals.join(", ") : "general fitness"}. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
+  // The equipment list is the whole point of having taken a photo, and it
+  // previously never reached the model -- it was reduced to keywords for
+  // template matching and then dropped, so the instructions read like a
+  // generic plan. Passing it lets cues reference what the user is actually
+  // standing in front of, without licence to change the prescription.
+  const equipmentSummary = equipment.size > 0
+    ? Array.from(equipment).sort().join(", ")
+    : "no equipment -- bodyweight only";
+  const prompt =
+    `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, and structure are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise. Only write clear, encouraging "instructions" text (2-3 sentences, plain language, real form cues) for each of these exercises, in this exact order: ${
+      allExerciseNames.join(", ")
+    }. The user confirmed they have this equipment available right now: ${equipmentSummary}. Where it helps, make the cues concrete about that setup (e.g. which implement to pick up, how to set it up) -- but never substitute a different exercise or suggest equipment not in that list. User's goals: ${
+      goals.length ? goals.join(", ") : "general fitness"
+    }. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
 
   const res = await fetch(OPENAI_URL, {
     method: "POST",
