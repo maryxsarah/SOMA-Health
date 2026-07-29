@@ -27,6 +27,12 @@ enum Config {
 
     static let backgroundTaskIdentifier = "com.soma.app.refresh"
 
+    /// Gated pending legal review of body-photo storage/consent copy.
+    /// Flipping this to true is the entire "ship it" step -- no other code
+    /// changes needed; onboarding and Profile show zero trace of the
+    /// feature while it's false.
+    static let enableBodyPhotoUpload = false
+
     private static func string(for key: String) -> String {
         Bundle.main.object(forInfoDictionaryKey: key) as? String ?? ""
     }

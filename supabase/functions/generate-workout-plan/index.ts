@@ -28,6 +28,7 @@
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
+import { computeTotalDuration } from "../_shared/duration.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -90,12 +91,20 @@ interface Selection {
   bodyPart: string;
 }
 
+interface DurationRange {
+  min: number;
+  max: number;
+}
+
 interface UserRow {
   goals: string[] | null;
   equipment: string[] | null;
   injury_tags: string[] | null;
   injury_notes: string | null;
   experience_level: string | null;
+  sex: string | null;
+  date_of_birth: string | null;
+  weight_kg: number | null;
 }
 
 interface SnapshotRow {
@@ -117,6 +126,28 @@ interface WorkoutLogRow {
   feedback: string | null;
 }
 
+interface GeneratedExercise {
+  name: string;
+  sets: number;
+  reps: string;
+  weight_guidance: string;
+  intensity: string;
+  duration_minutes: number;
+  instructions: string;
+}
+interface GeneratedBlock {
+  name: string;
+  rounds: number;
+  rest_between_rounds: string;
+  exercises: GeneratedExercise[];
+}
+interface WorkoutPlanResult {
+  focus: string;
+  warm_up: GeneratedExercise[];
+  blocks: GeneratedBlock[];
+  cool_down: GeneratedExercise[];
+}
+
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -127,6 +158,10 @@ Deno.serve(async (req: Request) => {
     const date: string | undefined = body.date;
     const selection: Selection | undefined = body.selection;
     const notes: string | undefined = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : undefined;
+    const targetDurationRange: DurationRange | undefined =
+      body.targetDurationRange && typeof body.targetDurationRange.min === "number" && typeof body.targetDurationRange.max === "number"
+        ? body.targetDurationRange
+        : undefined;
     if (!date) {
       return jsonResponse({ error: "missing 'date' (YYYY-MM-DD)" }, 400);
     }
@@ -170,6 +205,24 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ date, category: cached.category, ...cached.plan });
     }
 
+    // A different selection than what's cached, but the day is already
+    // logged -- refuse rather than silently swapping the plan behind an
+    // already-completed workout. A log matching this selection's title
+    // falls through normally (the cache-read above already served it).
+    const { data: existingLog } = await supabase
+      .from("workout_log")
+      .select("title")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .maybeSingle();
+    if (existingLog && existingLog.title !== selection.title) {
+      return jsonResponse({
+        date,
+        locked: true,
+        message: "Today's workout is already logged. Generating a different plan won't undo that — pick tomorrow's workout instead.",
+      });
+    }
+
     const { data: recommendation } = await supabase
       .from("daily_recommendation")
       .select("category")
@@ -183,7 +236,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow } = await supabase
       .from("users")
-      .select("goals, equipment, injury_tags, injury_notes, experience_level")
+      .select("goals, equipment, injury_tags, injury_notes, experience_level, sex, date_of_birth, weight_kg")
       .eq("id", userId)
       .maybeSingle();
 
@@ -209,16 +262,38 @@ Deno.serve(async (req: Request) => {
       (recentLogs ?? []) as WorkoutLogRow[],
       notes,
     );
-    const plan = await callClaude(prompt);
+    let plan = await callClaude(prompt);
+    let actualDurationMinutes = computeTotalDuration(plan);
+
+    // One bounded retry when a target was given and the total misses by
+    // more than the ~2 min tolerance -- never a silent claim that a
+    // mismatched total matches the label. If the retry doesn't land closer,
+    // the response still carries the true (mismatched) total rather than
+    // pretending precision the model didn't produce.
+    if (
+      targetDurationRange &&
+      (actualDurationMinutes < targetDurationRange.min - 2 || actualDurationMinutes > targetDurationRange.max + 2)
+    ) {
+      const gapPrompt = `${prompt}\n\nYour previous attempt totaled ~${actualDurationMinutes} min but the target is ${targetDurationRange.min}-${targetDurationRange.max} min -- ${actualDurationMinutes < targetDurationRange.min ? "add 1-2 more working sets or an extra exercise to close the gap" : "trim a set or exercise to fit the target"}, don't just pad or shrink rest periods.`;
+      const retryPlan = await callClaude(gapPrompt);
+      const retryDuration = computeTotalDuration(retryPlan);
+      const targetMid = (targetDurationRange.min + targetDurationRange.max) / 2;
+      if (Math.abs(retryDuration - targetMid) < Math.abs(actualDurationMinutes - targetMid)) {
+        plan = retryPlan;
+        actualDurationMinutes = retryDuration;
+      }
+    }
+
+    const planWithDuration = { ...plan, actual_duration_minutes: actualDurationMinutes };
 
     await supabase
       .from("ai_workout_plan")
       .upsert(
-        { user_id: userId, date, category, plan, selected_title: selection.title },
+        { user_id: userId, date, category, plan: planWithDuration, selected_title: selection.title },
         { onConflict: "user_id,date" },
       );
 
-    return jsonResponse({ date, category, ...plan });
+    return jsonResponse({ date, category, ...planWithDuration });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const status = msg === "unauthorized" ? 401 : 500;
@@ -226,13 +301,56 @@ Deno.serve(async (req: Request) => {
   }
 });
 
+// DRAFT -- NOT reviewed by a certified S&C professional. Rough NSCA/ACSM-
+// style working-set load bands (fraction of bodyweight) per major lift
+// pattern x experience level. Passed into the prompt as guideline RANGES
+// the model should stay within, not parsed/clamped from its free-text
+// weight_guidance after the fact (that parsing would be unreliable).
+// Needs expert sign-off before shipping, same as templates.ts's own
+// equipment-coverage disclaimer.
+const LOAD_FRACTION_OF_BODYWEIGHT: Record<string, Record<string, [number, number]>> = {
+  squat_pattern: { newbie: [0.3, 0.6], moderate: [0.5, 1.0], advanced: [0.75, 1.5] },
+  hinge_pattern: { newbie: [0.4, 0.7], moderate: [0.6, 1.2], advanced: [0.9, 1.75] },
+  overhead_press: { newbie: [0.15, 0.3], moderate: [0.25, 0.45], advanced: [0.35, 0.6] },
+  horizontal_press: { newbie: [0.25, 0.5], moderate: [0.4, 0.7], advanced: [0.55, 1.0] },
+  row_pull: { newbie: [0.2, 0.4], moderate: [0.35, 0.6], advanced: [0.5, 0.85] },
+};
+
+/// Simple year-diff -- good enough for the general caution language this
+/// feeds (age is passed as context, not a numeric load formula: there's no
+/// citable evidence-based age->load table to encode as fact here).
+function ageFromDOB(dob: string): number {
+  const birth = new Date(dob);
+  const now = new Date();
+  let age = now.getUTCFullYear() - birth.getUTCFullYear();
+  const hasHadBirthdayThisYear = now.getUTCMonth() > birth.getUTCMonth() ||
+    (now.getUTCMonth() === birth.getUTCMonth() && now.getUTCDate() >= birth.getUTCDate());
+  if (!hasHadBirthdayThisYear) age -= 1;
+  return age;
+}
+
+/// Guideline load ranges for today's experience level, as a prompt-ready
+/// paragraph -- omitted entirely when bodyweight is unknown rather than
+/// guessing a number.
+function buildLoadGuidance(weightKg: number | null, experience: string): string {
+  if (weightKg === null) {
+    return "The user's bodyweight isn't on file -- for any barbell/dumbbell/kettlebell working set, use conservative, experience-appropriate language ('start light and build') instead of a specific number.";
+  }
+  const level = LOAD_FRACTION_OF_BODYWEIGHT.squat_pattern[experience] ? experience : "moderate";
+  const range = (pattern: string) => {
+    const [low, high] = LOAD_FRACTION_OF_BODYWEIGHT[pattern][level];
+    return `${(low * weightKg).toFixed(0)}-${(high * weightKg).toFixed(0)}kg`;
+  };
+  return `The user weighs ${weightKg}kg, ${experience} experience. For any working set targeting these patterns, keep weight_guidance's suggested load within these guideline ranges once warmed up (not a strict per-rep ceiling, use professional judgment for warm-ups): squat pattern ${range("squat_pattern")}; hinge pattern (deadlift-style) ${range("hinge_pattern")}; overhead press ${range("overhead_press")}; horizontal press (bench/push-up-with-added-load) ${range("horizontal_press")}; row/pull ${range("row_pull")}.`;
+}
+
 const EXPERIENCE_GUIDANCE: Record<string, string> = {
   newbie:
-    "This user is a newbie. Keep it simple: warm_up plus 2 blocks (no supersets -- every block should have rounds: 1), lower volume (2-3 sets per exercise), longer rest, and instructions that over-explain form and cues a beginner wouldn't already know. Avoid complex movement patterns.",
+    "This user is a newbie. Keep it simple: warm_up plus 2 blocks total, the LAST of which is the required finisher (no supersets in the non-finisher block -- rounds: 1), lower volume (2-3 sets per exercise), longer rest, and instructions that over-explain form and cues a beginner wouldn't already know. Avoid complex movement patterns.",
   moderate:
-    "This user has moderate training experience. Use warm_up plus 2-3 blocks; at most one of those blocks may be a 2-exercise superset (rounds 2-3). Standard rest periods, instructions can assume basic gym literacy (they know what a \"set\" and \"superset\" mean).",
+    "This user has moderate training experience. Use warm_up plus 2-3 blocks total, the LAST of which is the required finisher; among the non-finisher blocks, at most one may be a 2-exercise superset (rounds 2-3). Standard rest periods, instructions can assume basic gym literacy (they know what a \"set\" and \"superset\" mean).",
   advanced:
-    "This user is advanced. Use warm_up plus 3+ blocks, and make real use of the block/superset/finisher structure -- e.g. Block 1 (compound lift), Block 2 (compound lift), a labeled Superset A/B/C pairing accessory movements back-to-back, and a Block 3 - Finisher (short, high-effort closer). Higher volume, shorter rest between superset rounds, and instructions can be terse -- assume they know proper form already and just need the prescription.",
+    "This user is advanced. Use warm_up plus 3+ blocks, and make real use of the block/superset/finisher structure -- e.g. Block 1 (compound lift), Block 2 (compound lift), a labeled Superset A/B/C pairing accessory movements back-to-back, and a final Block - Finisher (short, high-effort closer, scaled per the finisher rule below). Higher volume, shorter rest between superset rounds, and instructions can be terse -- assume they know proper form already and just need the prescription.",
 };
 
 function buildPrompt(
@@ -251,6 +369,9 @@ function buildPrompt(
   const injuryNotes = userRow?.injury_notes ? ` (${userRow.injury_notes})` : "";
   const experience = userRow?.experience_level ?? "moderate";
   const experienceGuidance = EXPERIENCE_GUIDANCE[experience] ?? EXPERIENCE_GUIDANCE.moderate;
+  const loadGuidance = buildLoadGuidance(userRow?.weight_kg ?? null, experience);
+  const ageLine = userRow?.date_of_birth ? `The user is ${ageFromDOB(userRow.date_of_birth)} years old -- use general caution appropriate to their age, but this is context, not a numeric load rule.` : "";
+  const sexLine = userRow?.sex ? `Sex: ${userRow.sex}.` : "";
 
   const healthLines = describeHealthData(snapshots);
 
@@ -273,6 +394,8 @@ User's goals: ${goals}.
 Training experience: ${experience}. ${experienceGuidance}
 Available equipment: ${equipment}.
 Noted injuries: ${injuries}${injuryNotes}.
+${sexLine}${ageLine ? `\n${ageLine}` : ""}
+${loadGuidance}
 
 Recent logged workouts (last 14 days, oldest first) -- use this for progressive overload: if the user has repeated an exercise, suggest a sensible progression (more reps, more weight, or more sets) rather than repeating the exact same prescription. If an exercise is new, prescribe a safe, moderate starting point.
 ${historyLines}
@@ -287,7 +410,7 @@ ${
   }
 Return the full session as:
 - warm_up: 2-3 items that specifically prepare the body for THIS workout and adjust to today's health data above (e.g. lighter/shorter if recovery or sleep was poor) -- concrete named items like "5 min incline treadmill walk", "2x10 arm circles", "shoulder rolls", not a generic "warm up" placeholder.
-- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A", "Block 3 - Finisher") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset) and a rest_between_rounds.
+- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A", "Block 3 - Finisher") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset) and a rest_between_rounds. The LAST block in this array must always be a finisher (name it something like "Block N - Finisher") -- with NO exceptions, even on a low-readiness or short-sleep day. Scale its intensity and duration to today's actual intensity instead of omitting it: on "push_hard" days make it short but hard (1-3 min, RPE 8-10, e.g. a max-effort carry, sprint, or hold); on "moderate" days shorter and less intense (~1-2 min, moderate effort); on "light"/"rest" days very short and gentle (1-2 min, e.g. a held stretch or breathing drill, RPE 2-4 at most). Only its intensity and duration shrink on a harder recovery day -- it must never be left out entirely.
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
 For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, and instructions (2-3 sentences, plain and easy to follow, describing exact form/technique). Also give a one-line "focus" summarizing today's session.`;
@@ -326,12 +449,7 @@ function describeHealthData(snapshots: SnapshotRow[]): string {
   return parts.length > 0 ? parts.join("; ") : "Wearable connected but no metrics reported today.";
 }
 
-async function callClaude(prompt: string): Promise<{
-  focus: string;
-  warm_up: unknown[];
-  blocks: unknown[];
-  cool_down: unknown[];
-}> {
+async function callClaude(prompt: string): Promise<WorkoutPlanResult> {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",

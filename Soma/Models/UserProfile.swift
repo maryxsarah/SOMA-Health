@@ -63,6 +63,11 @@ struct UserProfile: Codable, Equatable {
     /// Self-reported only, never assumed -- one of the deterministic
     /// safety-guardrail triggers for the gym-photo-workout feature.
     var pregnancy: Bool?
+    /// Storage paths (not the image itself), behind Config.enableBodyPhotoUpload
+    /// -- managed only via SupabaseClient's uploadBodyPhoto/deleteBodyPhoto,
+    /// not through the general profile save() flow, hence the defaults.
+    var goalBodyPhotoPath: String? = nil
+    var currentBodyPhotoPath: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
@@ -74,6 +79,8 @@ struct UserProfile: Codable, Equatable {
         case injuryNotes = "injury_notes"
         case experienceLevel = "experience_level"
         case pregnancy
+        case goalBodyPhotoPath = "goal_body_photo_path"
+        case currentBodyPhotoPath = "current_body_photo_path"
     }
 
     static let empty = UserProfile(
@@ -85,6 +92,8 @@ struct UserProfile: Codable, Equatable {
         injuryTags: [],
         injuryNotes: nil,
         experienceLevel: nil,
-        pregnancy: nil
+        pregnancy: nil,
+        goalBodyPhotoPath: nil,
+        currentBodyPhotoPath: nil
     )
 }

@@ -11,10 +11,11 @@ struct RecommendationDetailView: View {
     @State private var averageSteps: Double?
     @State private var profile: UserProfile = .empty
     @State private var loggedTitlesToday: Set<String> = []
-    @State private var yesterdayBodyParts: Set<BodyPartFocus> = []
+    @State private var recentBodyPartCounts: [BodyPartFocus: Int] = [:]
     @State private var shuffleSeed: UInt64 = 0
     @State private var selectedTitle: String?
     @State private var selectedBodyPart: String?
+    @State private var selectedDurationRange: ClosedRange<Int>?
     @State private var preGenerationNotes = ""
     @State private var aiPlan: AIWorkoutPlan?
     @State private var isLoadingAIPlan = false
@@ -25,7 +26,16 @@ struct RecommendationDetailView: View {
     @State private var addonSuggestions: [String] = []
     @State private var isFetchingAddons = false
 
-    @State private var showingGymPhotoFlow = false
+    /// Lets HomeView hand off an already-generated gym-photo plan so it
+    /// shows up here immediately -- the "Take a Picture of Your Gym" entry
+    /// point now lives on Home (not here), so this is the only way a
+    /// gym-photo result reaches this view.
+    init(recommendation: DailyRecommendation, seededPlan: AIWorkoutPlan? = nil, seededTitle: String? = nil, seededBodyPart: String? = nil) {
+        self.recommendation = recommendation
+        _aiPlan = State(initialValue: seededPlan)
+        _selectedTitle = State(initialValue: seededTitle)
+        _selectedBodyPart = State(initialValue: seededBodyPart)
+    }
 
     /// True once the user has explicitly logged today's workout as done
     /// (via "Mark Workout Complete") -- generating/viewing an AI plan does
@@ -76,13 +86,6 @@ struct RecommendationDetailView: View {
                     ForEach(filteredWorkoutSuggestions) { suggestion in
                         workoutRow(suggestion)
                     }
-                    Button {
-                        showingGymPhotoFlow = true
-                    } label: {
-                        Label("Or scan your gym →", systemImage: "camera.fill")
-                            .font(.caption.bold())
-                    }
-                    .padding(.top, 6)
                 }
 
                 CardView {
@@ -213,19 +216,6 @@ struct RecommendationDetailView: View {
         .task {
             await loadContext()
         }
-        .sheet(isPresented: $showingGymPhotoFlow) {
-            // A gym-photo-generated workout is handed straight into the
-            // same aiPlan/selectedTitle/selectedBodyPart state the normal
-            // "Generate AI Workout" flow uses, so it shows up in the
-            // AI-generated workout card above exactly like any other
-            // generation -- no separate display path to keep in sync.
-            GymPhotoWorkoutView(date: recommendation.date) { plan, title, bodyPart in
-                aiPlan = plan
-                selectedTitle = title
-                selectedBodyPart = bodyPart
-                aiPlanError = nil
-            }
-        }
     }
 
     private var explanationText: String {
@@ -255,12 +245,21 @@ struct RecommendationDetailView: View {
         return Button {
             selectedTitle = suggestion.title
             selectedBodyPart = suggestion.bodyPart.rawValue
+            selectedDurationRange = suggestion.targetDurationMinutes
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                     .foregroundStyle(isSelected ? Theme.pillFill : .secondary)
                     .font(.body)
                 VStack(alignment: .leading, spacing: 2) {
+                    if suggestion.id == filteredWorkoutSuggestions.first?.id {
+                        Text("SOMA TOP RECOMMENDATION")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Theme.pillFill))
+                    }
                     Text(suggestion.title)
                         .font(.subheadline)
                     Text(suggestion.bodyPart.displayName)
@@ -278,13 +277,16 @@ struct RecommendationDetailView: View {
 
     /// Filters the fixed candidate list down to what the user's saved
     /// equipment/injuries actually support, prioritizes matches for their
-    /// saved goals, then deprioritizes (not removes) any body part already
-    /// logged yesterday -- avoids stacking the same muscle group two days
-    /// running. "Try another" reshuffles within what's left via a seeded
-    /// shuffle, so repeated taps give a different order deterministically
-    /// rather than a fresh random flicker each render. Never returns an
-    /// empty list -- falls back to the unfiltered set if filtering would
-    /// otherwise leave nothing to show.
+    /// saved goals, then deprioritizes (not removes) whichever body parts
+    /// have been trained most in the last 7 days -- avoids stacking the
+    /// same muscle group repeatedly across the week, not just avoiding an
+    /// exact repeat of yesterday. "Try another" reshuffles within what's
+    /// left via a seeded shuffle, so repeated taps give a different order
+    /// deterministically rather than a fresh random flicker each render.
+    /// Never returns an empty list -- falls back to the unfiltered set if
+    /// filtering would otherwise leave nothing to show. The first item in
+    /// this ranked order is shown as "SOMA Top Recommendation" in
+    /// `workoutRow`.
     private var filteredWorkoutSuggestions: [WorkoutSuggestion] {
         let all = recommendation.category.workoutSuggestions
         let hasInjury = !profile.injuryTags.isEmpty
@@ -307,16 +309,17 @@ struct RecommendationDetailView: View {
 
         let goalSet = Set(profile.goals)
         // Stable sort: matching-goal suggestions float to the top, then
-        // yesterday's body parts sink to the bottom (repeat, not remove --
+        // whichever body part has been trained less recently/frequently
+        // this week floats above one trained more (repeat, not remove --
         // still selectable if the user actually wants to repeat a lift).
         return candidates.sorted { lhs, rhs in
             let lhsGoalMatch = !lhs.goals.isDisjoint(with: goalSet)
             let rhsGoalMatch = !rhs.goals.isDisjoint(with: goalSet)
             if lhsGoalMatch != rhsGoalMatch { return lhsGoalMatch && !rhsGoalMatch }
 
-            let lhsRepeatsYesterday = yesterdayBodyParts.contains(lhs.bodyPart)
-            let rhsRepeatsYesterday = yesterdayBodyParts.contains(rhs.bodyPart)
-            return !lhsRepeatsYesterday && rhsRepeatsYesterday
+            let lhsCount = recentBodyPartCounts[lhs.bodyPart] ?? 0
+            let rhsCount = recentBodyPartCounts[rhs.bodyPart] ?? 0
+            return lhsCount < rhsCount
         }
     }
 
@@ -342,11 +345,14 @@ struct RecommendationDetailView: View {
                 date: recommendation.date,
                 selectedTitle: selectedTitle,
                 selectedBodyPart: selectedBodyPart,
-                notes: trimmedNotes.isEmpty ? nil : trimmedNotes
+                notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+                targetDurationMinutes: selectedDurationRange
             )
         } catch SupabaseError.safetyBlocked(let message) {
             // Shown verbatim. A generic "try again in a moment" would be a
             // lie -- retrying cannot help, and the user would keep tapping.
+            aiPlanError = message
+        } catch SupabaseError.workoutLocked(let message) {
             aiPlanError = message
         } catch {
             aiPlanError = "Couldn't generate a plan right now. Try again in a moment."
@@ -397,14 +403,18 @@ struct RecommendationDetailView: View {
         async let stepsFetch: Double? = HealthKitManager.isAvailable ? await HealthKitManager.shared.fetchRecentAverageSteps() : nil
         async let profileFetch = fetchProfileSafely()
         async let todaysLogsFetch: [WorkoutLogEntry] = (try? await SupabaseClient.shared.fetchWorkoutLogs(date: recommendation.date)) ?? []
-        async let yesterdaysLogsFetch: [WorkoutLogEntry] = (try? await SupabaseClient.shared.fetchWorkoutLogs(date: Self.yesterday(of: recommendation.date))) ?? []
+        async let recentLogsFetch: [WorkoutLogEntry] = (try? await SupabaseClient.shared.fetchWorkoutLogs(
+            fromDate: Self.daysBefore(6, of: recommendation.date),
+            toDate: Self.daysBefore(1, of: recommendation.date)
+        )) ?? []
 
         snapshots = await snapshotFetch ?? []
         averageSteps = await stepsFetch
         profile = await profileFetch
         let todaysLogs = await todaysLogsFetch
         loggedTitlesToday = Set(todaysLogs.map(\.title))
-        yesterdayBodyParts = Set(await yesterdaysLogsFetch.compactMap { BodyPartFocus(rawValue: $0.bodyPart) })
+        recentBodyPartCounts = await recentLogsFetch.compactMap { BodyPartFocus(rawValue: $0.bodyPart) }
+            .reduce(into: [:]) { counts, bodyPart in counts[bodyPart, default: 0] += 1 }
 
         // Already logged today (e.g. reopening the sheet) -- restore the
         // choice and pull the cached plan rather than leaving the picker
@@ -421,15 +431,15 @@ struct RecommendationDetailView: View {
         return (try? await SupabaseClient.shared.fetchProfile(id: userId)) ?? .empty
     }
 
-    private static func yesterday(of dateString: String) -> String {
+    private static func daysBefore(_ days: Int, of dateString: String) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = .current
         guard let date = formatter.date(from: dateString),
-              let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: date) else {
+              let earlier = Calendar.current.date(byAdding: .day, value: -days, to: date) else {
             return dateString
         }
-        return formatter.string(from: yesterday)
+        return formatter.string(from: earlier)
     }
 }
 

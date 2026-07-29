@@ -156,7 +156,7 @@ final class SupabaseClient {
 
     /// Plain read via RLS -- used by ProfileView on appear.
     func fetchProfile(id: String) async throws -> UserProfile {
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_notes,experience_level,pregnancy&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_notes,experience_level,pregnancy,goal_body_photo_path,current_body_photo_path&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -233,6 +233,69 @@ final class SupabaseClient {
         return plain.date(from: string)
     }
 
+    // MARK: - Body photos (feature-flagged, see Config.enableBodyPhotoUpload)
+
+    enum BodyPhotoKind: String {
+        case goal = "goal-body"
+        case current = "current-body"
+    }
+
+    /// Fixed filename per kind -- a new upload overwrites via x-upsert,
+    /// nothing to clean up. Uses Storage's binary-body endpoint directly
+    /// rather than `authorizedRequest` (which hardcodes
+    /// Content-Type: application/json).
+    func uploadBodyPhoto(kind: BodyPhotoKind, imageData: Data) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let path = "\(userId)/\(kind.rawValue).jpg"
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1/object/body-photos/\(path)")!)
+        request.httpMethod = "POST"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("true", forHTTPHeaderField: "x-upsert")
+        request.httpBody = imageData
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        let column = kind == .goal ? "goal_body_photo_path" : "current_body_photo_path"
+        var upsertRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        upsertRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        upsertRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, column: path])
+        let (d2, r2) = try await urlSession.data(for: upsertRequest)
+        try Self.assertSuccess(r2, data: d2)
+    }
+
+    /// The bucket is private, so viewing a stored photo needs a short-lived
+    /// signed URL rather than a plain public one.
+    func signedBodyPhotoURL(path: String, expiresInSeconds: Int = 3600) async throws -> URL {
+        var request = try await authorizedRequest(path: "storage/v1/object/sign/body-photos/\(path)", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["expiresIn": expiresInSeconds])
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Response: Decodable { let signedURL: String }
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        guard let url = URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1\(decoded.signedURL)") else {
+            throw SupabaseError.requestFailed(status: 0, message: "Invalid signed URL in response")
+        }
+        return url
+    }
+
+    func deleteBodyPhoto(kind: BodyPhotoKind) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let path = "\(userId)/\(kind.rawValue).jpg"
+        let request = try await authorizedRequest(path: "storage/v1/object/body-photos/\(path)", method: "DELETE")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        let column = kind == .goal ? "goal_body_photo_path" : "current_body_photo_path"
+        var clearRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        clearRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        clearRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, column: NSNull()])
+        let (d2, r2) = try await urlSession.data(for: clearRequest)
+        try Self.assertSuccess(r2, data: d2)
+    }
+
     // MARK: - daily_recommendation
 
     /// Plain read via RLS -- used by HomeView on appear so opening the app
@@ -271,7 +334,17 @@ final class SupabaseClient {
     /// Plain read via RLS -- used by RecommendationDetailView to pull the
     /// real metric value for RecommendationReason's explanation templates.
     func fetchTodaysSnapshots(date: String) async throws -> [DailySnapshotRow] {
-        let path = "rest/v1/daily_snapshot?date=eq.\(date)&select=source,recovery_score,readiness_score,hrv_ms,sleep_hours,resting_hr"
+        let path = "rest/v1/daily_snapshot?date=eq.\(date)&select=source,recovery_score,readiness_score,hrv_ms,sleep_hours,resting_hr,strain_score,stress_score"
+        var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([DailySnapshotRow].self, from: data)
+    }
+
+    /// Feeds HealthDashboardView's trend section -- same columns as
+    /// fetchTodaysSnapshots plus `date`, over a range instead of one day.
+    func fetchSnapshots(fromDate: String, toDate: String) async throws -> [DailySnapshotRow] {
+        let path = "rest/v1/daily_snapshot?date=gte.\(fromDate)&date=lte.\(toDate)&select=date,source,recovery_score,readiness_score,hrv_ms,sleep_hours,resting_hr,strain_score,stress_score&order=date.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -312,6 +385,17 @@ final class SupabaseClient {
     /// DayDetailView (calendar day drill-down).
     func fetchWorkoutLogs(date: String) async throws -> [WorkoutLogEntry] {
         let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback&order=completed_at.asc"
+        var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([WorkoutLogEntry].self, from: data)
+    }
+
+    /// Same shape as the single-date read above, over a range -- feeds
+    /// TrainingHistoryView's 30-day list and RecommendationDetailView's
+    /// 7-day body-part balancing.
+    func fetchWorkoutLogs(fromDate: String, toDate: String) async throws -> [WorkoutLogEntry] {
+        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback&order=date.desc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -495,13 +579,16 @@ final class SupabaseClient {
     /// `notes` is optional freeform text the user typed right after
     /// checking a workout (e.g. "sore shoulder today") -- folded into the
     /// generation prompt for this call only, not persisted.
-    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, notes: String? = nil) async throws -> AIWorkoutPlan {
+    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, notes: String? = nil, targetDurationMinutes: ClosedRange<Int>? = nil) async throws -> AIWorkoutPlan {
         var request = try await authorizedRequest(path: "functions/v1/generate-workout-plan", method: "POST")
         var body: [String: Any] = [
             "date": date,
             "selection": ["title": selectedTitle, "bodyPart": selectedBodyPart],
         ]
         if let notes { body["notes"] = notes }
+        if let targetDurationMinutes {
+            body["targetDurationRange"] = ["min": targetDurationMinutes.lowerBound, "max": targetDurationMinutes.upperBound]
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
@@ -516,6 +603,10 @@ final class SupabaseClient {
             throw SupabaseError.safetyBlocked(
                 message: safety.message ?? "Please check with a healthcare professional before starting a new workout."
             )
+        }
+        struct LockedResponse: Decodable { let locked: Bool; let message: String? }
+        if let locked = try? JSONDecoder().decode(LockedResponse.self, from: data), locked.locked {
+            throw SupabaseError.workoutLocked(message: locked.message ?? "Today's workout is already logged.")
         }
         return try JSONDecoder().decode(AIWorkoutPlan.self, from: data)
     }
@@ -553,6 +644,10 @@ final class SupabaseClient {
         struct SafetyResponse: Decodable { let safety_flag: Bool; let message: String? }
         if let safety = try? JSONDecoder().decode(SafetyResponse.self, from: data), safety.safety_flag {
             return .safetyBlocked(message: safety.message ?? "Please check with a healthcare professional before starting a new workout.")
+        }
+        struct LockedResponse: Decodable { let locked: Bool; let message: String? }
+        if let locked = try? JSONDecoder().decode(LockedResponse.self, from: data), locked.locked {
+            throw SupabaseError.workoutLocked(message: locked.message ?? "Today's workout is already logged.")
         }
         struct TitleDTO: Decodable { let title: String; let bodyPart: String }
         let titleInfo = try JSONDecoder().decode(TitleDTO.self, from: data)
@@ -657,12 +752,18 @@ enum SupabaseError: LocalizedError {
     /// authored server-side and shown verbatim -- never reworded here, and
     /// never made specific about which condition triggered it.
     case safetyBlocked(message: String)
+    /// Today's workout is already logged -- the server refused to generate
+    /// or replace the plan rather than silently overwriting what's shown
+    /// for an already-completed day.
+    case workoutLocked(message: String)
 
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
             return "Not signed in."
         case .safetyBlocked(let message):
+            return message
+        case .workoutLocked(let message):
             return message
         case .requestFailed(let status, let message):
             return "Request failed (\(status)): \(message)"

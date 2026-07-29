@@ -4,6 +4,14 @@
 // generation task, per the product requirement that this step stay
 // deterministic. Analogous in spirit to the Swift-side
 // RecommendationCategory.workoutSuggestions fixed catalog.
+//
+// Finisher coverage added 2026-07-29: every template now ends in a
+// "Finisher" block (previously 13 of 20 had none, so a session could
+// silently ship with no finisher at all). Each new finisher uses only that
+// template's own requiredEquipment and is scaled to its category (rest/light
+// = gentle, ~1-2 min; moderate = moderate effort, ~1-2 min; push_hard =
+// short-but-hard, RPE 8-10). DRAFTED, NOT EXPERT-REVIEWED -- same caveat as
+// the equipment-coverage additions below.
 
 import { normalizeEquipment } from "../_shared/equipment.ts";
 
@@ -110,6 +118,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Walking lunge with reach", sets: 1, reps: "8 each leg", weight_guidance: "bodyweight", intensity: "easy", duration_minutes: 4, target_area: "Quads, glutes, hip flexors" },
         ],
       },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Supported child's pose with deep breathing", sets: 1, reps: "90 sec", weight_guidance: "N/A", intensity: "RPE 2/10", duration_minutes: 2, target_area: "Nervous system, lower back -- brings heart rate down" },
+        ],
+      },
     ],
     cool_down: COOL_DOWN,
   },
@@ -136,6 +152,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Glute bridge", sets: 1, reps: "15", weight_guidance: "bodyweight", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Glutes, hamstrings" },
         ],
       },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Plank hold", sets: 1, reps: "30-45 sec", weight_guidance: "bodyweight", intensity: "RPE 5/10", duration_minutes: 1, target_area: "Core" },
+        ],
+      },
     ],
     cool_down: COOL_DOWN,
   },
@@ -158,6 +182,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Dumbbell goblet squat", sets: 1, reps: "12", weight_guidance: "light, 2x8-12kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Quads, glutes, core" },
           { name: "Dumbbell shoulder press", sets: 1, reps: "10", weight_guidance: "light, 2x5-8kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Shoulders, triceps" },
           { name: "Dumbbell row", sets: 1, reps: "12 each side", weight_guidance: "light, 1x8-12kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Back, biceps" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Dumbbell farmer's hold", sets: 1, reps: "45 sec", weight_guidance: "light, 2x8-12kg", intensity: "RPE 5/10", duration_minutes: 1, target_area: "Grip, core" },
         ],
       },
     ],
@@ -222,6 +254,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rest_between_rounds: "90 sec",
         exercises: [
           { name: "Barbell bench press", sets: 3, reps: "8", weight_guidance: "moderate -- last rep should feel like RPE 7", intensity: "RPE 7/10", duration_minutes: 10, target_area: "Chest, shoulders, triceps" },
+        ],
+      },
+      {
+        name: "Block 3 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Barbell front-rack hold", sets: 1, reps: "30 sec", weight_guidance: "light -- the bar should feel manageable, not maximal", intensity: "RPE 6/10", duration_minutes: 1, target_area: "Core, upper back, shoulders" },
         ],
       },
     ],
@@ -338,6 +378,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Foam roll glutes", sets: 1, reps: "60 sec each side", weight_guidance: "N/A", intensity: "easy", duration_minutes: 3, target_area: "Glutes" },
         ],
       },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Foam roll + deep breathing", sets: 1, reps: "90 sec", weight_guidance: "N/A", intensity: "RPE 2/10", duration_minutes: 2, target_area: "Nervous system -- brings heart rate down" },
+        ],
+      },
     ],
     cool_down: COOL_DOWN,
   },
@@ -364,6 +412,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Kettlebell goblet squat", sets: 1, reps: "10", weight_guidance: "light, 1x12-16kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Quads, glutes, core" },
         ],
       },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Kettlebell suitcase hold", sets: 1, reps: "45 sec each side", weight_guidance: "light, 1x12-16kg", intensity: "RPE 5/10", duration_minutes: 2, target_area: "Grip, obliques, core" },
+        ],
+      },
     ],
     cool_down: COOL_DOWN,
   },
@@ -388,6 +444,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Banded row", sets: 1, reps: "15", weight_guidance: "medium band", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Back, biceps" },
         ],
       },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Banded plank pull-apart", sets: 1, reps: "45 sec", weight_guidance: "light band", intensity: "RPE 5/10", duration_minutes: 1, target_area: "Core, rear delts" },
+        ],
+      },
     ],
     cool_down: COOL_DOWN,
   },
@@ -408,6 +472,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rest_between_rounds: "N/A",
         exercises: [
           { name: "Steady-state cycling", sets: 1, reps: "20 min", weight_guidance: "light resistance -- you should be able to hold a conversation", intensity: "RPE 4/10", duration_minutes: 20, target_area: "Legs, cardiovascular system" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Slightly-faster spin", sets: 1, reps: "1 min", weight_guidance: "light-moderate resistance -- a bit quicker than the steady pace above", intensity: "RPE 5/10", duration_minutes: 1, target_area: "Legs, cardiovascular system" },
         ],
       },
     ],
@@ -444,6 +516,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Dumbbell lateral raise", sets: 1, reps: "12", weight_guidance: "light, 2x4-8kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Side delts" },
         ],
       },
+      {
+        name: "Block 3 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Dumbbell farmer's carry", sets: 1, reps: "40m", weight_guidance: "moderate, 2x12-20kg", intensity: "RPE 7/10", duration_minutes: 1, target_area: "Grip, core, traps" },
+        ],
+      },
     ],
     cool_down: COOL_DOWN,
   },
@@ -466,6 +546,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Kettlebell swing", sets: 1, reps: "15", weight_guidance: "moderate, 1x16-24kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Glutes, hamstrings, core" },
           { name: "Kettlebell front squat", sets: 1, reps: "10", weight_guidance: "moderate, 1x16-20kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Quads, glutes, core" },
           { name: "Kettlebell single-arm row", sets: 1, reps: "10 each side", weight_guidance: "moderate, 1x16-24kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Back, biceps" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Kettlebell rack hold", sets: 1, reps: "45-60 sec", weight_guidance: "moderate, 1x16-20kg", intensity: "RPE 7/10", duration_minutes: 1, target_area: "Core, shoulders, grip" },
         ],
       },
     ],
@@ -492,6 +580,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Cable woodchop", sets: 1, reps: "10 each side", weight_guidance: "light-moderate", intensity: "RPE 6/10", duration_minutes: 3, target_area: "Obliques, core" },
         ],
       },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Cable anti-rotation hold", sets: 1, reps: "45 sec each side", weight_guidance: "light", intensity: "RPE 6/10", duration_minutes: 2, target_area: "Core, obliques" },
+        ],
+      },
     ],
     cool_down: COOL_DOWN,
   },
@@ -514,6 +610,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
           { name: "Pull-up or assisted pull-up", sets: 1, reps: "5-8", weight_guidance: "bodyweight -- use a band or your feet on the floor if needed", intensity: "RPE 7/10", duration_minutes: 4, target_area: "Back, biceps" },
           { name: "Hanging knee raise", sets: 1, reps: "10", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Lower abs, hip flexors" },
           { name: "Push-up", sets: 1, reps: "12", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Chest, shoulders, triceps" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Dead-hang", sets: 1, reps: "20-30 sec", weight_guidance: "bodyweight", intensity: "RPE 6/10", duration_minutes: 1, target_area: "Grip, shoulders, lats" },
         ],
       },
     ],
@@ -608,6 +712,14 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rest_between_rounds: "90 sec easy paddle",
         exercises: [
           { name: "Rowing interval", sets: 1, reps: "250m hard", weight_guidance: "damper 5-6 -- pace you can just hold for all 6 rounds", intensity: "RPE 9/10", duration_minutes: 3, target_area: "Full body -- legs, back, cardiovascular system" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "All-out row sprint", sets: 1, reps: "60-90 sec max effort", weight_guidance: "damper 7-8", intensity: "RPE 10/10", duration_minutes: 2, target_area: "Full body -- legs, back, cardiovascular system" },
         ],
       },
     ],

@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// Editable profile: contact email (display-only, never a login credential
@@ -39,6 +40,19 @@ struct ProfileView: View {
     @State private var deviceErrorMessage: String?
 
     @State private var showSignOutConfirmation = false
+    @State private var showTrainingHistory = false
+    @State private var showHealthDashboard = false
+
+    // Body photos -- gated by Config.enableBodyPhotoUpload, see the
+    // "Goal & Current Photos" card below.
+    @State private var goalBodyPhotoPath: String?
+    @State private var currentBodyPhotoPath: String?
+    @State private var goalBodyPhotoImage: UIImage?
+    @State private var currentBodyPhotoImage: UIImage?
+    @State private var goalPhotoItem: PhotosPickerItem?
+    @State private var currentPhotoItem: PhotosPickerItem?
+    @State private var isUploadingGoalPhoto = false
+    @State private var isUploadingCurrentPhoto = false
 
     var body: some View {
         ScrollView {
@@ -166,6 +180,32 @@ struct ProfileView: View {
                     }
                 }
 
+                if Config.enableBodyPhotoUpload {
+                    CardView {
+                        Text("Goal & Current Photos")
+                            .font(.body.bold())
+                        Text("Optional -- helps personalize your plan toward your goal.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 16) {
+                            bodyPhotoSlot(
+                                title: "Goal body",
+                                image: goalBodyPhotoImage,
+                                isUploading: isUploadingGoalPhoto,
+                                selection: $goalPhotoItem,
+                                onRemove: { Task { await removeBodyPhoto(kind: .goal) } }
+                            )
+                            bodyPhotoSlot(
+                                title: "Current body",
+                                image: currentBodyPhotoImage,
+                                isUploading: isUploadingCurrentPhoto,
+                                selection: $currentPhotoItem,
+                                onRemove: { Task { await removeBodyPhoto(kind: .current) } }
+                            )
+                        }
+                    }
+                }
+
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
@@ -178,6 +218,17 @@ struct ProfileView: View {
                 }
 
                 PillButton(title: "Save Profile", isEnabled: !isSaving, action: save)
+
+                CardView {
+                    Text("Insights")
+                        .font(.body.bold())
+                    PillButton(title: "Training History") {
+                        showTrainingHistory = true
+                    }
+                    PillButton(title: "Health Dashboard") {
+                        showHealthDashboard = true
+                    }
+                }
 
                 // The only place to subscribe on purpose. Both other
                 // paywall presentations are gates that dismiss themselves
@@ -214,8 +265,20 @@ struct ProfileView: View {
             // must not close itself just because a bonus is running.
             PaywallView(autoDismissIfBonusActive: false)
         }
+        .sheet(isPresented: $showTrainingHistory) {
+            TrainingHistoryView()
+        }
+        .sheet(isPresented: $showHealthDashboard) {
+            HealthDashboardView()
+        }
         .task {
             await load()
+        }
+        .onChange(of: goalPhotoItem) { _, newItem in
+            Task { await uploadBodyPhoto(kind: .goal, item: newItem) }
+        }
+        .onChange(of: currentPhotoItem) { _, newItem in
+            Task { await uploadBodyPhoto(kind: .current, item: newItem) }
         }
         .confirmationDialog(
             "Log out of Soma?",
@@ -288,6 +351,85 @@ struct ProfileView: View {
         injuryNotesText = profile.injuryNotes ?? ""
         experienceLevel = profile.experienceLevel
         pregnancy = profile.pregnancy
+
+        goalBodyPhotoPath = profile.goalBodyPhotoPath
+        currentBodyPhotoPath = profile.currentBodyPhotoPath
+        if Config.enableBodyPhotoUpload {
+            if let path = profile.goalBodyPhotoPath {
+                goalBodyPhotoImage = await loadBodyPhoto(path: path)
+            }
+            if let path = profile.currentBodyPhotoPath {
+                currentBodyPhotoImage = await loadBodyPhoto(path: path)
+            }
+        }
+    }
+
+    private func loadBodyPhoto(path: String) async -> UIImage? {
+        guard let url = try? await SupabaseClient.shared.signedBodyPhotoURL(path: path),
+              let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        return UIImage(data: data)
+    }
+
+    private func bodyPhotoSlot(title: String, image: UIImage?, isUploading: Bool, selection: Binding<PhotosPickerItem?>, onRemove: @escaping () -> Void) -> some View {
+        VStack(spacing: 8) {
+            PhotosPicker(selection: selection, matching: .images) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.systemGray6))
+                        .frame(height: 140)
+                    if let image {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(height: 140)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    } else if isUploading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "plus")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if image != nil {
+                Button("Remove photo", role: .destructive, action: onRemove)
+                    .font(.caption)
+            }
+        }
+    }
+
+    private func uploadBodyPhoto(kind: SupabaseClient.BodyPhotoKind, item: PhotosPickerItem?) async {
+        guard let item, let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
+        guard let compressed = ImageCompression.jpeg(image) else {
+            errorMessage = "Couldn't process that photo. Try another one."
+            return
+        }
+
+        if kind == .goal { isUploadingGoalPhoto = true } else { isUploadingCurrentPhoto = true }
+        defer {
+            if kind == .goal { isUploadingGoalPhoto = false } else { isUploadingCurrentPhoto = false }
+        }
+
+        do {
+            try await SupabaseClient.shared.uploadBodyPhoto(kind: kind, imageData: compressed)
+            if kind == .goal { goalBodyPhotoImage = image } else { currentBodyPhotoImage = image }
+        } catch {
+            errorMessage = "Couldn't upload that photo. Try again."
+        }
+    }
+
+    private func removeBodyPhoto(kind: SupabaseClient.BodyPhotoKind) async {
+        do {
+            try await SupabaseClient.shared.deleteBodyPhoto(kind: kind)
+            if kind == .goal { goalBodyPhotoImage = nil } else { currentBodyPhotoImage = nil }
+        } catch {
+            errorMessage = "Couldn't remove that photo. Try again."
+        }
     }
 
     private func save() {

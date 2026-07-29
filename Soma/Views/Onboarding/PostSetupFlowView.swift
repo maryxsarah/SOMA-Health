@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum PostSetupStep: Int {
-    case referralCode, loading, planSummary, consent, tryFree, trialReminder, paywall
+    case referralCode, loading, planSummary, bodyPhotos, consent, tryFree, trialReminder, paywall
 }
 
 /// Runs everything after Notification Enablement and before Home:
@@ -31,6 +31,8 @@ struct PostSetupFlowView: View {
                 GeneratingPlanStepView(onFinished: advance)
             case .planSummary:
                 PlanSummaryStepView(onContinue: advance)
+            case .bodyPhotos:
+                BodyPhotosStepView(onContinue: advance)
             case .consent:
                 SignUpConsentStepView { marketingOptIn in
                     Task { await saveConsent(marketingOptIn: marketingOptIn) }
@@ -59,7 +61,13 @@ struct PostSetupFlowView: View {
     }
 
     private func advance() {
-        if let next = PostSetupStep(rawValue: step.rawValue + 1) {
+        var nextRaw = step.rawValue + 1
+        // Skipped entirely while the feature flag is off, so behavior stays
+        // byte-for-byte identical to before this step existed.
+        if PostSetupStep(rawValue: nextRaw) == .bodyPhotos, !Config.enableBodyPhotoUpload {
+            nextRaw += 1
+        }
+        if let next = PostSetupStep(rawValue: nextRaw) {
             step = next
         } else {
             appState.markOnboardingComplete()

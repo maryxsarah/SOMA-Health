@@ -54,10 +54,16 @@ struct AIWorkoutPlan: Codable {
     let warmUp: [AIExercise]
     let blocks: [AIWorkoutBlock]
     let coolDown: [AIExercise]
+    /// Server-computed sum of every exercise's duration_minutes (plus rest
+    /// between rounds) -- the real total, shown instead of trusting a
+    /// static suggestion-list label that may not match what was actually
+    /// generated.
+    let actualDurationMinutes: Int?
 
     enum CodingKeys: String, CodingKey {
         case date, category, focus, blocks
         case warmUp = "warm_up"
         case coolDown = "cool_down"
+        case actualDurationMinutes = "actual_duration_minutes"
     }
 }
