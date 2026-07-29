@@ -26,6 +26,12 @@ struct RecommendationDetailView: View {
     @State private var addonSuggestions: [String] = []
     @State private var isFetchingAddons = false
 
+    @State private var injuryStates: [InjuryRecoveryState] = []
+    // Tags checked in during THIS view session -- hides the row immediately
+    // without waiting on a re-fetch of injuryStates.
+    @State private var checkedInTagsToday: Set<String> = []
+    @State private var injuryCheckinMessage: String?
+
     /// Lets HomeView hand off an already-generated gym-photo plan so it
     /// shows up here immediately -- the "Take a Picture of Your Gym" entry
     /// point now lives on Home (not here), so this is the only way a
@@ -192,6 +198,16 @@ struct RecommendationDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
+                    if recommendation.consecutiveDaysCapApplied {
+                        Text("Note: you've trained 5+ days in a row, so today is active recovery -- light movement only, even though recovery looked strong.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if recommendation.injuryProtocolCapApplied {
+                        Text("Note: today's intensity was capped to light because of an active severe-injury recovery protocol, even though recovery looked strong.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     // Says out loud when the read is thin. Without this a run
                     // of identical days is indistinguishable from the app
                     // being broken -- which is exactly how testers read it.
@@ -199,6 +215,22 @@ struct RecommendationDetailView: View {
                         Text(caveat)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !openInjuryCheckins.isEmpty {
+                    CardView {
+                        Text("Injury check-in")
+                            .font(.body.bold())
+                        ForEach(openInjuryCheckins) { state in
+                            injuryCheckinRow(state)
+                        }
+                        if let injuryCheckinMessage {
+                            Text(injuryCheckinMessage)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .padding(.top, 4)
+                        }
                     }
                 }
 
@@ -226,7 +258,7 @@ struct RecommendationDetailView: View {
         case .ouraHigh, .ouraMediumHigh, .ouraMedium, .ouraLow:
             let value = snapshots.first(where: { $0.source == "oura" })?.readinessScore
             return String(format: recommendation.reason.explanationTemplate, formattedNumber(value))
-        case .healthkitHigh, .healthkitMedium, .healthkitLow, .unknown:
+        case .healthkitHigh, .healthkitMedium, .healthkitLow, .insufficientData, .unknown:
             return recommendation.reason.explanationTemplate
         }
     }
@@ -374,7 +406,8 @@ struct RecommendationDetailView: View {
                 title: selectedTitle,
                 bodyPart: selectedBodyPart,
                 category: recommendation.category.rawValue,
-                feedback: trimmedFeedback.isEmpty ? nil : trimmedFeedback
+                feedback: trimmedFeedback.isEmpty ? nil : trimmedFeedback,
+                planSnapshot: aiPlan
             )
             loggedTitlesToday.insert(selectedTitle)
             if !trimmedFeedback.isEmpty {
@@ -407,10 +440,12 @@ struct RecommendationDetailView: View {
             fromDate: Self.daysBefore(6, of: recommendation.date),
             toDate: Self.daysBefore(1, of: recommendation.date)
         )) ?? []
+        async let injuryStatesFetch: [InjuryRecoveryState] = (try? await SupabaseClient.shared.fetchInjuryRecoveryStates()) ?? []
 
         snapshots = await snapshotFetch ?? []
         averageSteps = await stepsFetch
         profile = await profileFetch
+        injuryStates = await injuryStatesFetch
         let todaysLogs = await todaysLogsFetch
         loggedTitlesToday = Set(todaysLogs.map(\.title))
         recentBodyPartCounts = await recentLogsFetch.compactMap { BodyPartFocus(rawValue: $0.bodyPart) }
@@ -423,6 +458,43 @@ struct RecommendationDetailView: View {
             selectedTitle = alreadyLogged.title
             selectedBodyPart = alreadyLogged.bodyPart
             await loadAIPlan()
+        }
+    }
+
+    /// Active/recovering injury protocols that haven't been checked in on
+    /// today yet -- shown once per tag per day.
+    private var openInjuryCheckins: [InjuryRecoveryState] {
+        injuryStates.filter {
+            !$0.hasCheckedInToday(recommendation.date) && !checkedInTagsToday.contains($0.injuryTag)
+        }
+    }
+
+    private func injuryCheckinRow(_ state: InjuryRecoveryState) -> some View {
+        let tag = InjuryTag(rawValue: state.injuryTag)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("How's your \(tag?.displayName.lowercased() ?? state.injuryTag) feeling today?")
+                .font(.subheadline)
+            HStack(spacing: 10) {
+                ForEach([InjuryCheckinResponse.better, .same, .worse], id: \.self) { response in
+                    Button(response.rawValue.capitalized) {
+                        Task { await submitCheckin(tag: state.injuryTag, response: response) }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption.bold())
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func submitCheckin(tag: String, response: InjuryCheckinResponse) async {
+        guard let injuryTag = InjuryTag(rawValue: tag) else { return }
+        do {
+            let result = try await SupabaseClient.shared.recordInjuryCheckin(tag: injuryTag, response: response)
+            checkedInTagsToday.insert(tag)
+            injuryCheckinMessage = result.escalate ? result.escalationMessage : nil
+        } catch {
+            injuryCheckinMessage = "Couldn't record that check-in. Try again."
         }
     }
 
@@ -466,6 +538,8 @@ private struct SeededGenerator: RandomNumberGenerator {
             sleepCapApplied: false,
             injuryCapApplied: false,
             loadCapApplied: false,
+            consecutiveDaysCapApplied: false,
+            injuryProtocolCapApplied: false,
             dataConfidence: .low
         )
     )

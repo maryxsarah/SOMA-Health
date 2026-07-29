@@ -810,17 +810,39 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
 /// match. The equipment-specific templates were nearly unreachable, which
 /// made the whole photo step decorative. Sorting by specificity first fixes
 /// that: if you photographed a squat rack, you get the session that uses it.
+/// True if any exercise name or target_area in the template mentions one of
+/// the given keywords -- a second, more granular pass on top of the coarse
+/// highImpact filter below, from the deterministic contraindication map
+/// (see _shared/contraindications.ts). Severe injuries pass a longer
+/// keyword list than mild ones, so this excludes more broadly for them.
+function matchesExcludedKeyword(t: GymWorkoutTemplate, keywords: string[]): boolean {
+  if (keywords.length === 0) return false;
+  const haystack = [t.warm_up, ...t.blocks.map((b) => b.exercises), t.cool_down]
+    .flat()
+    .map((e) => `${e.name} ${e.target_area}`.toLowerCase())
+    .join(" ");
+  return keywords.some((kw) => haystack.includes(kw.toLowerCase()));
+}
+
 export function selectTemplate(
   category: string,
   confirmedEquipment: Set<string>,
   goals: string[],
   excludeHighImpact = false,
+  excludedKeywords: string[] = [],
 ): GymWorkoutTemplate {
   const normalizedEquipment = normalizeEquipment(Array.from(confirmedEquipment));
   const inCategory = GYM_WORKOUT_TEMPLATES.filter((t) =>
     t.category === category && (!excludeHighImpact || !t.highImpact)
   );
-  const candidates = inCategory.filter((t) =>
+  // Soft on purpose: the ~20-template library hasn't been manually audited
+  // against every contraindication keyword yet (tracked as a follow-up), so
+  // if applying it would leave nothing for this category, fall back to the
+  // coarse highImpact-only filter rather than throwing -- excludeHighImpact
+  // is still the hard safety floor either way.
+  const keywordFiltered = inCategory.filter((t) => !matchesExcludedKeyword(t, excludedKeywords));
+  const afterKeywordFilter = keywordFiltered.length > 0 ? keywordFiltered : inCategory;
+  const candidates = afterKeywordFilter.filter((t) =>
     t.requiredEquipment.every((eq) => normalizedEquipment.has(eq))
   );
   // `candidates` always contains at least the zero-equipment templates, so

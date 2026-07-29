@@ -29,6 +29,7 @@ import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
+import { describeContraindications, type InjurySeverityLevel } from "../_shared/contraindications.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -101,6 +102,7 @@ interface UserRow {
   equipment: string[] | null;
   injury_tags: string[] | null;
   injury_notes: string | null;
+  injury_severity: Record<string, string> | null;
   experience_level: string | null;
   sex: string | null;
   date_of_birth: string | null;
@@ -236,7 +238,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow } = await supabase
       .from("users")
-      .select("goals, equipment, injury_tags, injury_notes, experience_level, sex, date_of_birth, weight_kg")
+      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg")
       .eq("id", userId)
       .maybeSingle();
 
@@ -344,6 +346,27 @@ function buildLoadGuidance(weightKg: number | null, experience: string): string 
   return `The user weighs ${weightKg}kg, ${experience} experience. For any working set targeting these patterns, keep weight_guidance's suggested load within these guideline ranges once warmed up (not a strict per-rep ceiling, use professional judgment for warm-ups): squat pattern ${range("squat_pattern")}; hinge pattern (deadlift-style) ${range("hinge_pattern")}; overhead press ${range("overhead_press")}; horizontal press (bench/push-up-with-added-load) ${range("horizontal_press")}; row/pull ${range("row_pull")}.`;
 }
 
+// DRAFTED, NOT EXPERT-REVIEWED -- thresholds for "exceptionally" high
+// readiness, distinct from the ordinary push_hard bar (Whoop 67+ recovery,
+// Oura 85+ readiness -- see generate-recommendation/index.ts's
+// bandFromWhoop/bandFromOura). Gates a materially more aggressive finisher
+// prescription, so these should get the same sign-off as
+// LOAD_FRACTION_OF_BODYWEIGHT above before this is treated as authoritative.
+const EXCEPTIONAL_WHOOP_RECOVERY = 90;
+const EXCEPTIONAL_OURA_READINESS = 95;
+
+/// True only on an already-push_hard day where recovery is exceptional, not
+/// just sufficient -- lets the existing mandatory finisher (see the `blocks`
+/// bullet in buildPrompt below) push harder on the best days instead of
+/// treating every push_hard day identically.
+function isExceptionalReadiness(category: string, snapshots: SnapshotRow[]): boolean {
+  if (category !== "push_hard") return false;
+  return snapshots.some((s) =>
+    (s.recovery_score !== null && s.recovery_score >= EXCEPTIONAL_WHOOP_RECOVERY) ||
+    (s.readiness_score !== null && s.readiness_score >= EXCEPTIONAL_OURA_READINESS)
+  );
+}
+
 const EXPERIENCE_GUIDANCE: Record<string, string> = {
   newbie:
     "This user is a newbie. Keep it simple: warm_up plus 2 blocks total, the LAST of which is the required finisher (no supersets in the non-finisher block -- rounds: 1), lower volume (2-3 sets per exercise), longer rest, and instructions that over-explain form and cues a beginner wouldn't already know. Avoid complex movement patterns.",
@@ -365,8 +388,13 @@ function buildPrompt(
   const equipment = userRow?.equipment?.length
     ? userRow.equipment.join(", ")
     : "no equipment (bodyweight only)";
-  const injuries = userRow?.injury_tags?.length ? userRow.injury_tags.join(", ") : "none noted";
-  const injuryNotes = userRow?.injury_notes ? ` (${userRow.injury_notes})` : "";
+  // Deterministic exclusion sentence -- never left to the model to infer
+  // what's safe, same rule this codebase applies everywhere else.
+  const { promptLine: injuries } = describeContraindications(
+    userRow?.injury_tags ?? [],
+    (userRow?.injury_severity ?? {}) as Record<string, InjurySeverityLevel>,
+  );
+  const injuryNotes = userRow?.injury_notes ? ` User's free-text notes: ${userRow.injury_notes}.` : "";
   const experience = userRow?.experience_level ?? "moderate";
   const experienceGuidance = EXPERIENCE_GUIDANCE[experience] ?? EXPERIENCE_GUIDANCE.moderate;
   const loadGuidance = buildLoadGuidance(userRow?.weight_kg ?? null, experience);
@@ -384,6 +412,11 @@ function buildPrompt(
     ? feedbackEntries.map((l) => `- ${l.date} (${l.title}): "${l.feedback}"`).join("\n")
     : null;
 
+  const exceptional = isExceptionalReadiness(category, snapshots);
+  const finisherPushHardClause = exceptional
+    ? `on today's exceptionally high-readiness day, make the finisher genuinely max-effort (2-4 min, RPE 9-10) -- more rounds or heavier load than an ordinary push_hard day's finisher, and frame it to the user explicitly as "your recovery data is exceptional today, so this finisher pushes harder than usual"`
+    : `on "push_hard" days make it short but hard (1-3 min, RPE 8-10, e.g. a max-effort carry, sprint, or hold)`;
+
   return `You are a certified strength & conditioning coach writing a single day's workout plan for a fitness app user.
 
 The user has already chosen today's workout from the app's suggestion list: "${selection.title}" (target: ${selection.bodyPart}). Build today's plan as a detailed breakdown of exactly this workout -- do not substitute a different type of workout or body part focus. If equipment or injuries below force a change to a specific exercise, keep it a close, safe variant of the same movement pattern rather than switching focus areas.
@@ -393,7 +426,7 @@ Today's actual health data driving that intensity: ${healthLines}
 User's goals: ${goals}.
 Training experience: ${experience}. ${experienceGuidance}
 Available equipment: ${equipment}.
-Noted injuries: ${injuries}${injuryNotes}.
+Noted injuries: ${injuries}.${injuryNotes}
 ${sexLine}${ageLine ? `\n${ageLine}` : ""}
 ${loadGuidance}
 
@@ -410,7 +443,7 @@ ${
   }
 Return the full session as:
 - warm_up: 2-3 items that specifically prepare the body for THIS workout and adjust to today's health data above (e.g. lighter/shorter if recovery or sleep was poor) -- concrete named items like "5 min incline treadmill walk", "2x10 arm circles", "shoulder rolls", not a generic "warm up" placeholder.
-- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A", "Block 3 - Finisher") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset) and a rest_between_rounds. The LAST block in this array must always be a finisher (name it something like "Block N - Finisher") -- with NO exceptions, even on a low-readiness or short-sleep day. Scale its intensity and duration to today's actual intensity instead of omitting it: on "push_hard" days make it short but hard (1-3 min, RPE 8-10, e.g. a max-effort carry, sprint, or hold); on "moderate" days shorter and less intense (~1-2 min, moderate effort); on "light"/"rest" days very short and gentle (1-2 min, e.g. a held stretch or breathing drill, RPE 2-4 at most). Only its intensity and duration shrink on a harder recovery day -- it must never be left out entirely.
+- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A", "Block 3 - Finisher") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset) and a rest_between_rounds. The LAST block in this array must always be a finisher (name it something like "Block N - Finisher") -- with NO exceptions, even on a low-readiness or short-sleep day. Scale its intensity and duration to today's actual intensity instead of omitting it: ${finisherPushHardClause}; on "moderate" days shorter and less intense (~1-2 min, moderate effort); on "light"/"rest" days very short and gentle (1-2 min, e.g. a held stretch or breathing drill, RPE 2-4 at most). Only its intensity and duration shrink on a harder recovery day -- it must never be left out entirely.
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
 For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, and instructions (2-3 sentences, plain and easy to follow, describing exact form/technique). Also give a one-line "focus" summarizing today's session.`;

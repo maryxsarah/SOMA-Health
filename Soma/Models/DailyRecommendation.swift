@@ -213,6 +213,12 @@ enum RecommendationReason: String, Codable {
     case healthkitHigh = "healthkit_high"
     case healthkitMedium = "healthkit_medium"
     case healthkitLow = "healthkit_low"
+    /// Zero usable HealthKit signals today (typically day 1, before any
+    /// baseline exists) -- distinct from `.healthkitMedium` so a brand-new
+    /// user isn't shown the exact same "medium recovery" explanation a real
+    /// reading would get. The underlying category is still a cautious
+    /// "moderate" -- only the presented reason differs.
+    case insufficientData = "insufficient_data"
     case unknown
 
     /// Fixed explanation template. `%@` is filled in with the relevant
@@ -229,6 +235,7 @@ enum RecommendationReason: String, Codable {
         case .healthkitHigh: "Your HRV was close to your recent baseline and you slept enough -- a good sign of recovery."
         case .healthkitMedium: "Your HRV was somewhat below your recent baseline, or sleep was a little short -- a moderate day fits best."
         case .healthkitLow: "Your HRV was well below your recent baseline, or sleep was short -- your body needs to ease up today."
+        case .insufficientData: "Not enough health data yet to build a personalized read -- Soma is defaulting to a cautious moderate session while your baseline builds."
         case .unknown: "Today's recommendation is based on the data currently available."
         }
     }
@@ -244,6 +251,8 @@ enum RecommendationReason: String, Codable {
             "Prioritize sleep tonight and keep today's effort light -- recovery compounds over a few days, not just one."
         case .healthkitHigh:
             "You're on a good trend -- keep sleep and activity consistent to stay here."
+        case .insufficientData:
+            "Wearing your Apple Watch overnight, or connecting Whoop or Oura, will give you a personalized read starting tomorrow."
         case .unknown:
             "Connecting Whoop or Oura gives a more precise recovery score than Apple Health alone."
         }
@@ -280,6 +289,8 @@ struct DailyRecommendation: Codable, Equatable {
     let sleepCapApplied: Bool
     let injuryCapApplied: Bool
     let loadCapApplied: Bool
+    let consecutiveDaysCapApplied: Bool
+    let injuryProtocolCapApplied: Bool
     let dataConfidence: DataConfidence?
 
     enum CodingKeys: String, CodingKey {
@@ -288,5 +299,7 @@ struct DailyRecommendation: Codable, Equatable {
         case sleepCapApplied = "sleep_cap_applied"
         case injuryCapApplied = "injury_cap_applied"
         case loadCapApplied = "load_cap_applied"
+        case consecutiveDaysCapApplied = "consecutive_days_cap_applied"
+        case injuryProtocolCapApplied = "injury_protocol_cap_applied"
     }
 }

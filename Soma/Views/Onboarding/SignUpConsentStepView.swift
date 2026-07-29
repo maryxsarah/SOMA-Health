@@ -34,7 +34,7 @@ struct SignUpConsentStepView: View {
             VStack(alignment: .leading, spacing: 16) {
                 consentRow(
                     isOn: $acceptedTerms,
-                    text: "I agree to Soma's Terms of Service and Privacy Policy."
+                    text: "I agree to Soma's Terms of Service and Privacy Policy, and understand Soma's recommendations are not medical advice."
                 )
                 HStack(spacing: 16) {
                     Button("View Privacy Policy") { showingPrivacyPolicy = true }

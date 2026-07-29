@@ -164,7 +164,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact);
+    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact, safety.excludedKeywords);
 
     const wording = await callLunaForWording(
       template,

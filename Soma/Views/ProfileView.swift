@@ -21,6 +21,7 @@ struct ProfileView: View {
     @State private var goals: Set<GoalTag> = []
     @State private var equipment: Set<EquipmentTag> = []
     @State private var injuryTags: Set<InjuryTag> = []
+    @State private var injurySeverity: [InjuryTag: InjurySeverity] = [:]
     @State private var contactEmailText = ""
     @State private var otherGoalText = ""
     @State private var otherEquipmentText = ""
@@ -51,6 +52,9 @@ struct ProfileView: View {
     @State private var currentBodyPhotoImage: UIImage?
     @State private var goalPhotoItem: PhotosPickerItem?
     @State private var currentPhotoItem: PhotosPickerItem?
+    @State private var goalPhotoHistory: [BodyPhotoEntry] = []
+    @State private var currentPhotoHistory: [BodyPhotoEntry] = []
+    @State private var showingPhotoComparison = false
     @State private var isUploadingGoalPhoto = false
     @State private var isUploadingCurrentPhoto = false
 
@@ -154,8 +158,30 @@ struct ProfileView: View {
                         ForEach(InjuryTag.allCases) { tag in
                             ChipToggle(title: tag.displayName, isSelected: injuryTags.contains(tag)) {
                                 toggle(tag, in: &injuryTags)
+                                if injuryTags.contains(tag), injurySeverity[tag] == nil {
+                                    injurySeverity[tag] = .moderate
+                                }
                             }
                         }
+                    }
+                    // One severity picker per selected tag -- defaults to
+                    // .moderate the moment a tag is toggled on, above.
+                    ForEach(InjuryTag.allCases.filter { injuryTags.contains($0) }) { tag in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(tag.displayName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker(tag.displayName, selection: Binding(
+                                get: { injurySeverity[tag] ?? .moderate },
+                                set: { injurySeverity[tag] = $0 }
+                            )) {
+                                ForEach(InjurySeverity.allCases) { severity in
+                                    Text(severity.displayName).tag(severity)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        .padding(.top, 4)
                     }
                     TextField("Notes (optional)", text: $injuryNotesText, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
@@ -202,6 +228,23 @@ struct ProfileView: View {
                                 selection: $currentPhotoItem,
                                 onRemove: { Task { await removeBodyPhoto(kind: .current) } }
                             )
+                        }
+                        if !goalPhotoHistory.isEmpty || !currentPhotoHistory.isEmpty {
+                            Text("\(goalPhotoHistory.count) goal photo(s), \(currentPhotoHistory.count) current photo(s) saved")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let goalBodyPhotoImage, let currentBodyPhotoImage {
+                            Button {
+                                showingPhotoComparison = true
+                            } label: {
+                                Label("Compare Goal vs. Current", systemImage: "arrow.left.and.right.square")
+                                    .font(.caption.bold())
+                            }
+                            .padding(.top, 4)
+                            .sheet(isPresented: $showingPhotoComparison) {
+                                BodyPhotoComparisonView(goalImage: goalBodyPhotoImage, currentImage: currentBodyPhotoImage)
+                            }
                         }
                     }
                 }
@@ -348,6 +391,9 @@ struct ProfileView: View {
         equipment = Set(profile.equipment)
         otherEquipmentText = profile.otherEquipmentNotes ?? ""
         injuryTags = Set(profile.injuryTags)
+        injurySeverity = Dictionary(uniqueKeysWithValues: profile.injurySeverity.compactMap { key, value in
+            InjuryTag(rawValue: key).map { ($0, value) }
+        })
         injuryNotesText = profile.injuryNotes ?? ""
         experienceLevel = profile.experienceLevel
         pregnancy = profile.pregnancy
@@ -361,6 +407,8 @@ struct ProfileView: View {
             if let path = profile.currentBodyPhotoPath {
                 currentBodyPhotoImage = await loadBodyPhoto(path: path)
             }
+            goalPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .goal)) ?? []
+            currentPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .current)) ?? []
         }
     }
 
@@ -418,15 +466,38 @@ struct ProfileView: View {
         do {
             try await SupabaseClient.shared.uploadBodyPhoto(kind: kind, imageData: compressed)
             if kind == .goal { goalBodyPhotoImage = image } else { currentBodyPhotoImage = image }
+            // Upload paths are unique per call now (no more fixed-name
+            // overwrite), so the locally-held path/history need a refresh
+            // to stay in sync with what removeBodyPhoto will act on next.
+            if let userId = SupabaseClient.shared.currentUserID,
+               let refreshed = try? await SupabaseClient.shared.fetchProfile(id: userId) {
+                goalBodyPhotoPath = refreshed.goalBodyPhotoPath
+                currentBodyPhotoPath = refreshed.currentBodyPhotoPath
+            }
+            if kind == .goal {
+                goalPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .goal)) ?? []
+            } else {
+                currentPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .current)) ?? []
+            }
         } catch {
             errorMessage = "Couldn't upload that photo. Try again."
         }
     }
 
     private func removeBodyPhoto(kind: SupabaseClient.BodyPhotoKind) async {
+        let path = kind == .goal ? goalBodyPhotoPath : currentBodyPhotoPath
+        guard let path else { return }
         do {
-            try await SupabaseClient.shared.deleteBodyPhoto(kind: kind)
-            if kind == .goal { goalBodyPhotoImage = nil } else { currentBodyPhotoImage = nil }
+            try await SupabaseClient.shared.deleteBodyPhoto(kind: kind, path: path)
+            if kind == .goal {
+                goalBodyPhotoImage = nil
+                goalBodyPhotoPath = nil
+                goalPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .goal)) ?? []
+            } else {
+                currentBodyPhotoImage = nil
+                currentBodyPhotoPath = nil
+                currentPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .current)) ?? []
+            }
         } catch {
             errorMessage = "Couldn't remove that photo. Try again."
         }
@@ -450,10 +521,14 @@ struct ProfileView: View {
             pregnancy: pregnancy
         )
 
+        let currentInjuryTags = Array(injuryTags)
+        let currentInjurySeverity = injurySeverity
+
         Task {
             defer { isSaving = false }
             do {
                 try await SupabaseClient.shared.updateProfile(id: userId, profile: profile)
+                try await SupabaseClient.shared.reportInjury(tags: currentInjuryTags, severity: currentInjurySeverity)
                 savedConfirmation = true
             } catch {
                 errorMessage = "Couldn't save profile. Try again."

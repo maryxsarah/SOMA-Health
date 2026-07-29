@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { describeContraindications, type InjurySeverityLevel } from "./contraindications.ts";
 
 // Fixed, non-LLM-generated message -- never let the model diagnose/treat/
 // infer a medical condition; this copy is authored once, here, and never
@@ -14,6 +15,11 @@ export interface SafetyCheckResult {
   /// excluded. Mirrors what RecommendationDetailView already does to the
   /// normal suggestion list when an injury is noted.
   excludeHighImpact: boolean;
+  /// Severity-aware exercise/template keywords to exclude, from the
+  /// deterministic contraindication map -- a second, more granular filter
+  /// layered on top of excludeHighImpact, never replacing it. Severe
+  /// injuries exclude more broadly than mild ones.
+  excludedKeywords: string[];
 }
 
 /**
@@ -56,7 +62,7 @@ export async function checkSafetyFlags(
   // is the correct outcome when we cannot establish whether it is safe.
   const { data: userRow, error: userError } = await supabase
     .from("users")
-    .select("injury_tags, pregnancy")
+    .select("injury_tags, injury_severity, pregnancy")
     .eq("id", userId)
     .maybeSingle();
   if (userError) {
@@ -65,11 +71,13 @@ export async function checkSafetyFlags(
 
   if (userRow?.pregnancy === true) {
     await logFlag(supabase, userId, date, "pregnancy", null);
-    return { flagged: true, message: SAFETY_MESSAGE, excludeHighImpact: true };
+    return { flagged: true, message: SAFETY_MESSAGE, excludeHighImpact: true, excludedKeywords: [] };
   }
 
   const injuryTags = (userRow?.injury_tags as string[] | null) ?? [];
+  const severityMap = (userRow?.injury_severity as Record<string, InjurySeverityLevel> | null) ?? {};
   const excludeHighImpact = injuryTags.length > 0;
+  const { excludedKeywords } = describeContraindications(injuryTags, severityMap);
   if (excludeHighImpact) {
     await logFlag(supabase, userId, date, "injury_high_impact_excluded", injuryTags.join(", "));
   }
@@ -105,12 +113,12 @@ export async function checkSafetyFlags(
           "abnormal_resting_hr",
           `today ${todayRestingHr}bpm vs ${MIN_BASELINE_DAYS}+ day median ${baseline.toFixed(1)}bpm`,
         );
-        return { flagged: true, message: SAFETY_MESSAGE, excludeHighImpact };
+        return { flagged: true, message: SAFETY_MESSAGE, excludeHighImpact, excludedKeywords };
       }
     }
   }
 
-  return { flagged: false, excludeHighImpact };
+  return { flagged: false, excludeHighImpact, excludedKeywords };
 }
 
 async function logFlag(

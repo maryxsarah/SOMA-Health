@@ -76,6 +76,9 @@ struct PostSetupFlowView: View {
 
     private func saveConsent(marketingOptIn: Bool) async {
         guard let userId = SupabaseClient.shared.currentUserID else { return }
-        try? await SupabaseClient.shared.upsertUser(id: userId, marketingOptIn: marketingOptIn)
+        // SignUpConsentStepView's own "Continue" already refuses to fire
+        // this callback until acceptedTerms is checked, so reaching here
+        // means a real, gated acknowledgment just happened.
+        try? await SupabaseClient.shared.upsertUser(id: userId, marketingOptIn: marketingOptIn, legalAck: true)
     }
 }

@@ -176,6 +176,14 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(recommendation.category.displayTitle)
                             .font(Theme.display)
+                        // The only screen a day-1 user is guaranteed to see --
+                        // without this, a zero-signal "moderate" reads exactly
+                        // like a real one until they tap through to Detail.
+                        if recommendation.reason == .insufficientData {
+                            Text("Building your baseline")
+                                .font(.caption.bold())
+                                .foregroundStyle(.orange)
+                        }
                         Text(recommendation.message)
                             .font(.body)
                             .foregroundStyle(.secondary)
