@@ -82,6 +82,84 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
         }
     }
 
+    // MARK: - Sign in with Google
+
+    /// Same success-semantics as signInWithApple: branch on the return
+    /// value, not on `errorMessage == nil` (cancelling the browser sheet is
+    /// a silent non-error).
+    @discardableResult
+    func signInWithGoogle() async -> Bool {
+        isSigningIn = true
+        errorMessage = nil
+        defer { isSigningIn = false }
+
+        do {
+            try await GoogleOAuthManager.shared.signIn()
+            return true
+        } catch {
+            errorMessage = Self.userFacingMessage(forGoogleOrEmail: error)
+            return false
+        }
+    }
+
+    // MARK: - Email/password
+
+    /// Returns `true` if a session was established, `false` if the caller
+    /// should show a "check your email to confirm" message (Supabase's
+    /// default project setting requires email confirmation before a
+    /// signup session is usable).
+    @discardableResult
+    func signUpWithEmail(email: String, password: String) async -> Bool? {
+        isSigningIn = true
+        errorMessage = nil
+        defer { isSigningIn = false }
+
+        do {
+            return try await SupabaseClient.shared.signUpWithEmail(email: email, password: password)
+        } catch {
+            errorMessage = Self.userFacingMessage(forGoogleOrEmail: error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func signInWithEmail(email: String, password: String) async -> Bool {
+        isSigningIn = true
+        errorMessage = nil
+        defer { isSigningIn = false }
+
+        do {
+            try await SupabaseClient.shared.signInWithEmail(email: email, password: password)
+            return true
+        } catch {
+            errorMessage = Self.userFacingMessage(forGoogleOrEmail: error)
+            return false
+        }
+    }
+
+    /// Translates a raw SupabaseError (which carries the provider's raw
+    /// JSON error body) into text a person can act on -- never shown raw,
+    /// same principle as userFacingMessage(for:) above for Apple.
+    private static func userFacingMessage(forGoogleOrEmail error: Error) -> String? {
+        if case ASWebAuthenticationSessionError.canceledLogin = error {
+            return nil
+        }
+        guard case SupabaseError.requestFailed(_, let message) = error else {
+            return "Something went wrong. Please try again."
+        }
+        print("[Auth] \(message)")
+        if message.contains("already registered") || message.contains("already exists") {
+            return "An account with that email already exists -- try logging in instead."
+        }
+        if message.contains("Invalid login credentials") {
+            return "That email or password isn't right. Try again."
+        }
+        if message.contains("Password") {
+            return "That password doesn't meet the requirements -- try a longer one."
+        }
+        return "Couldn't complete that. Please try again."
+    }
+
     private func performSignIn() async throws {
         let nonce = Self.randomNonceString()
         currentNonce = nonce

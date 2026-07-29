@@ -7,6 +7,7 @@ struct OnboardingView: View {
 
     @State private var showingPrivacyPolicy = false
     @State private var showingTermsOfService = false
+    @State private var showingEmailAuth = false
 
     var body: some View {
         ScrollView {
@@ -58,7 +59,7 @@ struct OnboardingView: View {
                         }
                     }
 
-                    PillButton(title: "Get Started", isEnabled: !sessionManager.isSigningIn) {
+                    PillButton(title: "Continue with Apple", isEnabled: !sessionManager.isSigningIn) {
                         Task {
                             // Branch on the returned value, never on
                             // `errorMessage == nil` -- cancelling is a silent
@@ -69,6 +70,30 @@ struct OnboardingView: View {
                             }
                         }
                     }
+
+                    Button {
+                        Task {
+                            if await sessionManager.signInWithGoogle() {
+                                appState.markSignedIn()
+                            }
+                        }
+                    } label: {
+                        Text("Continue with Google")
+                            .font(.body.bold())
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(sessionManager.isSigningIn)
+
+                    Button {
+                        showingEmailAuth = true
+                    } label: {
+                        Text("Continue with Email")
+                            .font(.body.bold())
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(sessionManager.isSigningIn)
 
                     HStack(spacing: 8) {
                         Button("Privacy Policy") { showingPrivacyPolicy = true }
@@ -89,6 +114,9 @@ struct OnboardingView: View {
         }
         .sheet(isPresented: $showingTermsOfService) {
             LegalDocumentView(title: LegalContent.termsOfServiceTitle, text: LegalContent.termsOfServiceBody)
+        }
+        .sheet(isPresented: $showingEmailAuth) {
+            EmailAuthView()
         }
     }
 

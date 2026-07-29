@@ -59,6 +59,94 @@ final class SupabaseClient {
         return auth.user.id
     }
 
+    // MARK: - Sign in with Google
+
+    /// Exchanges the PKCE authorization code from GoogleOAuthManager for a
+    /// Supabase session -- same grant Supabase's own client SDKs use for
+    /// native OAuth, no client_secret needed since PKCE's code_verifier is
+    /// itself the exchange credential.
+    @discardableResult
+    func signInWithGoogle(code: String, codeVerifier: String) async throws -> String {
+        var request = URLRequest(
+            url: URL(string: "\(Config.supabaseURL.absoluteString)/auth/v1/token?grant_type=pkce")!
+        )
+        request.httpMethod = "POST"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "auth_code": code,
+            "code_verifier": codeVerifier,
+        ])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        let auth = try JSONDecoder().decode(AuthResponse.self, from: data)
+        keychain.save(StoredSession(
+            userID: auth.user.id,
+            accessToken: auth.access_token,
+            refreshToken: auth.refresh_token,
+            expiresAt: Date().addingTimeInterval(TimeInterval(auth.expires_in))
+        ))
+        try await upsertUser(id: auth.user.id, contactEmail: auth.user.email)
+        return auth.user.id
+    }
+
+    // MARK: - Email/password
+
+    /// Supabase's default project setting requires email confirmation
+    /// before a session is usable -- the signup response then has no
+    /// access_token yet. Returns `true` if a session was established
+    /// immediately, `false` if the caller should show a
+    /// "check your email to confirm" message instead.
+    @discardableResult
+    func signUpWithEmail(email: String, password: String) async throws -> Bool {
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/auth/v1/signup")!)
+        request.httpMethod = "POST"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["email": email, "password": password])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        guard let auth = try? JSONDecoder().decode(AuthResponse.self, from: data) else {
+            return false
+        }
+        keychain.save(StoredSession(
+            userID: auth.user.id,
+            accessToken: auth.access_token,
+            refreshToken: auth.refresh_token,
+            expiresAt: Date().addingTimeInterval(TimeInterval(auth.expires_in))
+        ))
+        try await upsertUser(id: auth.user.id, contactEmail: auth.user.email ?? email)
+        return true
+    }
+
+    @discardableResult
+    func signInWithEmail(email: String, password: String) async throws -> String {
+        var request = URLRequest(
+            url: URL(string: "\(Config.supabaseURL.absoluteString)/auth/v1/token?grant_type=password")!
+        )
+        request.httpMethod = "POST"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["email": email, "password": password])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        let auth = try JSONDecoder().decode(AuthResponse.self, from: data)
+        keychain.save(StoredSession(
+            userID: auth.user.id,
+            accessToken: auth.access_token,
+            refreshToken: auth.refresh_token,
+            expiresAt: Date().addingTimeInterval(TimeInterval(auth.expires_in))
+        ))
+        try await upsertUser(id: auth.user.id, contactEmail: auth.user.email ?? email)
+        return auth.user.id
+    }
+
     private func refreshSession() async throws {
         guard let current = keychain.load() else {
             throw SupabaseError.notSignedIn
@@ -742,6 +830,10 @@ private struct AuthResponse: Decodable {
 
     struct AuthUser: Decodable {
         let id: String
+        /// Present for Google/email sign-in (unlike Apple, which never
+        /// includes it here -- that flow captures email from the
+        /// ASAuthorizationAppleIDCredential directly instead).
+        let email: String?
     }
 }
 
