@@ -383,9 +383,18 @@ function mapBandToCategory(
   return { category, sleepCapApplied, injuryCapApplied, loadCapApplied };
 }
 
-/// Consecutive prior days with a logged workout, strictly before `date`,
-/// stopping at the first gap -- e.g. logs on d-1, d-2, d-3 but not d-4
-/// counts as 3, regardless of what happened further back.
+/// Consecutive prior days with a logged TRAINING workout (moderate or
+/// push_hard), strictly before `date`, stopping at the first gap -- e.g.
+/// training logs on d-1, d-2, d-3 but not d-4 counts as 3, regardless of
+/// what happened further back.
+///
+/// The category filter is what makes the cap releasable: counting every
+/// workout_log row meant a dutifully-logged "Full rest day" or recovery
+/// walk extended the streak, and -- worse -- each capped "light" day the
+/// user then logged re-extended it again, so the cap never let go and a
+/// well-recovered user never saw another moderate/push_hard day. Rest and
+/// light days are the streak BREAKING, not the streak continuing; that is
+/// the entire point of capping to light.
 const CONSECUTIVE_DAYS_THRESHOLD = 5;
 
 async function countConsecutiveTrainingDays(
@@ -398,6 +407,7 @@ async function countConsecutiveTrainingDays(
     .from("workout_log")
     .select("date")
     .eq("user_id", userId)
+    .in("category", ["moderate", "push_hard"])
     .gte("date", addDays(date, -7))
     .lt("date", date);
 

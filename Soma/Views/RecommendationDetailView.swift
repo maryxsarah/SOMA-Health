@@ -490,7 +490,7 @@ struct RecommendationDetailView: View {
     private func submitCheckin(tag: String, response: InjuryCheckinResponse) async {
         guard let injuryTag = InjuryTag(rawValue: tag) else { return }
         do {
-            let result = try await SupabaseClient.shared.recordInjuryCheckin(tag: injuryTag, response: response)
+            let result = try await SupabaseClient.shared.recordInjuryCheckin(tag: injuryTag, response: response, date: recommendation.date)
             checkedInTagsToday.insert(tag)
             injuryCheckinMessage = result.escalate ? result.escalationMessage : nil
         } catch {

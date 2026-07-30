@@ -31,6 +31,21 @@ Deno.serve(async (req: Request) => {
       ? body.injurySeverity
       : {};
 
+    // Reject unknown severities outright rather than storing them: a raw
+    // value like "critical" would be persisted verbatim, and every later
+    // describeContraindications lookup on it would crash generation for
+    // this account until the row is repaired by hand. Fail loudly at the
+    // door instead.
+    const invalid = Object.entries(injurySeverity)
+      .filter(([, v]) => !(v in SEVERITY_RANK))
+      .map(([k, v]) => `${k}=${v}`);
+    if (invalid.length > 0) {
+      return jsonResponse(
+        { error: `invalid injurySeverity value(s): ${invalid.join(", ")} (expected mild|moderate|severe)` },
+        400,
+      );
+    }
+
     const supabase = serviceRoleClient();
 
     const { data: currentRow, error: readError } = await supabase
@@ -46,14 +61,25 @@ Deno.serve(async (req: Request) => {
     const oldSeverity = (currentRow?.injury_severity as Record<string, string> | null) ?? {};
 
     const newlyAddedOrEscalated: { tag: string; severity: string }[] = [];
+    const severityChangedOnly: { tag: string; severity: string }[] = [];
     for (const tag of injuryTags) {
       const severity = injurySeverity[tag] ?? "moderate";
       const wasPresent = oldTags.has(tag);
-      const previousSeverity = oldSeverity[tag];
-      const escalated = wasPresent && previousSeverity !== undefined &&
-        (SEVERITY_RANK[severity] ?? 2) > (SEVERITY_RANK[previousSeverity] ?? 2);
-      if (!wasPresent || escalated) {
+      // An unset previous severity is treated as moderate everywhere else
+      // (contraindications.ts), so it must rank as moderate here too --
+      // requiring previousSeverity to be defined meant a pre-severity-era
+      // tag raised to "severe" never started a protocol at all.
+      const previousRank = SEVERITY_RANK[oldSeverity[tag]] ?? 2;
+      const newRank = SEVERITY_RANK[severity] ?? 2;
+      if (!wasPresent || newRank > previousRank) {
         newlyAddedOrEscalated.push({ tag, severity });
+      } else if (newRank !== previousRank) {
+        // Downgrade: the protocol keeps running (recovery evidence, not a
+        // severity edit, is what clears it), but its severity must follow
+        // the profile -- otherwise a severe->mild edit left the severe cap
+        // forcing every day to "light" indefinitely, with a message that
+        // no longer matched what the user's profile said.
+        severityChangedOnly.push({ tag, severity });
       }
     }
 
@@ -87,6 +113,18 @@ Deno.serve(async (req: Request) => {
         );
       if (error) {
         throw new Error(`could not start recovery protocol for ${tag}: ${error.message}`);
+      }
+    }
+
+    for (const { tag, severity } of severityChangedOnly) {
+      const { error } = await supabase
+        .from("injury_recovery_state")
+        .update({ severity, updated_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("injury_tag", tag)
+        .neq("status", "cleared");
+      if (error) {
+        throw new Error(`could not update severity for ${tag}: ${error.message}`);
       }
     }
 
