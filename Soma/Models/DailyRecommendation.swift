@@ -314,3 +314,27 @@ struct DailyRecommendation: Codable, Equatable {
         case injuryProtocolCapApplied = "injury_protocol_cap_applied"
     }
 }
+
+// In an extension so the synthesized memberwise init survives.
+extension DailyRecommendation {
+    /// The two newest cap flags decode as absent-means-false. App releases
+    /// and Edge Function deployments are not atomic: a response from a
+    /// function version predating a flag simply omits the key, and a
+    /// required Bool turned that into a decode failure for the whole row
+    /// -- the same blank-Home failure mode as an unrecognized reason
+    /// string. The three original cap flags predate every deployed
+    /// function version, so they stay required.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        date = try container.decode(String.self, forKey: .date)
+        category = try container.decode(RecommendationCategory.self, forKey: .category)
+        message = try container.decode(String.self, forKey: .message)
+        reason = try container.decode(RecommendationReason.self, forKey: .reason)
+        sleepCapApplied = try container.decode(Bool.self, forKey: .sleepCapApplied)
+        injuryCapApplied = try container.decode(Bool.self, forKey: .injuryCapApplied)
+        loadCapApplied = try container.decode(Bool.self, forKey: .loadCapApplied)
+        consecutiveDaysCapApplied = try container.decodeIfPresent(Bool.self, forKey: .consecutiveDaysCapApplied) ?? false
+        injuryProtocolCapApplied = try container.decodeIfPresent(Bool.self, forKey: .injuryProtocolCapApplied) ?? false
+        dataConfidence = try container.decodeIfPresent(DataConfidence.self, forKey: .dataConfidence)
+    }
+}
