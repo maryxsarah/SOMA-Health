@@ -18,6 +18,19 @@ final class SubscriptionManager: ObservableObject {
     @Published private(set) var isSubscribed = false
     @Published var errorMessage: String?
     @Published var isPurchasing = false
+    /// Drives the paywall's loading state so it can hold off on prices
+    /// instead of rendering hardcoded ones as if they were real.
+    @Published private(set) var isLoadingProducts = false
+
+    /// At least one plan is missing from StoreKit. Deliberately not
+    /// "both are nil": a partial response (e.g. only monthly returned
+    /// while the annual product awaits App Store approval) leaves the
+    /// paywall's default plan unbuyable, so it needs the same error/retry
+    /// treatment as a total failure -- gating recovery on "both missing"
+    /// made a partial load a silent dead end.
+    var productsIncomplete: Bool {
+        monthlyProduct == nil || annualProduct == nil
+    }
 
     private var transactionListener: Task<Void, Never>?
 
@@ -36,24 +49,34 @@ final class SubscriptionManager: ObservableObject {
     }
 
     func loadProducts() async {
+        isLoadingProducts = true
+        defer { isLoadingProducts = false }
         do {
             let products = try await Product.products(for: [Self.monthlyProductID, Self.annualProductID])
             monthlyProduct = products.first { $0.id == Self.monthlyProductID }
             annualProduct = products.first { $0.id == Self.annualProductID }
-            if monthlyProduct == nil, annualProduct == nil {
-                // Most common cause during development: the Xcode scheme
-                // isn't pointed at Soma.storekit (Edit Scheme -> Run ->
-                // Options -> StoreKit Configuration), so this is asking the
-                // real App Store for products that don't exist there yet.
-                errorMessage = "Subscription products not found. If you're testing in Xcode, check Edit Scheme -> Run -> Options -> StoreKit Configuration is set to Soma.storekit."
-            }
+            errorMessage = productsIncomplete ? Self.productsUnavailableMessage : nil
         } catch {
-            errorMessage = "Couldn't load subscription info. Check your connection."
+            errorMessage = "Couldn't load subscription options. Check your connection and try again."
         }
     }
 
+    /// The old copy here spelled out an Xcode scheme fix ("Edit Scheme ->
+    /// Run -> Options -> StoreKit Configuration") -- development
+    /// instructions that a TestFlight user has no way to act on, in red,
+    /// on the paywall. The hint is still useful while developing, so it
+    /// stays behind `#if DEBUG`; release builds get copy written for the
+    /// person actually reading it.
+    static var productsUnavailableMessage: String {
+        #if DEBUG
+        return "Subscription options aren't available right now. (Debug: check Edit Scheme -> Run -> Options -> StoreKit Configuration is set to Soma.storekit.)"
+        #else
+        return "Subscription options aren't available right now. Please try again in a moment."
+        #endif
+    }
+
     func purchase(_ product: Product) async {
-        if monthlyProduct == nil, annualProduct == nil {
+        if productsIncomplete {
             // Retry once on-demand -- covers the case where the initial
             // load in init() hadn't finished yet when the user tapped in.
             await loadProducts()

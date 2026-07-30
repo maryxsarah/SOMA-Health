@@ -293,6 +293,21 @@ struct ProfileView: View {
                     }
                 }
 
+                // Discoverable twin of the shake gesture -- shake works
+                // everywhere, but nothing advertises it; this card does.
+                CardView {
+                    Text("Feedback")
+                        .font(.body.bold())
+                    Text("Spotted a bug or have an idea? You can also shake your phone anywhere in the app.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    PillButton(title: "Send Feedback") {
+                        // Same presenter as the shake path -- one route,
+                        // and it dedupes against an already-open sheet.
+                        FeedbackPresenter.present()
+                    }
+                }
+
                 CardView {
                     Text("Account")
                         .font(.body.bold())

@@ -845,11 +845,20 @@ export function selectTemplate(
   const candidates = afterKeywordFilter.filter((t) =>
     t.requiredEquipment.every((eq) => normalizedEquipment.has(eq))
   );
-  // `candidates` always contains at least the zero-equipment templates, so
-  // this fallback only fires if a category somehow has none declared.
+  // The zero-equipment fallback must respect the keyword filter too: it
+  // fires precisely when every keyword-safe template needed missing
+  // equipment, so drawing it from `inCategory` handed back a
+  // keyword-violating template (bodyweight squats to a severe-knee user)
+  // in exactly the case the filter mattered most. Keyword-safe
+  // zero-equipment first; the raw zero-equipment pool remains as the very
+  // last resort per the soft-filter policy above -- excludeHighImpact is
+  // already baked into `inCategory` as the hard floor either way.
+  const zeroEquipmentSafe = afterKeywordFilter.filter((t) => t.requiredEquipment.length === 0);
   const pool = candidates.length > 0
     ? candidates
-    : inCategory.filter((t) => t.requiredEquipment.length === 0);
+    : zeroEquipmentSafe.length > 0
+      ? zeroEquipmentSafe
+      : inCategory.filter((t) => t.requiredEquipment.length === 0);
   // Deliberately loud. The alternative -- relaxing excludeHighImpact to
   // find something -- would hand an injured user the jumping session, which
   // is the one outcome this filter exists to prevent. If this throws, the

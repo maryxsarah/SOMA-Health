@@ -9,7 +9,13 @@
 //   check-ins escalates to a stronger fixed "see a professional" message
 //   (same fixed-copy pattern as safetyFlags.ts's SAFETY_MESSAGE -- never
 //   LLM-generated).
-// same -> no streak progress either direction; status unchanged.
+// same -> resets the good-day streak and extends the bad-day streak:
+//   "same" is a non-improving answer, and the escalation contract above is
+//   written for "worse/non-improving". (It previously reset the bad-day
+//   streak too, so an injury alternating worse/same/worse never reached
+//   the escalation threshold -- the check-ins the escalation exists for.)
+//   Status stays unchanged; "same" alone never re-activates a recovering
+//   injury.
 // better -> moves to (or stays) "recovering", extends the good-day streak.
 //   5+ consecutive "better" check-ins while recovering clears the protocol
 //   entirely (mirrors generate-recommendation's MIN_BASELINE_DAYS = 5
@@ -46,6 +52,15 @@ Deno.serve(async (req: Request) => {
     if (!injuryTag || !response || !["better", "same", "worse"].includes(response)) {
       return jsonResponse({ error: "missing or invalid 'injuryTag'/'response'" }, 400);
     }
+    // The check-in day is the CLIENT's calendar date, like every other
+    // date-keyed flow in this codebase. Stamping the UTC date here while
+    // the client compared against its local date meant the two disagreed
+    // for hours every day outside UTC -- the check-in card re-appeared
+    // same-day, and the extra submissions raced through the good-day
+    // streak, clearing a severe-injury protocol in 2-3 real days.
+    const date: string = typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
+      ? body.date
+      : new Date().toISOString().slice(0, 10);
 
     const supabase = serviceRoleClient();
 
@@ -64,6 +79,12 @@ Deno.serve(async (req: Request) => {
     if (row.status === "cleared") {
       return jsonResponse({ error: "this injury's protocol is already cleared" }, 400);
     }
+    // One check-in per calendar day, enforced server-side -- the streak
+    // thresholds below are calibrated in days, so duplicate submissions
+    // must not advance them.
+    if (row.last_checkin_date === date) {
+      return jsonResponse({ error: "already checked in for this injury today" }, 409);
+    }
 
     let status: string = row.status;
     let consecutiveGoodDays: number = row.consecutive_good_days;
@@ -76,8 +97,11 @@ Deno.serve(async (req: Request) => {
       status = "active";
       escalate = consecutiveBadDays >= BAD_DAYS_TO_ESCALATE;
     } else if (response === "same") {
+      // Non-improving: extends the bad-day streak (see the contract at the
+      // top of the file) but never re-activates a recovering injury.
       consecutiveGoodDays = 0;
-      consecutiveBadDays = 0;
+      consecutiveBadDays += 1;
+      escalate = consecutiveBadDays >= BAD_DAYS_TO_ESCALATE;
     } else {
       consecutiveBadDays = 0;
       consecutiveGoodDays += 1;
@@ -87,12 +111,11 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const today = new Date().toISOString().slice(0, 10);
     const { error: writeError } = await supabase
       .from("injury_recovery_state")
       .update({
         status,
-        last_checkin_date: today,
+        last_checkin_date: date,
         last_checkin_response: response,
         consecutive_good_days: consecutiveGoodDays,
         consecutive_bad_days: consecutiveBadDays,

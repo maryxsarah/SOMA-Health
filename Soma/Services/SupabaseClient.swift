@@ -253,7 +253,12 @@ final class SupabaseClient {
 
     /// Plain read via RLS -- used by ProfileView on appear.
     func fetchProfile(id: String) async throws -> UserProfile {
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_notes,experience_level,pregnancy,goal_body_photo_path,current_body_photo_path&limit=1"
+        // injury_severity must stay in this list: UserProfile decodes it
+        // non-optionally, and PostgREST returns only selected columns --
+        // omitting it made every profile fetch throw keyNotFound, which
+        // `try?` call sites turned into an empty profile (and a subsequent
+        // Save would then wipe the user's real data).
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_notes,experience_level,pregnancy,goal_body_photo_path,current_body_photo_path&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -315,12 +320,17 @@ final class SupabaseClient {
         return try JSONDecoder().decode([InjuryRecoveryState].self, from: data)
     }
 
-    /// Calls the record-injury-checkin Edge Function for one tag.
-    func recordInjuryCheckin(tag: InjuryTag, response: InjuryCheckinResponse) async throws -> InjuryCheckinResult {
+    /// Calls the record-injury-checkin Edge Function for one tag. `date`
+    /// is the client's local calendar date (the recommendation date the
+    /// check-in card was shown for) -- the server used to stamp its own
+    /// UTC date, which disagreed with the local date for hours every day
+    /// and let the same real day be checked in twice.
+    func recordInjuryCheckin(tag: InjuryTag, response: InjuryCheckinResponse, date: String) async throws -> InjuryCheckinResult {
         var request = try await authorizedRequest(path: "functions/v1/record-injury-checkin", method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "injuryTag": tag.rawValue,
             "response": response.rawValue,
+            "date": date,
         ])
         let (data, httpResponse) = try await urlSession.data(for: request)
         try Self.assertSuccess(httpResponse, data: data)
@@ -893,6 +903,37 @@ final class SupabaseClient {
 
         var request = try await authorizedRequest(path: "functions/v1/store-wearable-token", method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    // MARK: - user_feedback
+
+    /// Direct insert via RLS (`user_feedback_insert_own`) -- user-entered
+    /// content, same pattern as `logWorkout`. The device/app context comes
+    /// in as parameters (captured by the feedback UI at submit time) so
+    /// this stays a dumb transport.
+    func submitFeedback(
+        type: String,
+        message: String,
+        appVersion: String,
+        build: String,
+        osVersion: String,
+        deviceModel: String
+    ) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/user_feedback", method: "POST")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId,
+            "type": type,
+            "message": message,
+            "app_version": appVersion,
+            "build": build,
+            "os_version": osVersion,
+            "device_model": deviceModel,
+        ])
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)

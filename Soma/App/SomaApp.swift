@@ -29,6 +29,18 @@ struct SomaApp: App {
             .environmentObject(appState)
             .environmentObject(sessionManager)
             .environmentObject(SubscriptionManager.shared)
+            // Shake-to-report, live on every screen past sign-in (the
+            // insert needs a session; before onboarding completes there is
+            // no user row to attach the report to). Presented via UIKit
+            // from the top of the presentation stack, not a root .sheet --
+            // a root sheet can't present while any other sheet is up,
+            // which killed the gesture on exactly the modal screens
+            // (paywall, gym photo) where bugs get reported.
+            .onShake {
+                if appState.screen != .onboarding {
+                    FeedbackPresenter.present()
+                }
+            }
             // The visual design (white cards, pale-blue gradient, navy
             // pills) is a fixed light aesthetic per spec, not an adaptive
             // one -- without this, system text colors (.primary/.secondary)

@@ -203,6 +203,17 @@ struct WorkoutSuggestion: Identifiable {
 /// decision-engine logic on-device (the Edge Function is the single
 /// source of truth for the actual decision).
 enum RecommendationReason: String, Codable {
+    /// The reason vocabulary is owned by the server and grows with it --
+    /// the `insufficient_data` migration added a value this enum didn't
+    /// have, and with plain synthesized decoding one unrecognized string
+    /// threw for the whole row (and, in the history fetch, the whole
+    /// array): Home showed nothing instead of a recommendation with a
+    /// generic explanation. Unknown values decode as `.unknown`.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RecommendationReason(rawValue: raw) ?? .unknown
+    }
+
     case whoopHigh = "whoop_high"
     case whoopMedium = "whoop_medium"
     case whoopLow = "whoop_low"
@@ -301,5 +312,29 @@ struct DailyRecommendation: Codable, Equatable {
         case loadCapApplied = "load_cap_applied"
         case consecutiveDaysCapApplied = "consecutive_days_cap_applied"
         case injuryProtocolCapApplied = "injury_protocol_cap_applied"
+    }
+}
+
+// In an extension so the synthesized memberwise init survives.
+extension DailyRecommendation {
+    /// The two newest cap flags decode as absent-means-false. App releases
+    /// and Edge Function deployments are not atomic: a response from a
+    /// function version predating a flag simply omits the key, and a
+    /// required Bool turned that into a decode failure for the whole row
+    /// -- the same blank-Home failure mode as an unrecognized reason
+    /// string. The three original cap flags predate every deployed
+    /// function version, so they stay required.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        date = try container.decode(String.self, forKey: .date)
+        category = try container.decode(RecommendationCategory.self, forKey: .category)
+        message = try container.decode(String.self, forKey: .message)
+        reason = try container.decode(RecommendationReason.self, forKey: .reason)
+        sleepCapApplied = try container.decode(Bool.self, forKey: .sleepCapApplied)
+        injuryCapApplied = try container.decode(Bool.self, forKey: .injuryCapApplied)
+        loadCapApplied = try container.decode(Bool.self, forKey: .loadCapApplied)
+        consecutiveDaysCapApplied = try container.decodeIfPresent(Bool.self, forKey: .consecutiveDaysCapApplied) ?? false
+        injuryProtocolCapApplied = try container.decodeIfPresent(Bool.self, forKey: .injuryProtocolCapApplied) ?? false
+        dataConfidence = try container.decodeIfPresent(DataConfidence.self, forKey: .dataConfidence)
     }
 }

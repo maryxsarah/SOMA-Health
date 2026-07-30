@@ -111,8 +111,16 @@ Deno.serve(async (req: Request) => {
     // user added an injury tag -- serving them back the high-impact jumping
     // session that safety.excludeHighImpact exists to withhold, because the
     // cache hit returns before selectTemplate is ever consulted.
+    // ALL injury-derived constraints belong here, not just the high-impact
+    // flag: the severity-derived keyword exclusions change which template
+    // is selectable, so a severity edit (mild -> severe knee) must miss
+    // the cache and re-select -- otherwise the cache replays the morning's
+    // squat/lunge session that the new severity exists to withhold.
     const equipmentSignature = Array.from(equipmentSet).sort().join("|") +
-      (safety.excludeHighImpact ? "|no-impact" : "");
+      (safety.excludeHighImpact ? "|no-impact" : "") +
+      (safety.excludedKeywords.length > 0
+        ? "|kw:" + [...safety.excludedKeywords].sort().join(",")
+        : "");
 
     // Same setup, same day -> same answer, so serve it rather than paying
     // for the wording pass again. A different setup is a different
@@ -150,13 +158,21 @@ Deno.serve(async (req: Request) => {
     // silently swapping the plan behind an already-completed session --
     // re-viewing the SAME setup that produced today's log is still allowed
     // via the cache hit above; only a genuinely different setup is blocked.
-    const { data: existingLog } = await supabase
+    // NOT maybeSingle: multiple logs per day are supported (the schema has
+    // no unique(user_id, date)), and maybeSingle errors on 2+ rows -- with
+    // the error unread, `data` came back null and the lock silently
+    // disengaged on exactly the days it was written for. The read error is
+    // also surfaced now: a guard that fails open on error isn't a guard.
+    const { data: existingLogs, error: logReadError } = await supabase
       .from("workout_log")
       .select("title")
       .eq("user_id", userId)
       .eq("date", date)
-      .maybeSingle();
-    if (existingLog) {
+      .limit(1);
+    if (logReadError) {
+      throw new Error(`could not check today's workout log: ${logReadError.message}`);
+    }
+    if ((existingLogs ?? []).length > 0) {
       return jsonResponse({
         date,
         locked: true,
