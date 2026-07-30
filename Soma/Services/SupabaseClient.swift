@@ -898,6 +898,37 @@ final class SupabaseClient {
         try Self.assertSuccess(response, data: data)
     }
 
+    // MARK: - user_feedback
+
+    /// Direct insert via RLS (`user_feedback_insert_own`) -- user-entered
+    /// content, same pattern as `logWorkout`. The device/app context comes
+    /// in as parameters (captured by the feedback UI at submit time) so
+    /// this stays a dumb transport.
+    func submitFeedback(
+        type: String,
+        message: String,
+        appVersion: String,
+        build: String,
+        osVersion: String,
+        deviceModel: String
+    ) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/user_feedback", method: "POST")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId,
+            "type": type,
+            "message": message,
+            "app_version": appVersion,
+            "build": build,
+            "os_version": osVersion,
+            "device_model": deviceModel,
+        ])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
     // MARK: - Request helpers
 
     private func authorizedRequest(path: String, method: String) async throws -> URLRequest {

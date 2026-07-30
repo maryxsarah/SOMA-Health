@@ -67,6 +67,30 @@ final class DailyRecommendationDecodingTests: XCTestCase {
         XCTAssertTrue(recommendation.sleepCapApplied)
     }
 
+    // MARK: - Server-owned reason vocabulary
+
+    func testUnrecognizedReasonDecodesAsUnknownInsteadOfThrowing() throws {
+        // REGRESSION: the server's reason vocabulary grows ahead of the
+        // client -- the dev branch's insufficient_data migration added a
+        // value this build's enum doesn't have, and synthesized decoding
+        // threw for the whole row, blanking Home for exactly the users
+        // (no health data yet) the new reason was written for.
+        let recommendation = try decode("""
+        {
+          "date": "2026-07-30",
+          "category": "moderate",
+          "message": "Starting cautiously.",
+          "reason": "insufficient_data",
+          "data_confidence": "low",
+          "sleep_cap_applied": false,
+          "injury_cap_applied": false,
+          "load_cap_applied": false
+        }
+        """)
+
+        XCTAssertEqual(recommendation.reason, .unknown)
+    }
+
     // MARK: - Caveat copy
 
     func testLowConfidenceShowsACaveat() {

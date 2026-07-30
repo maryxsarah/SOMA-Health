@@ -1,9 +1,10 @@
+import AVFoundation
 import PhotosUI
 import SwiftUI
 import UIKit
 
 private enum GymPhotoStep {
-    case pickPhoto, analyzing, confirmingEquipment, generating, result
+    case pickPhoto, cameraBlocked, analyzing, confirmingEquipment, generating, result
 }
 
 /// Entry point: RecommendationDetailView's "Or scan your gym →" button.
@@ -24,10 +25,15 @@ struct GymPhotoWorkoutView: View {
     var onGenerated: (AIWorkoutPlan, String, String) -> Void = { _, _, _ in }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var step: GymPhotoStep = .pickPhoto
     @State private var photoItem: PhotosPickerItem?
     @State private var showingCamera = false
+    /// Which explanation `cameraBlockedContent` renders. Restricted
+    /// devices get different instructions than a plain denial, because
+    /// Settings > Soma has no camera toggle for them to flip.
+    @State private var cameraRestricted = false
     @State private var selectedImage: UIImage?
     @State private var equipment: [String] = []
     @State private var newEquipmentText = ""
@@ -47,6 +53,8 @@ struct GymPhotoWorkoutView: View {
                             switch step {
                             case .pickPhoto:
                                 pickPhotoContent
+                            case .cameraBlocked:
+                                cameraBlockedContent
                             case .analyzing:
                                 loadingContent(text: "Looking at your photo…")
                             case .confirmingEquipment:
@@ -83,6 +91,16 @@ struct GymPhotoWorkoutView: View {
                 Task { await analyze(image: image) }
             }
         }
+        // Granting access in Settings suspends the app; on the way back
+        // the explainer is stale, so drop the user at the picker with a
+        // working "Take a photo" button instead of instructions they've
+        // already followed.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, step == .cameraBlocked else { return }
+            if CameraAccess.currentAction() == .present {
+                step = .pickPhoto
+            }
+        }
         .onChange(of: photoItem) { _, newItem in
             Task {
                 guard let newItem, let data = try? await newItem.loadTransferable(type: Data.self),
@@ -101,18 +119,95 @@ struct GymPhotoWorkoutView: View {
                 .foregroundStyle(.secondary)
 
             Button {
-                showingCamera = true
+                Task { await startCamera() }
             } label: {
                 Label("Take a photo", systemImage: "camera.fill")
             }
             .buttonStyle(.borderedProminent)
 
-            PhotosPicker(selection: $photoItem, matching: .images) {
-                Label("Choose from library", systemImage: "photo.on.rectangle")
-            }
-            .buttonStyle(.bordered)
+            libraryPicker(fullWidth: false)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// The library-pick affordance, shared by the pick step and the
+    /// camera-blocked explainer so copy/filter/icon changes happen once.
+    private func libraryPicker(fullWidth: Bool) -> some View {
+        PhotosPicker(selection: $photoItem, matching: .images) {
+            Label("Choose from library", systemImage: "photo.on.rectangle")
+                .frame(maxWidth: fullWidth ? .infinity : nil)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    /// Shown instead of the camera when access isn't granted. Without
+    /// this the picker still opened and just sat there black -- nothing
+    /// on screen said permission was the problem or where to change it.
+    private var cameraBlockedContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: "camera.fill")
+                    .font(.largeTitle)
+                    .foregroundStyle(Theme.pillFill)
+
+                Text(cameraRestricted ? "Camera is restricted" : "Camera access is off")
+                    .font(.title3.bold())
+
+                Text(cameraRestricted
+                    ? "Something on this device is blocking the camera — usually Screen Time or a work/school profile. You can still scan your gym from a photo you already have."
+                    : "Soma needs camera access to see your gym equipment. You can turn it back on in Settings.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(cameraRestricted ? "How to allow it" : "How to turn it on")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+
+                ForEach(Array(cameraInstructionSteps.enumerated()), id: \.offset) { index, line in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("\(index + 1).")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.pillFill)
+                        Text(line)
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.systemGray6)))
+
+            VStack(spacing: 10) {
+                // Restricted devices have no Soma camera toggle to reach,
+                // so sending them to the app's settings page would be a
+                // dead end -- only the recoverable case gets the button.
+                if !cameraRestricted {
+                    Button {
+                        SystemSettings.open()
+                    } label: {
+                        Text("Open Settings")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                libraryPicker(fullWidth: true)
+
+                Button("Back") { step = .pickPhoto }
+                    .font(.subheadline)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var cameraInstructionSteps: [String] {
+        cameraRestricted
+            ? ["Open the Settings app", "Go to Screen Time → Content & Privacy Restrictions", "Under Allowed Apps (or App Privacy), allow the Camera"]
+            : ["Open the Settings app", "Scroll down and tap Soma", "Turn on Camera"]
     }
 
     private func loadingContent(text: String) -> some View {
@@ -285,6 +380,32 @@ struct GymPhotoWorkoutView: View {
         guard !trimmed.isEmpty, !equipment.contains(trimmed) else { return }
         equipment.append(trimmed)
         newEquipmentText = ""
+    }
+
+    /// Gate in front of every camera presentation. Denied access used to
+    /// reach `UIImagePickerController` anyway, which shows a black
+    /// viewfinder rather than refusing -- so the check has to happen
+    /// here, before the sheet.
+    private func startCamera() async {
+        switch CameraAccess.currentAction() {
+        case .present:
+            showingCamera = true
+        case .request:
+            // First run: the system prompt only ever appears once, so a
+            // "no" here lands on the explainer instead of a dead sheet.
+            if await AVCaptureDevice.requestAccess(for: .video) {
+                showingCamera = true
+            } else {
+                cameraRestricted = false
+                step = .cameraBlocked
+            }
+        case .explainDenied:
+            cameraRestricted = false
+            step = .cameraBlocked
+        case .explainRestricted:
+            cameraRestricted = true
+            step = .cameraBlocked
+        }
     }
 
     private func analyze(image: UIImage) async {

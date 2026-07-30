@@ -48,7 +48,7 @@ struct PaywallView: View {
                     Text(selectedPlan == .annual ? "Start your 7-day free trial to continue" : "Continue with Soma Premium")
                         .font(Theme.display)
                         .multilineTextAlignment(.center)
-                    Text("See exactly which workouts fit today, your step target, and why -- not just the headline.")
+                    Text("See exactly which workouts fit today, your step target, and why — not just the headline.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -67,20 +67,38 @@ struct PaywallView: View {
                         plan: .monthly,
                         title: "Monthly",
                         subtitle: nil,
-                        priceHeadline: monthlyPriceText,
+                        priceHeadline: monthlyPriceText ?? Self.unavailablePrice,
                         badge: nil
                     )
                 }
 
                 if let error = subscriptionManager.errorMessage {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                    VStack(spacing: 8) {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+
+                        // Products were only ever fetched once, in
+                        // SubscriptionManager.init -- a blip at launch left
+                        // the paywall permanently unbuyable with no way out.
+                        if subscriptionManager.productsIncomplete {
+                            Button("Try again") {
+                                Task { await subscriptionManager.loadProducts() }
+                            }
+                            .font(.caption.bold())
+                            .disabled(subscriptionManager.isLoadingProducts)
+                        }
+                    }
                 }
 
                 PillButton(
                     title: selectedPlan == .annual ? "Start Free Trial" : "Continue",
-                    isEnabled: !subscriptionManager.isPurchasing
+                    // Without the product check this stayed fully enabled
+                    // while there was nothing to buy: the tap hit a `guard
+                    // let product` and returned silently, so the button just
+                    // did nothing, over and over.
+                    isEnabled: !subscriptionManager.isPurchasing && selectedProduct != nil
                 ) {
                     Task {
                         guard let product = selectedProduct else { return }
@@ -91,11 +109,13 @@ struct PaywallView: View {
                     }
                 }
 
-                Text(finePrint)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 12)
+                if let finePrint {
+                    Text(finePrint)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 12)
+                }
 
                 Button("Restore Purchases") {
                     Task {
@@ -145,6 +165,13 @@ struct PaywallView: View {
         .somaBackground()
         .task {
             checkReferralBonusSkip()
+            // SubscriptionManager only loads products once, at init. If
+            // that attempt failed (no network at launch, StoreKit not ready
+            // yet), every later visit to this screen inherited the failure
+            // -- so the paywall retries for itself when it opens.
+            if subscriptionManager.productsIncomplete, !subscriptionManager.isLoadingProducts {
+                await subscriptionManager.loadProducts()
+            }
         }
     }
 
@@ -168,30 +195,46 @@ struct PaywallView: View {
         }
     }
 
-    private var annualPriceText: String {
-        subscriptionManager.annualProduct?.displayPrice ?? "$39.99"
+    /// Stands in for a price StoreKit hasn't returned. These used to fall
+    /// back to hardcoded "$39.99"/"$4.99"/"$3.33/mo", so a failed product
+    /// load still rendered confident prices -- and fine print promising
+    /// them -- for a purchase the app could not actually make, at whatever
+    /// the App Store's real (possibly localized) price turned out to be.
+    private static let unavailablePrice = "—"
+
+    private var annualPriceText: String? {
+        subscriptionManager.annualProduct?.displayPrice
     }
 
-    private var monthlyPriceText: String {
-        "\(subscriptionManager.monthlyProduct?.displayPrice ?? "$4.99")/mo"
+    private var monthlyPriceText: String? {
+        subscriptionManager.monthlyProduct.map { "\($0.displayPrice)/mo" }
     }
 
     private var annualMonthlyEquivalentText: String {
-        guard let product = subscriptionManager.annualProduct else { return "$3.33/mo" }
-        let monthly = (product.price as NSDecimalNumber).doubleValue / 12
-        return String(format: "$%.2f/mo", monthly)
+        guard let product = subscriptionManager.annualProduct else { return Self.unavailablePrice }
+        // Formatted with the product's own storefront format style -- a
+        // hardcoded "$%.2f" here rendered the raw decimal with a dollar
+        // sign on every storefront (e.g. "¥6,000 billed annually" next to
+        // a "$500.00/mo" headline).
+        return (product.price / 12).formatted(product.priceFormatStyle) + "/mo"
     }
 
     private var annualBillingText: String {
-        "\(annualPriceText) billed annually"
+        guard let annualPriceText else { return "Annual plan" }
+        return "\(annualPriceText) billed annually"
     }
 
-    private var finePrint: String {
+    /// Nil while there's no real price behind it -- the terms describe a
+    /// purchase, so they're hidden rather than invented when that purchase
+    /// isn't available.
+    private var finePrint: String? {
         switch selectedPlan {
         case .annual:
-            "7 days free, then \(annualPriceText) per year. Billed annually and renews automatically unless canceled in the App Store."
+            guard let annualPriceText else { return nil }
+            return "7 days free, then \(annualPriceText) per year. Billed annually and renews automatically unless canceled in the App Store."
         case .monthly:
-            "\(monthlyPriceText), billed monthly and renews automatically unless canceled in the App Store."
+            guard let monthlyPriceText else { return nil }
+            return "\(monthlyPriceText), billed monthly and renews automatically unless canceled in the App Store."
         }
     }
 

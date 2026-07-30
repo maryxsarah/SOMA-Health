@@ -50,10 +50,9 @@ struct OnboardingView: View {
                             .foregroundStyle(.red)
                             .multilineTextAlignment(.center)
 
-                        if sessionManager.needsAppleIDSetup,
-                           let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                        if sessionManager.needsAppleIDSetup {
                             Button("Open Settings") {
-                                UIApplication.shared.open(settingsURL)
+                                SystemSettings.open()
                             }
                             .font(.caption.bold())
                         }
