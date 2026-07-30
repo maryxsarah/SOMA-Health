@@ -22,6 +22,8 @@ struct ProfileView: View {
     @State private var equipment: Set<EquipmentTag> = []
     @State private var injuryTags: Set<InjuryTag> = []
     @State private var injurySeverity: [InjuryTag: InjurySeverity] = [:]
+    @State private var injuryType: [InjuryTag: InjuryType] = [:]
+    @State private var injuryPainLevel: [InjuryTag: Int] = [:]
     @State private var contactEmailText = ""
     @State private var otherGoalText = ""
     @State private var otherEquipmentText = ""
@@ -180,6 +182,42 @@ struct ProfileView: View {
                                 }
                             }
                             .pickerStyle(.segmented)
+
+                            // Both optional and purely informational --
+                            // neither affects generation, just richer
+                            // context for the user's own records.
+                            Picker("Type (optional)", selection: Binding(
+                                get: { injuryType[tag] },
+                                set: { injuryType[tag] = $0 }
+                            )) {
+                                Text("Not specified").tag(InjuryType?.none)
+                                ForEach(InjuryType.allCases) { type in
+                                    Text(type.displayName).tag(InjuryType?.some(type))
+                                }
+                            }
+                            .font(.caption)
+
+                            Stepper(
+                                "Pain level: \(injuryPainLevel[tag].map(String.init) ?? "not set")",
+                                value: Binding(
+                                    get: { injuryPainLevel[tag] ?? 1 },
+                                    set: { injuryPainLevel[tag] = $0 }
+                                ),
+                                in: 1...10
+                            )
+                            .font(.caption)
+
+                            // Proactive -- shown the moment moderate/severe
+                            // is selected, not only after a bad check-in
+                            // trend later (record-injury-checkin's
+                            // escalation message is the reactive version
+                            // of this same guidance).
+                            if injurySeverity[tag] == .moderate || injurySeverity[tag] == .severe {
+                                Text("Given the severity you've selected, consider seeing a physician or physiotherapist before continuing to train this area. Soma's guidance here is informational only, not a diagnosis.")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .padding(.top, 2)
+                            }
                         }
                         .padding(.top, 4)
                     }
@@ -412,6 +450,12 @@ struct ProfileView: View {
         injurySeverity = Dictionary(uniqueKeysWithValues: profile.injurySeverity.compactMap { key, value in
             InjuryTag(rawValue: key).map { ($0, value) }
         })
+        injuryType = Dictionary(uniqueKeysWithValues: profile.injuryType.compactMap { key, value in
+            InjuryTag(rawValue: key).map { ($0, value) }
+        })
+        injuryPainLevel = Dictionary(uniqueKeysWithValues: profile.injuryPainLevel.compactMap { key, value in
+            InjuryTag(rawValue: key).map { ($0, value) }
+        })
         injuryNotesText = profile.injuryNotes ?? ""
         experienceLevel = profile.experienceLevel
         pregnancy = profile.pregnancy
@@ -541,12 +585,19 @@ struct ProfileView: View {
 
         let currentInjuryTags = Array(injuryTags)
         let currentInjurySeverity = injurySeverity
+        let currentInjuryType = injuryType
+        let currentInjuryPainLevel = injuryPainLevel
 
         Task {
             defer { isSaving = false }
             do {
                 try await SupabaseClient.shared.updateProfile(id: userId, profile: profile)
-                try await SupabaseClient.shared.reportInjury(tags: currentInjuryTags, severity: currentInjurySeverity)
+                try await SupabaseClient.shared.reportInjury(
+                    tags: currentInjuryTags,
+                    severity: currentInjurySeverity,
+                    type: currentInjuryType,
+                    painLevel: currentInjuryPainLevel
+                )
                 savedConfirmation = true
             } catch {
                 errorMessage = "Couldn't save profile. Try again."

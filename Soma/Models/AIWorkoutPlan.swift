@@ -36,10 +36,25 @@ struct AIWorkoutBlock: Codable, Identifiable {
     let rounds: Int
     let restBetweenRounds: String
     let exercises: [AIExercise]
+    /// True only for the optional finisher block, if today's plan includes
+    /// one -- see AIWorkoutPlan.exceptionalFinisher for whether it's the
+    /// full max-effort version. Absent-means-false: plans cached before
+    /// this field existed (ai_workout_plan.plan jsonb) simply omit it.
+    let isFinisher: Bool
 
     enum CodingKeys: String, CodingKey {
         case name, rounds, exercises
         case restBetweenRounds = "rest_between_rounds"
+        case isFinisher = "is_finisher"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        rounds = try container.decode(Int.self, forKey: .rounds)
+        restBetweenRounds = try container.decode(String.self, forKey: .restBetweenRounds)
+        exercises = try container.decode([AIExercise].self, forKey: .exercises)
+        isFinisher = try container.decodeIfPresent(Bool.self, forKey: .isFinisher) ?? false
     }
 }
 
@@ -59,11 +74,36 @@ struct AIWorkoutPlan: Codable {
     /// static suggestion-list label that may not match what was actually
     /// generated.
     let actualDurationMinutes: Int?
+    /// Non-nil only when generate-workout-plan itself redirected today's
+    /// body part away from one conflicting with a noted injury -- see
+    /// _shared/injurySubstitution.ts. Absent-means-nil for plans cached
+    /// before this field existed.
+    let substitutedBodyPart: String?
+    /// True only when today's finisher (see AIWorkoutBlock.isFinisher) is
+    /// the full max-effort version, gated on exceptional readiness + no
+    /// injury/split conflict -- drives the "Optional finisher -- you're
+    /// well recovered today" badge. Absent-means-false, same reasoning.
+    let exceptionalFinisher: Bool
 
     enum CodingKeys: String, CodingKey {
         case date, category, focus, blocks
         case warmUp = "warm_up"
         case coolDown = "cool_down"
         case actualDurationMinutes = "actual_duration_minutes"
+        case substitutedBodyPart = "substituted_body_part"
+        case exceptionalFinisher = "exceptional_finisher"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        date = try container.decode(String.self, forKey: .date)
+        category = try container.decode(String.self, forKey: .category)
+        focus = try container.decode(String.self, forKey: .focus)
+        warmUp = try container.decode([AIExercise].self, forKey: .warmUp)
+        blocks = try container.decode([AIWorkoutBlock].self, forKey: .blocks)
+        coolDown = try container.decode([AIExercise].self, forKey: .coolDown)
+        actualDurationMinutes = try container.decodeIfPresent(Int.self, forKey: .actualDurationMinutes)
+        substitutedBodyPart = try container.decodeIfPresent(String.self, forKey: .substitutedBodyPart)
+        exceptionalFinisher = try container.decodeIfPresent(Bool.self, forKey: .exceptionalFinisher) ?? false
     }
 }

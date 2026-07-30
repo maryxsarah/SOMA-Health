@@ -17,6 +17,7 @@
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { assessHealthKit } from "./healthkitBand.ts";
+import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -168,17 +169,25 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
     const hasInjury = ((userRow?.injury_tags as string[] | null) ?? []).length > 0;
 
-    // Any severe-tier injury protocol currently active/recovering -- a soft
-    // cap (product decision), not a hard block like pregnancy: the day is
-    // forced to "light" but generation still proceeds, with the
+    // Any moderate/severe-tier injury protocol currently active/recovering
+    // -- a soft cap (product decision), not a hard block like pregnancy:
+    // the day is forced down but generation still proceeds, with the
     // contraindication map's exclusions applied by generate-workout-plan.
-    const { data: severeProtocolRows } = await supabase
+    // Severity-scaled: severe forces the day all the way to "light" (same
+    // as the consecutive-days cap); moderate is a LESSER cap that only
+    // ever knocks push_hard down to moderate, never all the way to light
+    // -- mild injuries never reach this query at all (report-injury never
+    // creates a recovery-state row for mild severity in the first place).
+    const { data: injuryProtocolRows } = await supabase
       .from("injury_recovery_state")
       .select("severity, status")
       .eq("user_id", userId)
       .in("status", ["active", "recovering"]);
-    const hasSevereInjuryProtocol = (severeProtocolRows ?? []).some(
+    const hasSevereInjuryProtocol = (injuryProtocolRows ?? []).some(
       (r: { severity: string }) => r.severity === "severe",
+    );
+    const hasModerateInjuryProtocol = (injuryProtocolRows ?? []).some(
+      (r: { severity: string }) => r.severity === "moderate",
     );
 
     let band: Band;
@@ -268,16 +277,45 @@ Deno.serve(async (req: Request) => {
     // on the recovery band before the category is chosen), this acts on the
     // FINAL category -- deliberately a different mechanism, since it's about
     // breaking a streak regardless of how good today's recovery signals
-    // look, not about discounting those signals themselves. Never forces
-    // a full "rest" -- only ever lands on "light" active recovery.
+    // look, not about discounting those signals themselves.
+    // countConsecutiveTrainingDays already only counts moderate/push_hard
+    // logged days (not light/rest), so the streak itself is already a real
+    // accumulated-load signal, not a blind day-count. On top of that: an
+    // EXCEPTIONAL readiness day (same bar generate-workout-plan uses for
+    // its finisher) skips the cap entirely -- a body that's clearly
+    // recovered exceptionally well doesn't need to be forced down just
+    // because of the calendar. And a streak that goes well past the
+    // threshold (REST_ESCALATION_THRESHOLD) lands on full "rest" instead
+    // of "light" -- the accumulated load at that point calls for more than
+    // active recovery.
     const consecutiveDays = await countConsecutiveTrainingDays(supabase, userId, date);
+    const exceptionalReadinessToday =
+      (whoopRecovery !== null && whoopRecovery.recoveryScore >= EXCEPTIONAL_WHOOP_RECOVERY) ||
+      (ouraReadiness !== null && ouraReadiness >= EXCEPTIONAL_OURA_READINESS);
     const consecutiveDaysCapApplied = consecutiveDays >= CONSECUTIVE_DAYS_THRESHOLD &&
+      !exceptionalReadinessToday &&
       (bandCategory === "moderate" || bandCategory === "push_hard");
+    const consecutiveDaysRestEscalated = consecutiveDaysCapApplied &&
+      consecutiveDays >= REST_ESCALATION_THRESHOLD;
     // Same post-processing-on-final-category mechanism as the consecutive-
     // days cap just above, and independent of it -- either or both can fire.
     const injuryProtocolCapApplied = hasSevereInjuryProtocol &&
       (bandCategory === "moderate" || bandCategory === "push_hard");
-    const category: Category = (consecutiveDaysCapApplied || injuryProtocolCapApplied) ? "light" : bandCategory;
+    // Moderate is a LESSER cap than severe (product decision) -- only ever
+    // knocks push_hard down to moderate, never all the way to light.
+    // Mutually exclusive with injuryProtocolCapApplied in practice (a tag
+    // is either moderate or severe, never both at once for the same
+    // injury), but written independently since a user could have one
+    // moderate and one severe injury simultaneously -- severe wins.
+    const injuryProtocolModerateCapApplied = !hasSevereInjuryProtocol &&
+      hasModerateInjuryProtocol && bandCategory === "push_hard";
+    const category: Category = consecutiveDaysRestEscalated
+      ? "rest"
+      : (consecutiveDaysCapApplied || injuryProtocolCapApplied)
+      ? "light"
+      : injuryProtocolModerateCapApplied
+      ? "moderate"
+      : bandCategory;
     const message = MESSAGES[category];
 
     await supabase
@@ -294,6 +332,13 @@ Deno.serve(async (req: Request) => {
           load_cap_applied: loadCapApplied,
           consecutive_days_cap_applied: consecutiveDaysCapApplied,
           injury_protocol_cap_applied: injuryProtocolCapApplied,
+          injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+          // The uncapped category, so a later client re-fetch (after any
+          // cap has been applied) still has access to what the
+          // recommendation would have been -- the override affordance in
+          // RecommendationDetailView reads this to offer "a standard
+          // workout anyway" without re-deriving the recovery band client-side.
+          pre_cap_category: bandCategory,
           data_confidence: dataConfidence,
         },
         { onConflict: "user_id,date" },
@@ -312,6 +357,8 @@ Deno.serve(async (req: Request) => {
       load_cap_applied: loadCapApplied,
       consecutive_days_cap_applied: consecutiveDaysCapApplied,
       injury_protocol_cap_applied: injuryProtocolCapApplied,
+      injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+      pre_cap_category: bandCategory,
       data_confidence: dataConfidence,
     });
   } catch (err) {
@@ -396,6 +443,10 @@ function mapBandToCategory(
 /// light days are the streak BREAKING, not the streak continuing; that is
 /// the entire point of capping to light.
 const CONSECUTIVE_DAYS_THRESHOLD = 5;
+/// DRAFTED, NOT EXPERT-REVIEWED -- past this many consecutive hard-training
+/// days, the accumulated load calls for more than active recovery: the day
+/// lands on full "rest" instead of "light".
+const REST_ESCALATION_THRESHOLD = 6;
 
 async function countConsecutiveTrainingDays(
   // deno-lint-ignore no-explicit-any

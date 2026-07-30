@@ -50,6 +50,31 @@ enum InjurySeverity: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Injury type -- optional, separate from severity and from the free-text
+/// `injuryNotes`. A small fixed set (not free text) for the same reason as
+/// InjuryTag/InjurySeverity: informational only today (doesn't affect
+/// contraindication filtering or the recovery-protocol state machine), but
+/// structured so it can later without a data migration.
+enum InjuryType: String, Codable, CaseIterable, Identifiable {
+    case strain
+    case sprain
+    case tendinitis
+    case postSurgical = "post_surgical"
+    case other
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .strain: "Strain"
+        case .sprain: "Sprain"
+        case .tendinitis: "Tendinitis"
+        case .postSurgical: "Post-surgical"
+        case .other: "Other"
+        }
+    }
+}
+
 /// Training experience -- feeds AI workout plan generation (block count,
 /// superset usage, rest periods) so the same category/day produces
 /// meaningfully different structure for a newbie vs. an advanced lifter,
@@ -85,6 +110,12 @@ struct UserProfile: Codable, Equatable {
     /// entry here is treated as `.moderate` by the backend (never silently
     /// as "no injury") -- see contraindications.ts's describeContraindications.
     var injurySeverity: [String: InjurySeverity] = [:]
+    /// Both optional and purely informational -- absent for any tag means
+    /// "not specified," never inferred. Keyed by InjuryTag.rawValue, same
+    /// pattern as injurySeverity.
+    var injuryType: [String: InjuryType] = [:]
+    /// Self-reported pain level, 1-10. Also purely informational.
+    var injuryPainLevel: [String: Int] = [:]
     var experienceLevel: ExperienceLevel?
     /// Self-reported only, never assumed -- one of the deterministic
     /// safety-guardrail triggers for the gym-photo-workout feature.
@@ -104,6 +135,8 @@ struct UserProfile: Codable, Equatable {
         case injuryTags = "injury_tags"
         case injuryNotes = "injury_notes"
         case injurySeverity = "injury_severity"
+        case injuryType = "injury_type"
+        case injuryPainLevel = "injury_pain_level"
         case experienceLevel = "experience_level"
         case pregnancy
         case goalBodyPhotoPath = "goal_body_photo_path"

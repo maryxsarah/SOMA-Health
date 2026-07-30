@@ -42,6 +42,9 @@ struct HealthDashboardView: View {
             .somaBackground()
             .navigationTitle("Health Dashboard")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: HealthMetricFamily.self) { family in
+                MetricDetailView(metric: family, recentSnapshots: recentSnapshots)
+            }
         }
         .task { await load() }
     }
@@ -61,17 +64,28 @@ struct HealthDashboardView: View {
                         // elsewhere in this app (bandFromWhoop/bandFromOura),
                         // so one ring covers whichever this source reports.
                         if let primary = snapshot.recoveryScore ?? snapshot.readinessScore {
-                            RingChartView(
-                                value: primary,
-                                maxValue: 100,
-                                label: snapshot.recoveryScore != nil ? "Recovery" : "Readiness"
-                            )
+                            NavigationLink(value: HealthMetricFamily.recoveryReadiness) {
+                                RingChartView(
+                                    value: primary,
+                                    maxValue: 100,
+                                    label: snapshot.recoveryScore != nil ? "Recovery" : "Readiness"
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
                         VStack(alignment: .leading, spacing: 4) {
-                            ForEach(metricLines(for: snapshot), id: \.self) { line in
-                                Text(line)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                            ForEach(metricLineRows(for: snapshot), id: \.family) { row in
+                                NavigationLink(value: row.family) {
+                                    HStack {
+                                        Text(row.text)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -81,20 +95,27 @@ struct HealthDashboardView: View {
         }
     }
 
-    /// Only lines with a real value -- a source that doesn't report a
+    private struct MetricLineRow {
+        let family: HealthMetricFamily
+        let text: String
+    }
+
+    /// Only rows with a real value -- a source that doesn't report a
     /// metric (e.g. Whoop has no stress score) simply contributes nothing,
     /// rather than showing a placeholder. Recovery/readiness are shown as
-    /// the ring above instead of repeating them here.
-    private func metricLines(for snapshot: DailySnapshotRow) -> [String] {
-        var lines: [String] = []
-        if let hrv = snapshot.hrvMs { lines.append("HRV: \(Int(hrv))ms") }
-        if let restingHr = snapshot.restingHr { lines.append("Resting HR: \(Int(restingHr))bpm") }
-        if let sleepHours = snapshot.sleepHours { lines.append("Sleep: \(String(format: "%.1f", sleepHours))h") }
+    /// the ring above instead of repeating them here. Each row is tappable
+    /// -- Level 1 -> Level 2 (MetricDetailView).
+    private func metricLineRows(for snapshot: DailySnapshotRow) -> [MetricLineRow] {
+        var rows: [MetricLineRow] = []
+        if let hrv = snapshot.hrvMs { rows.append(.init(family: .hrv, text: "HRV: \(Int(hrv))ms")) }
+        if let restingHr = snapshot.restingHr { rows.append(.init(family: .restingHR, text: "Resting HR: \(Int(restingHr))bpm")) }
+        if let sleepHours = snapshot.sleepHours { rows.append(.init(family: .sleep, text: "Sleep: \(String(format: "%.1f", sleepHours))h")) }
         if let strain = snapshot.strainScore {
-            lines.append(snapshot.source == "whoop" ? "Strain: \(String(format: "%.1f", strain))/21" : "Strain: \(Int(strain)) hard session(s)")
+            let text = snapshot.source == "whoop" ? "Strain: \(String(format: "%.1f", strain))/21" : "Strain: \(Int(strain)) hard session(s)"
+            rows.append(.init(family: .strain, text: text))
         }
-        if let stress = snapshot.stressScore { lines.append("Stress: \(Int(stress)) min high-stress today") }
-        return lines
+        if let stress = snapshot.stressScore { rows.append(.init(family: .stress, text: "Stress: \(Int(stress)) min high-stress today")) }
+        return rows
     }
 
     private struct TrendMetric {
@@ -167,56 +188,7 @@ struct HealthDashboardView: View {
     }
 
     private func trendCard(_ metric: TrendMetric) -> some View {
-        let values = metric.values.map(\.value)
-        let minValue = values.min() ?? 0
-        let maxValue = values.max() ?? 1
-        let range = max(maxValue - minValue, 0.001)
-        let points = metric.values.enumerated().map { index, entry in
-            CGPoint(
-                x: metric.values.count > 1 ? Double(index) / Double(metric.values.count - 1) : 0.5,
-                y: (entry.value - minValue) / range
-            )
-        }
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(formattedAxisValue(maxValue))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            TrendLineShape(points: points)
-                .stroke(Theme.pillFill, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .frame(height: 60)
-            HStack {
-                Text(formattedAxisValue(minValue))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            HStack {
-                Text(formattedAxisDate(metric.values.first?.date))
-                Spacer()
-                Text(formattedAxisDate(metric.values.last?.date))
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .padding(.top, 2)
-        }
-    }
-
-    private func formattedAxisValue(_ value: Double) -> String {
-        value.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
-    }
-
-    private func formattedAxisDate(_ dateString: String?) -> String {
-        guard let dateString else { return "" }
-        let parser = DateFormatter()
-        parser.dateFormat = "yyyy-MM-dd"
-        parser.timeZone = .current
-        guard let parsed = parser.date(from: dateString) else { return dateString }
-        let display = DateFormatter()
-        display.dateFormat = "MMM d"
-        return display.string(from: parsed)
+        AxisLabeledTrendChart(values: metric.values)
     }
 
     private func load() async {

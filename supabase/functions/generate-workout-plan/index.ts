@@ -30,6 +30,9 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
 import { describeContraindications, type InjurySeverityLevel } from "../_shared/contraindications.ts";
+import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
+import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
+import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -63,15 +66,19 @@ const EXERCISE_SCHEMA = {
 const BLOCK_SCHEMA = {
   type: "object",
   properties: {
-    // e.g. "Block 1", "Superset A", "Block 3 - Finisher"
+    // e.g. "Block 1", "Superset A", "Block 3 - Optional Finisher"
     name: { type: "string" },
     // How many times to cycle through this block's exercises -- 1 for a
     // straight-through block, >1 for a circuit/superset.
     rounds: { type: "integer" },
     rest_between_rounds: { type: "string" },
     exercises: { type: "array", items: EXERCISE_SCHEMA },
+    // True only for the optional finisher block, if one is included today
+    // -- an explicit flag rather than string-matching the block name, so
+    // the client can reliably show the "optional finisher" badge.
+    is_finisher: { type: "boolean" },
   },
-  required: ["name", "rounds", "rest_between_rounds", "exercises"],
+  required: ["name", "rounds", "rest_between_rounds", "exercises", "is_finisher"],
   additionalProperties: false,
 };
 
@@ -142,6 +149,7 @@ interface GeneratedBlock {
   rounds: number;
   rest_between_rounds: string;
   exercises: GeneratedExercise[];
+  is_finisher: boolean;
 }
 interface WorkoutPlanResult {
   focus: string;
@@ -264,9 +272,48 @@ Deno.serve(async (req: Request) => {
       .lte("date", date)
       .order("date", { ascending: true });
 
+    // Genuine substitution, not just exclusion: a moderate/severe injury
+    // that conflicts with the assigned body part redirects to a
+    // different, safe one BEFORE the prompt is built, rather than asking
+    // the LLM to reshape an unsafe body part into a "safe variant" of
+    // itself. Defense-in-depth -- the client's resolve-injury-
+    // substitutions endpoint already steers the suggestion list away from
+    // conflicting body parts, but a stale list or direct API call still
+    // hits this same resolution here.
+    const { bodyPart: resolvedBodyPart, substituted } = resolveBodyPartForInjuries(
+      selection.bodyPart,
+      (userRow as UserRow | null)?.injury_tags ?? [],
+      ((userRow as UserRow | null)?.injury_severity ?? {}) as Record<string, InjurySeverityLevel>,
+    );
+    // The cache/lock keys above stay on the CLIENT's original selection --
+    // "did the user pick something different" is about their choice, not
+    // the resolved body part. Only the prompt itself sees the substitution.
+    const resolvedSelection: Selection = substituted
+      ? { title: `${bodyPartDisplayName(resolvedBodyPart)} (adjusted for your noted injury)`, bodyPart: resolvedBodyPart }
+      : selection;
+
+    // Deterministic finisher decision -- whether one appears at all today,
+    // and whether it's the exceptional max-effort version. Never left to
+    // the LLM: gated on category, readiness, injury contraindications, and
+    // yesterday's logged split, all computed here before the prompt exists.
+    const { excludedKeywords: finisherExcludedKeywords } = describeContraindications(
+      (userRow as UserRow | null)?.injury_tags ?? [],
+      ((userRow as UserRow | null)?.injury_severity ?? {}) as Record<string, InjurySeverityLevel>,
+    );
+    const finisherDecision = decideFinisher(
+      category,
+      resolvedBodyPart,
+      isExceptionalReadiness(category, (snapshots ?? []) as SnapshotRow[]),
+      finisherExcludedKeywords,
+      (recentLogs ?? []) as WorkoutLogRow[],
+      addDays(date, -1),
+    );
+
     const prompt = buildPrompt(
       category,
-      selection,
+      resolvedSelection,
+      substituted,
+      finisherDecision,
       userRow as UserRow | null,
       (snapshots ?? []) as SnapshotRow[],
       (recentLogs ?? []) as WorkoutLogRow[],
@@ -294,7 +341,15 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const planWithDuration = { ...plan, actual_duration_minutes: actualDurationMinutes };
+    const planWithDuration = {
+      ...plan,
+      actual_duration_minutes: actualDurationMinutes,
+      substituted_body_part: substituted ? resolvedBodyPart : null,
+      // Drives the "Optional finisher -- you're well recovered today"
+      // badge client-side (AIWorkoutPlanSections.swift) -- only ever true
+      // alongside a block whose is_finisher is also true.
+      exceptional_finisher: finisherDecision.exceptional,
+    };
 
     await supabase
       .from("ai_workout_plan")
@@ -354,14 +409,22 @@ function buildLoadGuidance(weightKg: number | null, experience: string): string 
   return `The user weighs ${weightKg}kg, ${experience} experience. For any working set targeting these patterns, keep weight_guidance's suggested load within these guideline ranges once warmed up (not a strict per-rep ceiling, use professional judgment for warm-ups): squat pattern ${range("squat_pattern")}; hinge pattern (deadlift-style) ${range("hinge_pattern")}; overhead press ${range("overhead_press")}; horizontal press (bench/push-up-with-added-load) ${range("horizontal_press")}; row/pull ${range("row_pull")}.`;
 }
 
-// DRAFTED, NOT EXPERT-REVIEWED -- thresholds for "exceptionally" high
-// readiness, distinct from the ordinary push_hard bar (Whoop 67+ recovery,
-// Oura 85+ readiness -- see generate-recommendation/index.ts's
-// bandFromWhoop/bandFromOura). Gates a materially more aggressive finisher
-// prescription, so these should get the same sign-off as
-// LOAD_FRACTION_OF_BODYWEIGHT above before this is treated as authoritative.
-const EXCEPTIONAL_WHOOP_RECOVERY = 90;
-const EXCEPTIONAL_OURA_READINESS = 95;
+/// Fallback title used only when generate-workout-plan itself substitutes
+/// a conflicting body part -- the client's resolve-injury-substitutions
+/// endpoint normally steers the suggestion list away from this case
+/// before the user ever picks a title, so this only fires as a
+/// defense-in-depth fallback.
+function bodyPartDisplayName(bodyPart: string): string {
+  switch (bodyPart) {
+    case "full_body": return "Full Body Strength";
+    case "upper_body": return "Upper Body Strength";
+    case "lower_body": return "Lower Body Strength";
+    case "core": return "Core & Mobility";
+    case "cardio": return "Cardio";
+    case "recovery": return "Active Recovery";
+    default: return "Workout";
+  }
+}
 
 /// True only on an already-push_hard day where recovery is exceptional, not
 /// just sufficient -- lets the existing mandatory finisher (see the `blocks`
@@ -377,16 +440,18 @@ function isExceptionalReadiness(category: string, snapshots: SnapshotRow[]): boo
 
 const EXPERIENCE_GUIDANCE: Record<string, string> = {
   newbie:
-    "This user is a newbie. Keep it simple: warm_up plus 2 blocks total, the LAST of which is the required finisher (no supersets in the non-finisher block -- rounds: 1), lower volume (2-3 sets per exercise), longer rest, and instructions that over-explain form and cues a beginner wouldn't already know. Avoid complex movement patterns.",
+    "This user is a newbie. Keep it simple: warm_up plus 1-2 non-finisher blocks (no supersets -- rounds: 1), lower volume (2-3 sets per exercise), longer rest, and instructions that over-explain form and cues a beginner wouldn't already know. Avoid complex movement patterns. If a finisher block is called for below, it comes LAST, after these.",
   moderate:
-    "This user has moderate training experience. Use warm_up plus 2-3 blocks total, the LAST of which is the required finisher; among the non-finisher blocks, at most one may be a 2-exercise superset (rounds 2-3). Standard rest periods, instructions can assume basic gym literacy (they know what a \"set\" and \"superset\" mean).",
+    "This user has moderate training experience. Use warm_up plus 2-3 non-finisher blocks; at most one may be a 2-exercise superset (rounds 2-3). Standard rest periods, instructions can assume basic gym literacy (they know what a \"set\" and \"superset\" mean). If a finisher block is called for below, it comes LAST, after these.",
   advanced:
-    "This user is advanced. Use warm_up plus 3+ blocks, and make real use of the block/superset/finisher structure -- e.g. Block 1 (compound lift), Block 2 (compound lift), a labeled Superset A/B/C pairing accessory movements back-to-back, and a final Block - Finisher (short, high-effort closer, scaled per the finisher rule below). Higher volume, shorter rest between superset rounds, and instructions can be terse -- assume they know proper form already and just need the prescription.",
+    "This user is advanced. Use warm_up plus 3+ non-finisher blocks, and make real use of the block/superset structure -- e.g. Block 1 (compound lift), Block 2 (compound lift), a labeled Superset A/B/C pairing accessory movements back-to-back. Higher volume, shorter rest between superset rounds, and instructions can be terse -- assume they know proper form already and just need the prescription. If a finisher block is called for below, it comes LAST, after these.",
 };
 
 function buildPrompt(
   category: string,
   selection: Selection,
+  wasSubstituted: boolean,
+  finisherDecision: FinisherDecision,
   userRow: UserRow | null,
   snapshots: SnapshotRow[],
   recentLogs: WorkoutLogRow[],
@@ -420,14 +485,27 @@ function buildPrompt(
     ? feedbackEntries.map((l) => `- ${l.date} (${l.title}): "${l.feedback}"`).join("\n")
     : null;
 
-  const exceptional = isExceptionalReadiness(category, snapshots);
-  const finisherPushHardClause = exceptional
-    ? `on today's exceptionally high-readiness day, make the finisher genuinely max-effort (2-4 min, RPE 9-10) -- more rounds or heavier load than an ordinary push_hard day's finisher, and frame it to the user explicitly as "your recovery data is exceptional today, so this finisher pushes harder than usual"`
-    : `on "push_hard" days make it short but hard (1-3 min, RPE 8-10, e.g. a max-effort carry, sprint, or hold)`;
+  // Optional now, not mandatory ("no exceptions" used to be the rule) --
+  // whether a finisher appears at all, and whether it's the full
+  // max-effort version, was already decided deterministically by
+  // decideFinisher() before this prompt was built (category eligibility,
+  // readiness, injury contraindications, and yesterday's logged split).
+  // The LLM only elaborates the chosen concept into concrete exercises.
+  const finisherInstruction = !finisherDecision.include
+    ? `Do NOT include a finisher block today. On a "${category}" day, every block should stay gentle -- no high-effort closer of any kind.`
+    : finisherDecision.exceptional && finisherDecision.definition
+    ? `Include exactly one finisher as the LAST block, named "Block N - Optional Finisher" (is_finisher: true, every other block is_finisher: false). Your recovery data is exceptionally good today, so make it genuinely max-effort: ${finisherDecision.definition.durationMinutesRange[1]} min, ${finisherDecision.definition.rpeTarget.replace("RPE 8-9", "RPE 9-10").replace("RPE 8", "RPE 9-10")}, built around this concept -- ${finisherDecision.definition.description} Frame it to the user explicitly as "your recovery data is exceptional today, so this finisher pushes harder than usual."`
+    : finisherDecision.definition
+    ? `Include exactly one finisher as the LAST block, named "Block N - Optional Finisher" (is_finisher: true, every other block is_finisher: false), clearly optional and skippable without any penalty to the rest of the session -- state that plainly in its instructions. ${finisherDecision.definition.durationMinutesRange[0]}-${finisherDecision.definition.durationMinutesRange[1]} min, built around this concept -- ${finisherDecision.definition.description} Scale effort to a solid but not maximal ${finisherDecision.definition.rpeTarget}.`
+    : `Do NOT include a finisher block today.`;
+
+  const substitutionLine = wasSubstituted
+    ? `This target was already redirected server-side to a safe body part given the user's noted injury (their original selection conflicted with it) -- build the plan around "${selection.bodyPart}" as given, do not try to reintroduce the original focus area.`
+    : `Build today's plan as a detailed breakdown of exactly this workout -- do not substitute a different type of workout or body part focus. If equipment or injuries below force a change to a specific exercise, keep it a close, safe variant of the same movement pattern rather than switching focus areas.`;
 
   return `You are a certified strength & conditioning coach writing a single day's workout plan for a fitness app user.
 
-The user has already chosen today's workout from the app's suggestion list: "${selection.title}" (target: ${selection.bodyPart}). Build today's plan as a detailed breakdown of exactly this workout -- do not substitute a different type of workout or body part focus. If equipment or injuries below force a change to a specific exercise, keep it a close, safe variant of the same movement pattern rather than switching focus areas.
+The user has already chosen today's workout from the app's suggestion list: "${selection.title}" (target: ${selection.bodyPart}). ${substitutionLine}
 
 Today's training intensity (already decided by the app's recovery-based rules -- do not override it): ${category}.
 Today's actual health data driving that intensity: ${healthLines}
@@ -451,7 +529,7 @@ ${
   }
 Return the full session as:
 - warm_up: 2-3 items that specifically prepare the body for THIS workout and adjust to today's health data above (e.g. lighter/shorter if recovery or sleep was poor) -- concrete named items like "5 min incline treadmill walk", "2x10 arm circles", "shoulder rolls", not a generic "warm up" placeholder.
-- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A", "Block 3 - Finisher") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset) and a rest_between_rounds. The LAST block in this array must always be a finisher (name it something like "Block N - Finisher") -- with NO exceptions, even on a low-readiness or short-sleep day. Scale its intensity and duration to today's actual intensity instead of omitting it: ${finisherPushHardClause}; on "moderate" days shorter and less intense (~1-2 min, moderate effort); on "light"/"rest" days very short and gentle (1-2 min, e.g. a held stretch or breathing drill, RPE 2-4 at most). Only its intensity and duration shrink on a harder recovery day -- it must never be left out entirely.
+- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). ${finisherInstruction}
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
 For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, and instructions (2-3 sentences, plain and easy to follow, describing exact form/technique). Also give a one-line "focus" summarizing today's session.`;

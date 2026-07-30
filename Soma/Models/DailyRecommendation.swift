@@ -302,6 +302,12 @@ struct DailyRecommendation: Codable, Equatable {
     let loadCapApplied: Bool
     let consecutiveDaysCapApplied: Bool
     let injuryProtocolCapApplied: Bool
+    let injuryProtocolModerateCapApplied: Bool
+    /// The uncapped recovery-band category, when the server has it on
+    /// record -- lets RecommendationDetailView offer "a standard workout
+    /// anyway" without re-deriving the recovery band client-side. Nil for
+    /// rows written before this column existed.
+    let preCapCategory: RecommendationCategory?
     let dataConfidence: DataConfidence?
 
     enum CodingKeys: String, CodingKey {
@@ -312,12 +318,14 @@ struct DailyRecommendation: Codable, Equatable {
         case loadCapApplied = "load_cap_applied"
         case consecutiveDaysCapApplied = "consecutive_days_cap_applied"
         case injuryProtocolCapApplied = "injury_protocol_cap_applied"
+        case injuryProtocolModerateCapApplied = "injury_protocol_moderate_cap_applied"
+        case preCapCategory = "pre_cap_category"
     }
 }
 
 // In an extension so the synthesized memberwise init survives.
 extension DailyRecommendation {
-    /// The two newest cap flags decode as absent-means-false. App releases
+    /// The newest cap flags decode as absent-means-false. App releases
     /// and Edge Function deployments are not atomic: a response from a
     /// function version predating a flag simply omits the key, and a
     /// required Bool turned that into a decode failure for the whole row
@@ -335,6 +343,8 @@ extension DailyRecommendation {
         loadCapApplied = try container.decode(Bool.self, forKey: .loadCapApplied)
         consecutiveDaysCapApplied = try container.decodeIfPresent(Bool.self, forKey: .consecutiveDaysCapApplied) ?? false
         injuryProtocolCapApplied = try container.decodeIfPresent(Bool.self, forKey: .injuryProtocolCapApplied) ?? false
+        injuryProtocolModerateCapApplied = try container.decodeIfPresent(Bool.self, forKey: .injuryProtocolModerateCapApplied) ?? false
+        preCapCategory = try container.decodeIfPresent(RecommendationCategory.self, forKey: .preCapCategory)
         dataConfidence = try container.decodeIfPresent(DataConfidence.self, forKey: .dataConfidence)
     }
 }

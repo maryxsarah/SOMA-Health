@@ -27,14 +27,14 @@ export const CONTRAINDICATIONS: Record<string, Record<InjurySeverityLevel, Contr
       note: "avoid deep knee flexion and jumping/plyometric work",
     },
     moderate: {
-      excludedPatterns: ["deep squats", "lunges", "jumping/plyometric work"],
-      excludedKeywords: ["squat", "lunge", "jump", "plyo"],
-      note: "avoid deep squats, lunges, and any jumping/plyometric work",
+      excludedPatterns: ["deep squats", "lunges", "jumping/plyometric work", "cycling", "deep-knee-flexion yoga poses"],
+      excludedKeywords: ["squat", "lunge", "jump", "plyo", "bike", "cycle", "cycling", "spin", "yoga", "vinyasa", "pigeon"],
+      note: "avoid deep squats, lunges, jumping/plyometric work, cycling (repetitive loaded knee flexion), and deep-knee-flexion yoga poses",
     },
     severe: {
-      excludedPatterns: ["any loaded knee flexion", "jumping/plyometric work", "running/sprinting"],
-      excludedKeywords: ["squat", "lunge", "jump", "plyo", "run", "sprint"],
-      note: "avoid all loaded knee flexion, jumping, and running -- upper-body and seated work only",
+      excludedPatterns: ["any loaded knee flexion", "jumping/plyometric work", "running/sprinting", "cycling", "yoga poses involving knee flexion"],
+      excludedKeywords: ["squat", "lunge", "jump", "plyo", "run", "sprint", "bike", "cycle", "cycling", "spin", "yoga", "vinyasa", "pigeon"],
+      note: "avoid all loaded knee flexion, jumping, running, cycling, and yoga poses involving knee flexion -- upper-body and seated work only",
     },
   },
   shoulder: {
@@ -44,14 +44,14 @@ export const CONTRAINDICATIONS: Record<string, Record<InjurySeverityLevel, Contr
       note: "keep overhead pressing light",
     },
     moderate: {
-      excludedPatterns: ["overhead press", "heavy bench press", "dips"],
-      excludedKeywords: ["overhead", "bench press", "dip"],
-      note: "avoid overhead pressing, heavy bench press, and dips",
+      excludedPatterns: ["overhead press", "heavy bench press", "dips", "weight-bearing overhead yoga poses"],
+      excludedKeywords: ["overhead", "bench press", "dip", "yoga", "vinyasa", "chaturanga", "downward dog"],
+      note: "avoid overhead pressing, heavy bench press, dips, and weight-bearing overhead yoga poses (e.g. chaturanga, downward dog)",
     },
     severe: {
-      excludedPatterns: ["any overhead movement", "pressing movements", "dips"],
-      excludedKeywords: ["overhead", "press", "dip"],
-      note: "avoid all overhead and pressing movements -- lower-body work only",
+      excludedPatterns: ["any overhead movement", "pressing movements", "dips", "weight-bearing yoga poses"],
+      excludedKeywords: ["overhead", "press", "dip", "yoga", "vinyasa", "chaturanga", "downward dog"],
+      note: "avoid all overhead and pressing movements, and weight-bearing yoga poses -- lower-body work only",
     },
   },
   back: {
@@ -61,14 +61,14 @@ export const CONTRAINDICATIONS: Record<string, Record<InjurySeverityLevel, Contr
       note: "keep loaded spinal flexion light",
     },
     moderate: {
-      excludedPatterns: ["loaded spinal flexion", "heavy deadlifts", "loaded twisting"],
-      excludedKeywords: ["deadlift", "good morning", "russian twist"],
-      note: "avoid loaded spinal flexion, heavy deadlifts, and loaded twisting",
+      excludedPatterns: ["loaded spinal flexion", "heavy deadlifts", "loaded twisting", "backbend/loaded-flexion yoga poses"],
+      excludedKeywords: ["deadlift", "good morning", "russian twist", "yoga", "vinyasa"],
+      note: "avoid loaded spinal flexion, heavy deadlifts, loaded twisting, and backbend/loaded-flexion yoga poses",
     },
     severe: {
-      excludedPatterns: ["any spinal loading", "deadlifts", "loaded twisting", "high-impact cardio"],
-      excludedKeywords: ["deadlift", "twist", "run", "jump"],
-      note: "avoid all spinal loading and high-impact cardio -- gentle mobility only",
+      excludedPatterns: ["any spinal loading", "deadlifts", "loaded twisting", "high-impact cardio", "yoga poses involving spinal loading"],
+      excludedKeywords: ["deadlift", "twist", "run", "jump", "yoga", "vinyasa"],
+      note: "avoid all spinal loading, high-impact cardio, and yoga poses involving spinal loading -- gentle mobility only",
     },
   },
   ankle: {
@@ -78,14 +78,17 @@ export const CONTRAINDICATIONS: Record<string, Record<InjurySeverityLevel, Contr
       note: "avoid jumping/plyometric work",
     },
     moderate: {
-      excludedPatterns: ["jumping/plyometric work", "lateral cutting/agility drills", "running on uneven surfaces"],
-      excludedKeywords: ["jump", "plyo", "sprint", "agility", "run"],
-      note: "avoid jumping, lateral cutting/agility drills, and running",
+      // Balance-heavy single-leg yoga poses (tree, warrior III, etc.) load
+      // an unstable ankle under bodyweight -- a weaker case than knee's
+      // cycling/yoga exclusion above, so kept narrower and moderate+ only.
+      excludedPatterns: ["jumping/plyometric work", "lateral cutting/agility drills", "running on uneven surfaces", "balance-heavy standing yoga poses"],
+      excludedKeywords: ["jump", "plyo", "sprint", "agility", "run", "yoga", "vinyasa"],
+      note: "avoid jumping, lateral cutting/agility drills, running, and balance-heavy standing yoga poses",
     },
     severe: {
-      excludedPatterns: ["any weight-bearing impact", "jumping/plyometric work", "running/sprinting"],
-      excludedKeywords: ["jump", "plyo", "sprint", "run", "agility"],
-      note: "avoid all weight-bearing impact work -- seated or upper-body work only",
+      excludedPatterns: ["any weight-bearing impact", "jumping/plyometric work", "running/sprinting", "standing yoga poses"],
+      excludedKeywords: ["jump", "plyo", "sprint", "run", "agility", "yoga", "vinyasa"],
+      note: "avoid all weight-bearing impact work and standing yoga poses -- seated or upper-body work only",
     },
   },
   hip: {

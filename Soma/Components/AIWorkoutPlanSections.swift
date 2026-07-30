@@ -50,6 +50,17 @@ struct AIWorkoutPlanView: View {
                 }
             }
             .padding(.top, 10)
+            // Clearly optional/skippable -- the finisher used to be
+            // mandatory ("no exceptions") on every plan; it's now included
+            // deterministically only on eligible days (see
+            // finisherCatalog.ts's decideFinisher), and this badge is the
+            // one place that distinction is visible to the user.
+            if block.isFinisher {
+                Text(plan.exceptionalFinisher ? "Optional finisher — you're well recovered today" : "Optional finisher — skip it without any penalty")
+                    .font(.caption2.bold())
+                    .foregroundStyle(Theme.pillFill)
+                    .padding(.top, 2)
+            }
             ForEach(block.exercises) { exercise in
                 aiExerciseRow(exercise)
             }

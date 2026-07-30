@@ -1,14 +1,21 @@
 import SwiftUI
 
 private enum PostSetupStep: Int {
-    case referralCode, loading, planSummary, bodyPhotos, consent, tryFree, trialReminder, paywall
+    case referralCode, loading, consent, planSummary, bodyPhotos, tryFree, trialReminder, paywall
 }
 
 /// Runs everything after Notification Enablement and before Home:
-/// optional referral code, the plan-generation loading sequence, a plan
-/// summary, Terms/Privacy + marketing consent, two soft pre-paywall
-/// reassurance screens, and finally the paywall itself. Only marks
-/// onboarding complete once this entire sequence finishes.
+/// optional referral code, the plan-generation loading sequence,
+/// Terms/Privacy + health-disclaimer + marketing consent, a plan summary,
+/// two soft pre-paywall reassurance screens, and finally the paywall
+/// itself. Only marks onboarding complete once this entire sequence
+/// finishes.
+///
+/// `.consent` deliberately runs BEFORE `.planSummary` -- it used to come
+/// after, which meant PlanSummaryStepView showed the user's actual first
+/// real recommendation (category + message) before they had acknowledged
+/// the health disclaimer. That's the one legally load-bearing ordering
+/// constraint in this whole sequence; don't move `.consent` back down.
 struct PostSetupFlowView: View {
     @EnvironmentObject private var appState: AppState
 

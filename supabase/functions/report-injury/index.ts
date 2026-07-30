@@ -30,6 +30,15 @@ Deno.serve(async (req: Request) => {
     const injurySeverity: Record<string, string> = body.injurySeverity && typeof body.injurySeverity === "object"
       ? body.injurySeverity
       : {};
+    // Both informational only -- unlike tags/severity, neither affects
+    // contraindication filtering or the recovery-protocol state machine,
+    // so no diffing/escalation logic is needed for them, just write-through.
+    const injuryType: Record<string, string> = body.injuryType && typeof body.injuryType === "object"
+      ? body.injuryType
+      : {};
+    const injuryPainLevel: Record<string, number> = body.injuryPainLevel && typeof body.injuryPainLevel === "object"
+      ? body.injuryPainLevel
+      : {};
 
     // Reject unknown severities outright rather than storing them: a raw
     // value like "critical" would be persisted verbatim, and every later
@@ -87,13 +96,23 @@ Deno.serve(async (req: Request) => {
 
     const { error: writeError } = await supabase
       .from("users")
-      .update({ injury_tags: injuryTags, injury_severity: injurySeverity })
+      .update({
+        injury_tags: injuryTags,
+        injury_severity: injurySeverity,
+        injury_type: injuryType,
+        injury_pain_level: injuryPainLevel,
+      })
       .eq("id", userId);
     if (writeError) {
       throw new Error(`could not write injury tags/severity: ${writeError.message}`);
     }
 
+    // Mild injuries never get a recovery-state row at all -- per product
+    // decision, mild is exclusion-only (contraindications.ts handles it
+    // within the same body part), with no multi-day protocol/check-in
+    // machinery. Only moderate/severe start (or restart) a protocol.
     for (const { tag, severity } of newlyAddedOrEscalated) {
+      if (severity === "mild") continue;
       const { error } = await supabase
         .from("injury_recovery_state")
         .upsert(
@@ -117,12 +136,22 @@ Deno.serve(async (req: Request) => {
     }
 
     for (const { tag, severity } of severityChangedOnly) {
-      const { error } = await supabase
-        .from("injury_recovery_state")
-        .update({ severity, updated_at: new Date().toISOString() })
-        .eq("user_id", userId)
-        .eq("injury_tag", tag)
-        .neq("status", "cleared");
+      // A downgrade to mild exits the protocol entirely (same reasoning as
+      // above) rather than leaving a mild-severity row that would still
+      // gate generation -- clear it instead of just updating severity.
+      const { error } = severity === "mild"
+        ? await supabase
+          .from("injury_recovery_state")
+          .update({ status: "cleared", updated_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("injury_tag", tag)
+          .neq("status", "cleared")
+        : await supabase
+          .from("injury_recovery_state")
+          .update({ severity, updated_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("injury_tag", tag)
+          .neq("status", "cleared");
       if (error) {
         throw new Error(`could not update severity for ${tag}: ${error.message}`);
       }

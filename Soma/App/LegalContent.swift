@@ -16,12 +16,12 @@ enum LegalContent {
     /// returning user needs to re-acknowledge -- see SupabaseClient's
     /// sign-in methods, which write both this and a timestamp on every
     /// successful gated sign-in.
-    static let currentVersion = "2026-07-30"
+    static let currentVersion = "2026-07-30-2"
 
     static let privacyPolicyTitle = "Privacy Policy"
 
     static let privacyPolicyBody = """
-    Last updated: 30th of July 2026
+    Last updated: 30th of July 2026 (revised)
 
     Soma ("the app", "we", "our") helps you decide how hard to train each \
     day by reading data from Apple Health, Whoop, and/or Oura. This policy \
@@ -57,6 +57,9 @@ enum LegalContent {
     choose. Passwords are never visible to us in plain text -- they are \
     handled entirely by our authentication provider, Supabase.
     - Your notification wake-time preference and marketing preference.
+    - App usage and interaction events (e.g. which screens you view and \
+    actions you take in the app), collected via our analytics providers, \
+    to understand how the app is used and to improve it.
 
     How We Use Your Information
     Your health and activity data is used to compute your daily training \
@@ -88,6 +91,9 @@ enum LegalContent {
     context described above
     - OpenAI -- recognizes equipment in gym photos and writes exercise \
     instructions
+    - Firebase (Google) -- analytics on how the app is used
+    - PostHog -- a second analytics service processing the same app-usage \
+    events as Firebase, above
     Each provider's use of data they process is governed by their own \
     privacy policy in addition to this one.
 
@@ -115,7 +121,7 @@ enum LegalContent {
     static let termsOfServiceTitle = "Terms of Service"
 
     static let termsOfServiceBody = """
-    Last updated: 30th of July 2026
+    Last updated: 30th of July 2026 (revised)
 
     By using Soma ("the app"), you agree to these Terms of Service.
 
@@ -126,10 +132,15 @@ enum LegalContent {
     personalized medical or freeform advice.
 
     Not Medical Advice
-    Soma provides general fitness suggestions and is not a substitute for \
-    professional medical advice, diagnosis, or treatment. Always consult a \
+    Soma provides automated fitness, recovery, and wellness recommendations \
+    for informational purposes only. Soma is not a medical device and does \
+    not provide medical, physical therapy, or professional health advice. \
+    Soma is not a substitute for consultation with a qualified physician, \
+    physical therapist, or certified fitness professional. Always consult a \
     qualified physician before beginning or changing an exercise program, \
-    particularly if you have any medical condition. Stop exercising and \
+    particularly if you have any medical condition. If you have an injury, \
+    medical condition, or are experiencing pain, consult a licensed \
+    professional before following any recommendation. Stop exercising and \
     seek medical attention if you experience pain, dizziness, or other \
     concerning symptoms. Any injury you note in your profile, and any \
     related severity, contraindication guidance, or recovery-protocol \
@@ -155,6 +166,14 @@ enum LegalContent {
     maximum extent permitted by law, we are not liable for any damages \
     arising from your use of the app, including any injury resulting from \
     following a training recommendation.
+
+    Limitation of Liability Cap
+    To the maximum extent permitted by law, SOMA's total aggregate \
+    liability to you for any claim arising out of or relating to your use \
+    of the app or subscription shall not exceed the total amount you have \
+    paid to SOMA for your subscription. This limitation applies regardless \
+    of the legal theory of liability and even if SOMA has been advised of \
+    the possibility of such damages.
 
     Termination
     You may stop using the app at any time. We may suspend or terminate \

@@ -234,6 +234,40 @@ final class HealthKitManager {
         }
     }
 
+    /// Average and max heart rate over an EXACT window -- e.g. a logged
+    /// workout's start/end timestamps, not the whole day. Everything else
+    /// in this file only ever computes a day-level median (see
+    /// fetchMedianQuantity above); this is the one query scoped to an
+    /// arbitrary caller-supplied interval, for DayDetailView's wearable-
+    /// HR-matched-to-workout feature. Returns nil if nothing was recorded
+    /// in that exact window (a workout logged with no Watch worn, or a
+    /// window HealthKit simply has no samples for) -- never a
+    /// zero/placeholder value.
+    func fetchHeartRateSummary(start: Date, end: Date) async -> (average: Double, max: Double)? {
+        guard Self.isAvailable, let type = HKObjectType.quantityType(forIdentifier: .heartRate) else { return nil }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let unit = HKUnit.count().unitDivided(by: .minute())
+
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, _ in
+                let values = (samples as? [HKQuantitySample])?
+                    .map { $0.quantity.doubleValue(for: unit) } ?? []
+                guard !values.isEmpty else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let average = values.reduce(0, +) / Double(values.count)
+                continuation.resume(returning: (average: average, max: values.max() ?? average))
+            }
+            store.execute(query)
+        }
+    }
+
     static func median(_ values: [Double]) -> Double? {
         guard !values.isEmpty else { return nil }
         let sorted = values.sorted()

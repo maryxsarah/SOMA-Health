@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Privacy Policy</h1>
-<p class="updated">Last updated: 30th of July 2026</p>
+<p class="updated">Last updated: 30th of July 2026 (revised)</p>
 
 <p>Soma ("the app", "we", "our") helps you decide how hard to train each day by reading data from Apple Health, Whoop, and/or Oura. This policy explains what data we collect, how it's used, and your choices.</p>
 
@@ -27,6 +27,7 @@
   <li>Workouts you mark as complete, and any feedback you write about them.</li>
   <li>Account information depending on how you sign in: with Apple, a unique ID (and your email only if Apple shares it and you allow it); with Google, a unique ID and the email associated with your Google account; with email and password, the email address and password you choose. Passwords are never visible to us in plain text — they are handled entirely by our authentication provider, Supabase.</li>
   <li>Your notification wake-time preference and marketing preference.</li>
+  <li>App usage and interaction events (e.g. which screens you view and actions you take in the app), collected via our analytics providers, to understand how the app is used and to improve it.</li>
 </ul>
 
 <h2>How We Use Your Information</h2>
@@ -44,6 +45,8 @@
   <li>Supabase — backend, database, and hosting</li>
   <li>Anthropic — generates workout plans and workout suggestions from the context described above</li>
   <li>OpenAI — recognizes equipment in gym photos and writes exercise instructions</li>
+  <li>Firebase (Google) — analytics on how the app is used</li>
+  <li>PostHog — a second analytics service processing the same app-usage events as Firebase, above</li>
 </ul>
 <p>Each provider's use of data they process is governed by their own privacy policy in addition to this one.</p>
 

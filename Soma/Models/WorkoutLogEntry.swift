@@ -15,11 +15,21 @@ struct WorkoutLogEntry: Codable, Identifiable {
     /// column existed. Lets Training History show real exercise-level
     /// detail per day instead of just title/body_part.
     let planSnapshot: AIWorkoutPlan?
+    /// Real workout start/end, distinct from `completedAt` (the log
+    /// action's own timestamp) -- nil for entries logged before these
+    /// columns existed, or logged without a reliable start time. Raw ISO
+    /// 8601 strings, same convention as `completedAt`, parsed at the point
+    /// of use rather than decoded as Date (this app doesn't set a custom
+    /// JSONDecoder date strategy).
+    let startedAt: String?
+    let endedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, date, title, category, feedback
         case bodyPart = "body_part"
         case completedAt = "completed_at"
         case planSnapshot = "plan_snapshot"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
     }
 }

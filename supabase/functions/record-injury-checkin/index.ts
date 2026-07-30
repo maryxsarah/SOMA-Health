@@ -61,6 +61,14 @@ Deno.serve(async (req: Request) => {
     const date: string = typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
       ? body.date
       : new Date().toISOString().slice(0, 10);
+    // Optional -- purely informational, doesn't affect the state machine
+    // below. Bounds-checked rather than trusted verbatim (a raw client
+    // value could otherwise store e.g. -5 or 500 in a "1-10" column).
+    const rawPainLevel = body.painLevel;
+    const painLevel: number | null = typeof rawPainLevel === "number" && Number.isInteger(rawPainLevel) &&
+        rawPainLevel >= 1 && rawPainLevel <= 10
+      ? rawPainLevel
+      : null;
 
     const supabase = serviceRoleClient();
 
@@ -119,6 +127,7 @@ Deno.serve(async (req: Request) => {
         last_checkin_response: response,
         consecutive_good_days: consecutiveGoodDays,
         consecutive_bad_days: consecutiveBadDays,
+        ...(painLevel !== null ? { pain_level: painLevel } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", row.id);

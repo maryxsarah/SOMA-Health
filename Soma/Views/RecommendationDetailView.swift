@@ -18,6 +18,12 @@ struct RecommendationDetailView: View {
     @State private var selectedDurationRange: ClosedRange<Int>?
     @State private var preGenerationNotes = ""
     @State private var aiPlan: AIWorkoutPlan?
+    /// Set the moment a plan is first shown -- the most honest available
+    /// approximation of "when the workout started" without a dedicated
+    /// start-workout timer. Feeds workout_log.started_at, which lets
+    /// DayDetailView match wearable heart-rate data to the exact session
+    /// window later, instead of the whole day.
+    @State private var planStartedAt: Date?
     @State private var isLoadingAIPlan = false
     @State private var aiPlanError: String?
 
@@ -26,7 +32,18 @@ struct RecommendationDetailView: View {
     @State private var addonSuggestions: [String] = []
     @State private var isFetchingAddons = false
 
+    /// Set only via the "give me a standard workout anyway" / active-
+    /// recovery-type override affordance, shown when a cap has been
+    /// applied. See `effectiveCategory`.
+    @State private var overrideCategory: RecommendationCategory?
+
     @State private var injuryStates: [InjuryRecoveryState] = []
+    // Body-part redirects currently active for the user's injuries (e.g.
+    // "lower_body": "upper_body" for a knee injury) -- steers the
+    // suggestion list away from a conflicting body part before the user
+    // even picks one. generate-workout-plan runs the same resolution
+    // server-side as a defense-in-depth fallback if this list is stale.
+    @State private var injurySubstitutions: [String: String] = [:]
     // Tags checked in during THIS view session -- hides the row immediately
     // without waiting on a re-fetch of injuryStates.
     @State private var checkedInTagsToday: Set<String> = []
@@ -198,13 +215,36 @@ struct RecommendationDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
-                    if recommendation.consecutiveDaysCapApplied {
-                        Text("Note: you've trained 5+ days in a row, so today is active recovery -- light movement only, even though recovery looked strong.")
+                    if recommendation.consecutiveDaysCapApplied, overrideCategory == nil {
+                        Text(recommendation.category == .rest
+                            ? "Note: you've trained several days in a row without a break, so today is a full rest day, even though recovery looked strong."
+                            : "Note: you've trained 5+ days in a row, so today is active recovery -- light movement only, even though recovery looked strong.")
                             .font(.caption)
                             .foregroundStyle(.orange)
+                        if let preCapCategory = recommendation.preCapCategory, preCapCategory != recommendation.category {
+                            Button("Give me a standard workout anyway") {
+                                overrideCategory = preCapCategory
+                            }
+                            .font(.caption.bold())
+                            .padding(.top, 2)
+                        }
+                    }
+                    if let overrideCategory, recommendation.consecutiveDaysCapApplied {
+                        HStack(spacing: 4) {
+                            Text("Showing \(overrideCategory.displayTitle) workouts instead.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button("Undo") { self.overrideCategory = nil }
+                                .font(.caption.bold())
+                        }
                     }
                     if recommendation.injuryProtocolCapApplied {
                         Text("Note: today's intensity was capped to light because of an active severe-injury recovery protocol, even though recovery looked strong.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if recommendation.injuryProtocolModerateCapApplied {
+                        Text("Note: today's intensity was capped to moderate because of an active injury recovery protocol, even though recovery looked strong enough for push hard.")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -319,8 +359,17 @@ struct RecommendationDetailView: View {
     /// filtering would otherwise leave nothing to show. The first item in
     /// this ranked order is shown as "SOMA Top Recommendation" in
     /// `workoutRow`.
+    /// The category actually in effect for suggestion/logging purposes --
+    /// the server's recommendation unless the user has tapped the override
+    /// affordance below, in which case their choice wins. Session-local
+    /// only: never written back as the server's own record of what was
+    /// actually recommended, so the day's real history stays honest.
+    private var effectiveCategory: RecommendationCategory {
+        overrideCategory ?? recommendation.category
+    }
+
     private var filteredWorkoutSuggestions: [WorkoutSuggestion] {
-        let all = recommendation.category.workoutSuggestions
+        let all = effectiveCategory.workoutSuggestions
         let hasInjury = !profile.injuryTags.isEmpty
 
         var candidates = profile.equipment.isEmpty
@@ -329,6 +378,17 @@ struct RecommendationDetailView: View {
 
         if hasInjury {
             candidates = candidates.filter { !$0.highImpact }
+        }
+        // Genuine substitution, not just exclusion: don't even offer a
+        // suggestion whose body part conflicts with a moderate/severe
+        // injury -- generation would silently redirect it anyway, so
+        // showing it here would mismatch the title the user picked
+        // against what actually gets built.
+        if !injurySubstitutions.isEmpty {
+            let redirected = candidates.filter { injurySubstitutions[$0.bodyPart.rawValue] == nil }
+            if !redirected.isEmpty {
+                candidates = redirected
+            }
         }
         if candidates.isEmpty {
             candidates = all
@@ -382,6 +442,7 @@ struct RecommendationDetailView: View {
                 targetDurationMinutes: selectedDurationRange
             )
             AnalyticsManager.shared.aiResponseReceived()
+            if planStartedAt == nil { planStartedAt = Date() }
         } catch SupabaseError.safetyBlocked(let message) {
             // Shown verbatim. A generic "try again in a moment" would be a
             // lie -- retrying cannot help, and the user would keep tapping.
@@ -407,9 +468,14 @@ struct RecommendationDetailView: View {
                 date: recommendation.date,
                 title: selectedTitle,
                 bodyPart: selectedBodyPart,
-                category: recommendation.category.rawValue,
+                // The category actually done (which may be the user's
+                // override), not the server's original capped
+                // recommendation -- keeps future load-tracking honest.
+                category: effectiveCategory.rawValue,
                 feedback: trimmedFeedback.isEmpty ? nil : trimmedFeedback,
-                planSnapshot: aiPlan
+                planSnapshot: aiPlan,
+                startedAt: planStartedAt,
+                endedAt: planStartedAt != nil ? Date() : nil
             )
             loggedTitlesToday.insert(selectedTitle)
             if !trimmedFeedback.isEmpty {
@@ -443,11 +509,13 @@ struct RecommendationDetailView: View {
             toDate: Self.daysBefore(1, of: recommendation.date)
         )) ?? []
         async let injuryStatesFetch: [InjuryRecoveryState] = (try? await SupabaseClient.shared.fetchInjuryRecoveryStates()) ?? []
+        async let injurySubstitutionsFetch: [String: String] = (try? await SupabaseClient.shared.fetchInjurySubstitutions()) ?? [:]
 
         snapshots = await snapshotFetch ?? []
         averageSteps = await stepsFetch
         profile = await profileFetch
         injuryStates = await injuryStatesFetch
+        injurySubstitutions = await injurySubstitutionsFetch
         let todaysLogs = await todaysLogsFetch
         loggedTitlesToday = Set(todaysLogs.map(\.title))
         recentBodyPartCounts = await recentLogsFetch.compactMap { BodyPartFocus(rawValue: $0.bodyPart) }
@@ -542,6 +610,8 @@ private struct SeededGenerator: RandomNumberGenerator {
             loadCapApplied: false,
             consecutiveDaysCapApplied: false,
             injuryProtocolCapApplied: false,
+            injuryProtocolModerateCapApplied: false,
+            preCapCategory: nil,
             dataConfidence: .low
         )
     )

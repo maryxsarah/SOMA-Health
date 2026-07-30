@@ -258,7 +258,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_notes,experience_level,pregnancy,goal_body_photo_path,current_body_photo_path&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,goal_body_photo_path,current_body_photo_path&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -299,15 +299,37 @@ final class SupabaseClient {
     /// injury_tags/injury_severity. Diffs server-side against the current
     /// row to detect new/escalated injuries and start (or clear) the
     /// corresponding injury_recovery_state protocol.
-    func reportInjury(tags: [InjuryTag], severity: [InjuryTag: InjurySeverity]) async throws {
+    func reportInjury(
+        tags: [InjuryTag],
+        severity: [InjuryTag: InjurySeverity],
+        type: [InjuryTag: InjuryType] = [:],
+        painLevel: [InjuryTag: Int] = [:]
+    ) async throws {
         var request = try await authorizedRequest(path: "functions/v1/report-injury", method: "POST")
         let severityBody = Dictionary(uniqueKeysWithValues: severity.map { ($0.rawValue, $1.rawValue) })
+        let typeBody = Dictionary(uniqueKeysWithValues: type.map { ($0.rawValue, $1.rawValue) })
+        let painLevelBody = Dictionary(uniqueKeysWithValues: painLevel.map { ($0.rawValue, $1) })
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "injuryTags": tags.map(\.rawValue),
             "injurySeverity": severityBody,
+            "injuryType": typeBody,
+            "injuryPainLevel": painLevelBody,
         ])
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
+    }
+
+    /// Every body-part redirect currently active for the caller's noted
+    /// injuries -- e.g. `["lower_body": "upper_body"]` for a knee injury --
+    /// so RecommendationDetailView can steer its suggestion list away from
+    /// a conflicting body part before the user even picks one. Empty
+    /// result means nothing is currently redirected.
+    func fetchInjurySubstitutions() async throws -> [String: String] {
+        let request = try await authorizedRequest(path: "functions/v1/resolve-injury-substitutions", method: "POST")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Response: Decodable { let substitutions: [String: String] }
+        return try JSONDecoder().decode(Response.self, from: data).substitutions
     }
 
     /// Plain read via RLS -- active/recovering rows drive the daily
@@ -325,13 +347,15 @@ final class SupabaseClient {
     /// check-in card was shown for) -- the server used to stamp its own
     /// UTC date, which disagreed with the local date for hours every day
     /// and let the same real day be checked in twice.
-    func recordInjuryCheckin(tag: InjuryTag, response: InjuryCheckinResponse, date: String) async throws -> InjuryCheckinResult {
+    func recordInjuryCheckin(tag: InjuryTag, response: InjuryCheckinResponse, date: String, painLevel: Int? = nil) async throws -> InjuryCheckinResult {
         var request = try await authorizedRequest(path: "functions/v1/record-injury-checkin", method: "POST")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
+        var body: [String: Any] = [
             "injuryTag": tag.rawValue,
             "response": response.rawValue,
             "date": date,
-        ])
+        ]
+        if let painLevel { body["painLevel"] = painLevel }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, httpResponse) = try await urlSession.data(for: request)
         try Self.assertSuccess(httpResponse, data: data)
         return try JSONDecoder().decode(InjuryCheckinResult.self, from: data)
@@ -488,7 +512,7 @@ final class SupabaseClient {
     /// Plain read via RLS -- used by HomeView on appear so opening the app
     /// doesn't invoke the mutating generate-recommendation function every time.
     func fetchTodaysRecommendation(date: String) async throws -> DailyRecommendation? {
-        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied&limit=1"
+        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,pre_cap_category&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -509,7 +533,7 @@ final class SupabaseClient {
         let startStr = formatter.string(from: start)
         let endStr = formatter.string(from: end)
 
-        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied&order=date.asc"
+        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,pre_cap_category&order=date.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -547,7 +571,16 @@ final class SupabaseClient {
     /// workout done (e.g. "I like a 5-10min incline treadmill warm-up") --
     /// generate-workout-plan folds recent feedback into future plans for a
     /// similar workout.
-    func logWorkout(date: String, title: String, bodyPart: String, category: String, feedback: String? = nil, planSnapshot: AIWorkoutPlan? = nil) async throws {
+    func logWorkout(
+        date: String,
+        title: String,
+        bodyPart: String,
+        category: String,
+        feedback: String? = nil,
+        planSnapshot: AIWorkoutPlan? = nil,
+        startedAt: Date? = nil,
+        endedAt: Date? = nil
+    ) async throws {
         guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
         var body: [String: Any] = [
             "user_id": userId,
@@ -559,6 +592,15 @@ final class SupabaseClient {
         if let feedback, !feedback.isEmpty {
             body["feedback"] = feedback
         }
+        // Real workout start/end, distinct from completed_at (the log
+        // action's own timestamp) -- needed to match wearable HR data to
+        // the exact session window later. Nil when the caller has no
+        // reliable start time to offer (e.g. a workout logged without ever
+        // opening the AI plan first).
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let startedAt { body["started_at"] = isoFormatter.string(from: startedAt) }
+        if let endedAt { body["ended_at"] = isoFormatter.string(from: endedAt) }
         // Snapshots the actual plan shown at log time -- ai_workout_plan is
         // keyed by (user_id, date) and gets overwritten on regeneration, so
         // it's not a reliable source for "what did they actually do" later.
@@ -579,7 +621,7 @@ final class SupabaseClient {
     /// which of today's/yesterday's suggestions are already logged) and
     /// DayDetailView (calendar day drill-down).
     func fetchWorkoutLogs(date: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot&order=completed_at.asc"
+        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at&order=completed_at.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -590,7 +632,7 @@ final class SupabaseClient {
     /// TrainingHistoryView's 30-day list and RecommendationDetailView's
     /// 7-day body-part balancing.
     func fetchWorkoutLogs(fromDate: String, toDate: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot&order=date.desc"
+        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at&order=date.desc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -642,9 +684,17 @@ final class SupabaseClient {
     /// (Oura/Whoop) -- distinct from workout_log (what the user told Soma
     /// they did). HealthKit's own workouts are read separately, on-device,
     /// via HealthKitManager -- the caller merges both into one timeline.
-    func fetchProviderWorkoutTimeline(date: String) async throws -> [WorkoutTimelineEntry] {
+    /// `startTime`/`endTime`, if given, narrow the wearable query to a
+    /// specific logged workout's exact span (DayDetailView's wearable-HR-
+    /// matched-to-workout feature) instead of the whole day.
+    func fetchProviderWorkoutTimeline(date: String, startTime: Date? = nil, endTime: Date? = nil) async throws -> [WorkoutTimelineEntry] {
         var request = try await authorizedRequest(path: "functions/v1/fetch-workout-timeline", method: "POST")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["date": date])
+        var body: [String: Any] = ["date": date]
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let startTime { body["startTime"] = isoFormatter.string(from: startTime) }
+        if let endTime { body["endTime"] = isoFormatter.string(from: endTime) }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -655,6 +705,8 @@ final class SupabaseClient {
             let start_time: String
             let duration_minutes: Int
             let calories: Int?
+            let average_heart_rate: Int?
+            let max_heart_rate: Int?
         }
         struct Response: Decodable { let entries: [DTO] }
 
@@ -672,7 +724,9 @@ final class SupabaseClient {
                 title: dto.title,
                 startTime: start,
                 durationMinutes: dto.duration_minutes,
-                calories: dto.calories
+                calories: dto.calories,
+                averageHeartRate: dto.average_heart_rate,
+                maxHeartRate: dto.max_heart_rate
             )
         }
     }
