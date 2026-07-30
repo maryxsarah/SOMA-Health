@@ -196,6 +196,17 @@ struct WorkoutSuggestion: Identifiable {
 /// decision-engine logic on-device (the Edge Function is the single
 /// source of truth for the actual decision).
 enum RecommendationReason: String, Codable {
+    /// The reason vocabulary is owned by the server and grows with it --
+    /// the `insufficient_data` migration added a value this enum didn't
+    /// have, and with plain synthesized decoding one unrecognized string
+    /// threw for the whole row (and, in the history fetch, the whole
+    /// array): Home showed nothing instead of a recommendation with a
+    /// generic explanation. Unknown values decode as `.unknown`.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RecommendationReason(rawValue: raw) ?? .unknown
+    }
+
     case whoopHigh = "whoop_high"
     case whoopMedium = "whoop_medium"
     case whoopLow = "whoop_low"

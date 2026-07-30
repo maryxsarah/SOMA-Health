@@ -25,6 +25,11 @@ struct PillButton: View {
                 Text(style == .connected ? "Connected" : title)
                     .font(.body.bold())
             }
+            // A pill's label is a single word or short phrase; wrapping
+            // mid-word ("Connect-ed" in the 130pt provider-row pill) reads
+            // as broken. Shrink a little instead of breaking the line.
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
