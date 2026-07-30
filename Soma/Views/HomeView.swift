@@ -116,8 +116,25 @@ struct HomeView: View {
             ProfileView()
         }
         .sheet(isPresented: $showGymPhotoFlow, onDismiss: {
-            if pendingGymPlan != nil {
-                showSeededDetail = true
+            guard pendingGymPlan != nil else { return }
+            Task {
+                // The seeded sheet needs today's recommendation, which can
+                // be missing in memory (a failed fetch earlier, or a
+                // midnight rollover clearing it) even though the gym
+                // generation just succeeded server-side against the DB row.
+                // Presenting anyway rendered an empty sheet whose dismiss
+                // discarded the plan -- so re-fetch first, and only
+                // present once there is something to seed into.
+                if appState.currentRecommendation == nil {
+                    await loadTodaysRecommendation()
+                }
+                if appState.currentRecommendation != nil {
+                    showSeededDetail = true
+                }
+                // Still no recommendation: keep pendingGymPlan rather than
+                // dropping it. The plan is also persisted server-side in
+                // ai_workout_plan, so the detail view surfaces it once a
+                // recommendation loads.
             }
         }) {
             GymPhotoWorkoutView(date: Self.todayDateString()) { plan, title, bodyPart in

@@ -211,13 +211,21 @@ Deno.serve(async (req: Request) => {
     // logged -- refuse rather than silently swapping the plan behind an
     // already-completed workout. A log matching this selection's title
     // falls through normally (the cache-read above already served it).
-    const { data: existingLog } = await supabase
+    // NOT maybeSingle: multiple logs per day are supported (no
+    // unique(user_id, date) on workout_log), and maybeSingle errors on 2+
+    // rows -- with the error unread, `data` came back null and the lock
+    // silently disengaged on exactly the days it was written for. The
+    // refusal fires when ANY of today's logs differs from this selection;
+    // a day whose every log matches the selection falls through normally.
+    const { data: existingLogs, error: logReadError } = await supabase
       .from("workout_log")
       .select("title")
       .eq("user_id", userId)
-      .eq("date", date)
-      .maybeSingle();
-    if (existingLog && existingLog.title !== selection.title) {
+      .eq("date", date);
+    if (logReadError) {
+      throw new Error(`could not check today's workout log: ${logReadError.message}`);
+    }
+    if ((existingLogs ?? []).some((log) => log.title !== selection.title)) {
       return jsonResponse({
         date,
         locked: true,
