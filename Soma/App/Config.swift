@@ -24,8 +24,19 @@ enum Config {
     static let oauthURLScheme = "soma"
     static let whoopRedirectURI = "soma://oauth-callback/whoop"
     static let ouraRedirectURI = "soma://oauth-callback/oura"
+    /// Sign-in (not a data connection like Whoop/Oura) via Supabase's own
+    /// /authorize endpoint acting as the OAuth intermediary to Google --
+    /// this exact URL must also be added to the Supabase Dashboard's
+    /// Auth -> URL Configuration -> Redirect URLs allow-list.
+    static let googleRedirectURI = "soma://oauth-callback/google"
 
     static let backgroundTaskIdentifier = "com.soma.app.refresh"
+
+    /// Gated pending legal review of body-photo storage/consent copy.
+    /// Flipping this to true is the entire "ship it" step -- no other code
+    /// changes needed; onboarding and Profile show zero trace of the
+    /// feature while it's false.
+    static let enableBodyPhotoUpload = false
 
     private static func string(for key: String) -> String {
         Bundle.main.object(forInfoDictionaryKey: key) as? String ?? ""

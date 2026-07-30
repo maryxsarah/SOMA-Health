@@ -11,10 +11,17 @@ import Foundation
 /// does once already. Anything added here that touches data collection or
 /// third-party processors belongs in both files, plus a bumped date.
 enum LegalContent {
+    /// Bumped whenever a material change is made to either document below.
+    /// Compared against `users.legal_ack_version` to decide whether a
+    /// returning user needs to re-acknowledge -- see SupabaseClient's
+    /// sign-in methods, which write both this and a timestamp on every
+    /// successful gated sign-in.
+    static let currentVersion = "2026-07-30"
+
     static let privacyPolicyTitle = "Privacy Policy"
 
     static let privacyPolicyBody = """
-    Last updated: 28th of July 2026
+    Last updated: 30th of July 2026
 
     Soma ("the app", "we", "our") helps you decide how hard to train each \
     day by reading data from Apple Health, Whoop, and/or Oura. This policy \
@@ -43,8 +50,12 @@ enum LegalContent {
     NOT stored by us -- we keep only the resulting list of equipment after \
     you confirm it.
     - Workouts you mark as complete, and any feedback you write about them.
-    - Account identifier from Sign in with Apple (a unique ID). An email \
-    address only if Apple shares one with us and you allow it.
+    - Account information depending on how you sign in: with Apple, a \
+    unique ID (and your email only if Apple shares it and you allow it); \
+    with Google, a unique ID and the email associated with your Google \
+    account; with email and password, the email address and password you \
+    choose. Passwords are never visible to us in plain text -- they are \
+    handled entirely by our authentication provider, Supabase.
     - Your notification wake-time preference and marketing preference.
 
     How We Use Your Information
@@ -70,6 +81,7 @@ enum LegalContent {
     The app relies on the following providers, each of which processes some \
     of your data on our behalf:
     - Apple (Sign in with Apple, HealthKit)
+    - Google (Sign in with Google, if you choose it)
     - Whoop and Oura, if you connect them
     - Supabase -- backend, database, and hosting
     - Anthropic -- generates workout plans and workout suggestions from the \
@@ -103,7 +115,7 @@ enum LegalContent {
     static let termsOfServiceTitle = "Terms of Service"
 
     static let termsOfServiceBody = """
-    Last updated: July, 21st 2026
+    Last updated: 30th of July 2026
 
     By using Soma ("the app"), you agree to these Terms of Service.
 
@@ -119,7 +131,11 @@ enum LegalContent {
     qualified physician before beginning or changing an exercise program, \
     particularly if you have any medical condition. Stop exercising and \
     seek medical attention if you experience pain, dizziness, or other \
-    concerning symptoms.
+    concerning symptoms. Any injury you note in your profile, and any \
+    related severity, contraindication guidance, or recovery-protocol \
+    check-in, is informational only and generated from fixed rules, not a \
+    substitute for evaluation or clearance by a medical professional. \
+    Continuing to train while injured is entirely at your own risk.
 
     Eligibility
     You must be at least 13 years old (or the age of digital consent in \

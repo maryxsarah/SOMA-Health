@@ -23,6 +23,7 @@ import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { extractOutputText } from "../_shared/openai.ts";
 import { GymWorkoutTemplate, selectTemplate } from "./templates.ts";
 import { normalizeEquipment } from "../_shared/equipment.ts";
+import { computeTotalDuration } from "../_shared/duration.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MODEL = "gpt-5.6-luna";
@@ -143,7 +144,27 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ date, category: cached.category, safety_flag: false, ...cached.plan });
     }
 
-    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact);
+    // Reaching here means this equipment setup wasn't already generated
+    // today (that would have hit the cache above). If a workout is already
+    // logged for today, refuse to generate a different one rather than
+    // silently swapping the plan behind an already-completed session --
+    // re-viewing the SAME setup that produced today's log is still allowed
+    // via the cache hit above; only a genuinely different setup is blocked.
+    const { data: existingLog } = await supabase
+      .from("workout_log")
+      .select("title")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .maybeSingle();
+    if (existingLog) {
+      return jsonResponse({
+        date,
+        locked: true,
+        message: "Today's workout is already logged. Generating a different plan won't undo that — pick tomorrow's workout instead.",
+      });
+    }
+
+    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact, safety.excludedKeywords);
 
     const wording = await callLunaForWording(
       template,
@@ -152,8 +173,17 @@ Deno.serve(async (req: Request) => {
       equipmentSet,
     );
     // title/bodyPart travel inside the cached object so a cache hit can
-    // return them without re-running selection.
-    const plan = { ...mergeWording(template, wording), title: template.title, bodyPart: template.bodyPart };
+    // return them without re-running selection. actual_duration_minutes is
+    // computed from the fixed template (not the wording pass -- Luna never
+    // touches sets/reps/duration), so it's always the true total, never an
+    // LLM guess.
+    const merged = mergeWording(template, wording);
+    const plan = {
+      ...merged,
+      title: template.title,
+      bodyPart: template.bodyPart,
+      actual_duration_minutes: computeTotalDuration(merged),
+    };
 
     // Two writes, two different jobs -- not a duplicate.
     //

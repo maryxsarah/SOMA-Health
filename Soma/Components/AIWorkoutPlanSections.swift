@@ -12,6 +12,11 @@ struct AIWorkoutPlanView: View {
             Text(plan.focus)
                 .font(.subheadline.bold())
                 .padding(.top, 4)
+            if let actualDurationMinutes = plan.actualDurationMinutes {
+                Text("~\(actualDurationMinutes) min total")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             aiPhaseSection(title: "Warm-up", exercises: plan.warmUp)
             ForEach(plan.blocks) { block in
                 aiBlockSection(block)

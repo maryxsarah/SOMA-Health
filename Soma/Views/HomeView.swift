@@ -17,6 +17,10 @@ struct HomeView: View {
     @State private var completedDates: Set<String> = []
     @State private var timelineEntries: [WorkoutTimelineEntry] = []
 
+    @State private var showGymPhotoFlow = false
+    @State private var showSeededDetail = false
+    @State private var pendingGymPlan: (AIWorkoutPlan, String, String)?
+
     var body: some View {
         ScrollView {
             VStack(spacing: 28) {
@@ -31,6 +35,25 @@ struct HomeView: View {
                         recommendationCard(recommendation)
                     } else {
                         needsDataCard
+                    }
+                }
+                .padding(.horizontal, 20)
+
+                // Primary CTA for the gym-photo feature -- reachable without
+                // scrolling, matching the rest of the app's PillButton
+                // styling rather than a bespoke look. Disabled once today's
+                // workout is logged, same lock the fixed suggestion list
+                // already has, so this is the one place that needs it now
+                // that the entry point lives here instead of also inside
+                // RecommendationDetailView.
+                PillButton(
+                    title: "Take a Picture of Your Gym",
+                    isEnabled: todaysWorkoutLog == nil
+                ) {
+                    if hasDetailAccess {
+                        showGymPhotoFlow = true
+                    } else {
+                        showPaywall = true
                     }
                 }
                 .padding(.horizontal, 20)
@@ -92,6 +115,32 @@ struct HomeView: View {
         .sheet(isPresented: $showProfile) {
             ProfileView()
         }
+        .sheet(isPresented: $showGymPhotoFlow, onDismiss: {
+            if pendingGymPlan != nil {
+                showSeededDetail = true
+            }
+        }) {
+            GymPhotoWorkoutView(date: Self.todayDateString()) { plan, title, bodyPart in
+                pendingGymPlan = (plan, title, bodyPart)
+            }
+        }
+        .sheet(isPresented: $showSeededDetail, onDismiss: {
+            pendingGymPlan = nil
+            Task {
+                await loadTodaysWorkoutLog()
+                await loadCompletedDates()
+                await loadTimeline()
+            }
+        }) {
+            if let recommendation = appState.currentRecommendation, let pendingGymPlan {
+                RecommendationDetailView(
+                    recommendation: recommendation,
+                    seededPlan: pendingGymPlan.0,
+                    seededTitle: pendingGymPlan.1,
+                    seededBodyPart: pendingGymPlan.2
+                )
+            }
+        }
         .sheet(isPresented: $showPaywall) {
             PaywallView()
         }
@@ -127,6 +176,14 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(recommendation.category.displayTitle)
                             .font(Theme.display)
+                        // The only screen a day-1 user is guaranteed to see --
+                        // without this, a zero-signal "moderate" reads exactly
+                        // like a real one until they tap through to Detail.
+                        if recommendation.reason == .insufficientData {
+                            Text("Building your baseline")
+                                .font(.caption.bold())
+                                .foregroundStyle(.orange)
+                        }
                         Text(recommendation.message)
                             .font(.body)
                             .foregroundStyle(.secondary)

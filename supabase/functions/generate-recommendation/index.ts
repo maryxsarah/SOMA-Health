@@ -168,6 +168,19 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
     const hasInjury = ((userRow?.injury_tags as string[] | null) ?? []).length > 0;
 
+    // Any severe-tier injury protocol currently active/recovering -- a soft
+    // cap (product decision), not a hard block like pregnancy: the day is
+    // forced to "light" but generation still proceeds, with the
+    // contraindication map's exclusions applied by generate-workout-plan.
+    const { data: severeProtocolRows } = await supabase
+      .from("injury_recovery_state")
+      .select("severity, status")
+      .eq("user_id", userId)
+      .in("status", ["active", "recovering"]);
+    const hasSevereInjuryProtocol = (severeProtocolRows ?? []).some(
+      (r: { severity: string }) => r.severity === "severe",
+    );
+
     let band: Band;
     let source: Source;
     let clearlyPoorRecovery = false;
@@ -176,6 +189,10 @@ Deno.serve(async (req: Request) => {
     // be uncertain about; HealthKit is assembled from whatever the watch
     // happened to record.
     let dataConfidence: DataConfidence = "high";
+    // True only for the HealthKit path with literally zero usable signals
+    // today (typically day 1, before any baseline exists) -- distinct from
+    // an ordinary low-confidence read, which still has at least one signal.
+    let insufficientData = false;
 
     if (whoopRecovery) {
       band = bandFromWhoop(whoopRecovery.recoveryScore);
@@ -220,6 +237,7 @@ Deno.serve(async (req: Request) => {
       // A provisional baseline is exactly the "thin read" the caveat exists
       // for, regardless of how many signals were present.
       dataConfidence = provisional ? "low" : assessment.confidence;
+      insufficientData = assessment.signalCount === 0;
       source = "healthkit";
       clearlyPoorRecovery = hrvBaseline !== null && healthkit.hrvMs != null
         ? healthkit.hrvMs < hrvBaseline * 0.6
@@ -234,15 +252,32 @@ Deno.serve(async (req: Request) => {
     // Recorded from the pre-cap band -- this is the diagnostic "why"
     // (e.g. "whoop_high"), independent of whether the sleep cap then
     // downgraded the final category. Matches the check constraint on
-    // daily_recommendation.reason.
-    const reason = `${source}_${band}`;
-    const { category, sleepCapApplied, injuryCapApplied, loadCapApplied } = mapBandToCategory(
+    // daily_recommendation.reason. The zero-signal case gets its own honest
+    // label instead of "healthkit_medium" -- category/message stay the same
+    // cautious "moderate", only the presented reason differs.
+    const reason = insufficientData ? "insufficient_data" : `${source}_${band}`;
+    const { category: bandCategory, sleepCapApplied, injuryCapApplied, loadCapApplied } = mapBandToCategory(
       band,
       sleepHours,
       clearlyPoorRecovery,
       hasInjury,
       recentHighStrain,
     );
+
+    // Consecutive-training-days cap: unlike the three caps above (which act
+    // on the recovery band before the category is chosen), this acts on the
+    // FINAL category -- deliberately a different mechanism, since it's about
+    // breaking a streak regardless of how good today's recovery signals
+    // look, not about discounting those signals themselves. Never forces
+    // a full "rest" -- only ever lands on "light" active recovery.
+    const consecutiveDays = await countConsecutiveTrainingDays(supabase, userId, date);
+    const consecutiveDaysCapApplied = consecutiveDays >= CONSECUTIVE_DAYS_THRESHOLD &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
+    // Same post-processing-on-final-category mechanism as the consecutive-
+    // days cap just above, and independent of it -- either or both can fire.
+    const injuryProtocolCapApplied = hasSevereInjuryProtocol &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
+    const category: Category = (consecutiveDaysCapApplied || injuryProtocolCapApplied) ? "light" : bandCategory;
     const message = MESSAGES[category];
 
     await supabase
@@ -257,6 +292,8 @@ Deno.serve(async (req: Request) => {
           sleep_cap_applied: sleepCapApplied,
           injury_cap_applied: injuryCapApplied,
           load_cap_applied: loadCapApplied,
+          consecutive_days_cap_applied: consecutiveDaysCapApplied,
+          injury_protocol_cap_applied: injuryProtocolCapApplied,
           data_confidence: dataConfidence,
         },
         { onConflict: "user_id,date" },
@@ -273,6 +310,8 @@ Deno.serve(async (req: Request) => {
       sleep_cap_applied: sleepCapApplied,
       injury_cap_applied: injuryCapApplied,
       load_cap_applied: loadCapApplied,
+      consecutive_days_cap_applied: consecutiveDaysCapApplied,
+      injury_protocol_cap_applied: injuryProtocolCapApplied,
       data_confidence: dataConfidence,
     });
   } catch (err) {
@@ -342,6 +381,34 @@ function mapBandToCategory(
   const severelyShortSleep = sleepHours !== null && sleepHours < 5.5;
   const category = severelyShortSleep || clearlyPoorRecovery ? "rest" : "light";
   return { category, sleepCapApplied, injuryCapApplied, loadCapApplied };
+}
+
+/// Consecutive prior days with a logged workout, strictly before `date`,
+/// stopping at the first gap -- e.g. logs on d-1, d-2, d-3 but not d-4
+/// counts as 3, regardless of what happened further back.
+const CONSECUTIVE_DAYS_THRESHOLD = 5;
+
+async function countConsecutiveTrainingDays(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  userId: string,
+  date: string,
+): Promise<number> {
+  const { data } = await supabase
+    .from("workout_log")
+    .select("date")
+    .eq("user_id", userId)
+    .gte("date", addDays(date, -7))
+    .lt("date", date);
+
+  const loggedDates = new Set((data ?? []).map((r: { date: string }) => r.date));
+  let count = 0;
+  let cursor = addDays(date, -1);
+  while (loggedDates.has(cursor)) {
+    count++;
+    cursor = addDays(cursor, -1);
+  }
+  return count;
 }
 
 function pickSleepHours(

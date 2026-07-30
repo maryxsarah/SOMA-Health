@@ -28,6 +28,28 @@ enum InjuryTag: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Per-injury severity -- feeds the deterministic contraindication map
+/// (supabase/functions/_shared/contraindications.ts) and, for `.severe`,
+/// the injury_recovery_state protocol. Stored as `users.injury_severity`,
+/// a jsonb dict keyed by InjuryTag.rawValue -- kept separate from
+/// `injuryTags` (a plain text[]) rather than reshaping that column, so
+/// every existing reader of injury_tags keeps working unmodified.
+enum InjurySeverity: String, Codable, CaseIterable, Identifiable {
+    case mild
+    case moderate
+    case severe
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .mild: "Mild"
+        case .moderate: "Moderate"
+        case .severe: "Severe"
+        }
+    }
+}
+
 /// Training experience -- feeds AI workout plan generation (block count,
 /// superset usage, rest periods) so the same category/day produces
 /// meaningfully different structure for a newbie vs. an advanced lifter,
@@ -59,10 +81,19 @@ struct UserProfile: Codable, Equatable {
     var otherEquipmentNotes: String?
     var injuryTags: [InjuryTag]
     var injuryNotes: String?
+    /// Keyed by InjuryTag.rawValue. A tag present in `injuryTags` with no
+    /// entry here is treated as `.moderate` by the backend (never silently
+    /// as "no injury") -- see contraindications.ts's describeContraindications.
+    var injurySeverity: [String: InjurySeverity] = [:]
     var experienceLevel: ExperienceLevel?
     /// Self-reported only, never assumed -- one of the deterministic
     /// safety-guardrail triggers for the gym-photo-workout feature.
     var pregnancy: Bool?
+    /// Storage paths (not the image itself), behind Config.enableBodyPhotoUpload
+    /// -- managed only via SupabaseClient's uploadBodyPhoto/deleteBodyPhoto,
+    /// not through the general profile save() flow, hence the defaults.
+    var goalBodyPhotoPath: String? = nil
+    var currentBodyPhotoPath: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
@@ -72,8 +103,11 @@ struct UserProfile: Codable, Equatable {
         case otherEquipmentNotes = "other_equipment_notes"
         case injuryTags = "injury_tags"
         case injuryNotes = "injury_notes"
+        case injurySeverity = "injury_severity"
         case experienceLevel = "experience_level"
         case pregnancy
+        case goalBodyPhotoPath = "goal_body_photo_path"
+        case currentBodyPhotoPath = "current_body_photo_path"
     }
 
     static let empty = UserProfile(
@@ -85,6 +119,8 @@ struct UserProfile: Codable, Equatable {
         injuryTags: [],
         injuryNotes: nil,
         experienceLevel: nil,
-        pregnancy: nil
+        pregnancy: nil,
+        goalBodyPhotoPath: nil,
+        currentBodyPhotoPath: nil
     )
 }

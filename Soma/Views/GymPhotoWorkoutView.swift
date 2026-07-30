@@ -411,7 +411,7 @@ struct GymPhotoWorkoutView: View {
     private func analyze(image: UIImage) async {
         step = .analyzing
         errorMessage = nil
-        guard let imageData = Self.compressedJPEG(image) else {
+        guard let imageData = ImageCompression.jpeg(image) else {
             errorMessage = "Couldn't process that photo. Try another one."
             step = .pickPhoto
             return
@@ -448,19 +448,6 @@ struct GymPhotoWorkoutView: View {
         }
     }
 
-    /// Resizes to ~1024px longest edge and compresses to keep the request
-    /// well under Edge Function body-size limits.
-    private static func compressedJPEG(_ image: UIImage) -> Data? {
-        let maxDimension: CGFloat = 1024
-        let scale = min(1, maxDimension / max(image.size.width, image.size.height))
-        let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        let resized = renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: targetSize))
-        }
-        return resized.jpegData(compressionQuality: 0.6)
-    }
 }
 
 /// Thin UIImagePickerController wrapper -- this codebase has no prior

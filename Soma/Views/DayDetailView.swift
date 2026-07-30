@@ -40,6 +40,14 @@ struct DayDetailView: View {
                                 )
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                                // Full exercise-level detail when this entry
+                                // has a snapshot -- entries logged before
+                                // plan_snapshot existed just show the label
+                                // above, same as always.
+                                if let planSnapshot = log.planSnapshot {
+                                    AIWorkoutPlanView(plan: planSnapshot)
+                                        .padding(.top, 4)
+                                }
                             }
                         }
                     }

@@ -51,7 +51,7 @@ export function assessHealthKit(
   // positive ones are dropped. Asymmetric on purpose -- a shaky baseline is
   // reason enough to hold someone back, never to tell them to push hard.
   baselinesAreProvisional = false,
-): { band: Band; confidence: DataConfidence } {
+): { band: Band; confidence: DataConfidence; signalCount: number } {
   const sleep = hk.sleepHours ?? null;
   let score = 0;
   let signals = 0;
@@ -100,12 +100,12 @@ export function assessHealthKit(
   // Nothing usable -- typically the first days before any baseline exists.
   // Stay conservative and say so, rather than guessing push_hard.
   if (signals === 0) {
-    return { band: "medium", confidence: "low" };
+    return { band: "medium", confidence: "low", signalCount: 0 };
   }
 
   const band: Band = score >= 2 ? "high" : score <= -2 ? "low" : "medium";
   // One signal can move the band on its own, so flag that the read is thin.
   // The app uses this to caveat the explanation rather than presenting a
   // guess with the same confidence as a Whoop recovery score.
-  return { band, confidence: signals >= 2 ? "high" : "low" };
+  return { band, confidence: signals >= 2 ? "high" : "low", signalCount: signals };
 }
