@@ -10,6 +10,13 @@ export interface HealthKitPayload {
   sleepHours?: number;
   hrvMs?: number;
   restingHr?: number;
+  // Per-stage sleep breakdown -- persisted to daily_snapshot for the
+  // dashboard's sleep-stage chart, not used by the band-scoring logic
+  // below (assessHealthKit only ever used the merged sleepHours total).
+  sleepLightHours?: number;
+  sleepDeepHours?: number;
+  sleepRemHours?: number;
+  sleepAwakeHours?: number;
 }
 
 /**

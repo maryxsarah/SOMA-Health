@@ -30,6 +30,12 @@ struct PaywallView: View {
     /// to subscribe at all during a 14-day bonus.
     var autoDismissIfBonusActive: Bool = true
 
+    /// False only for onboarding's final step -- a fully hard paywall with
+    /// no "Not now" skip. Every other presentation (Home's locked-detail
+    /// sheet, etc.) keeps the default `true`. Restore Purchases stays
+    /// visible either way -- recovering an existing purchase isn't a skip.
+    var allowsDismissal: Bool = true
+
     @State private var selectedPlan: SubscriptionPlan = .annual
     @State private var referralCode = ""
     @State private var isRedeeming = false
@@ -45,7 +51,7 @@ struct PaywallView: View {
                     .allowsHitTesting(false)
 
                 VStack(spacing: 8) {
-                    Text(selectedPlan == .annual ? "Start your 7-day free trial to continue" : "Continue with Soma Premium")
+                    Text(selectedPlan == .annual ? "Start your 3-day free trial to continue" : "Continue with Soma Premium")
                         .font(Theme.display)
                         .multilineTextAlignment(.center)
                     Text("See exactly which workouts fit today, your step target, and why — not just the headline.")
@@ -61,7 +67,7 @@ struct PaywallView: View {
                         title: "Start for free & save",
                         subtitle: annualBillingText,
                         priceHeadline: annualMonthlyEquivalentText,
-                        badge: "7 DAYS FREE"
+                        badge: "3 DAYS FREE"
                     )
                     planRow(
                         plan: .monthly,
@@ -154,9 +160,11 @@ struct PaywallView: View {
                     }
                 }
 
-                Button("Not now") { finish() }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if allowsDismissal {
+                    Button("Not now") { finish() }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(20)
             .dismissKeyboardOnTap()
@@ -232,7 +240,7 @@ struct PaywallView: View {
         switch selectedPlan {
         case .annual:
             guard let annualPriceText else { return nil }
-            return "7 days free, then \(annualPriceText) per year. Billed annually and renews automatically unless canceled in the App Store."
+            return "3 days free, then \(annualPriceText) per year. Billed annually and renews automatically unless canceled in the App Store."
         case .monthly:
             guard let monthlyPriceText else { return nil }
             return "\(monthlyPriceText), billed monthly and renews automatically unless canceled in the App Store."

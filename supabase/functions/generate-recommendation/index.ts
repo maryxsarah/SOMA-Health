@@ -18,6 +18,7 @@ import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { assessHealthKit } from "./healthkitBand.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
+import { type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -90,9 +91,9 @@ Deno.serve(async (req: Request) => {
 
     const whoopToken = (tokens ?? []).find((t: WearableTokenRow) => t.provider === "whoop");
     if (whoopToken) {
-      const [recovery, whoopSleepHours, whoopLoad] = await Promise.all([
+      const [recovery, whoopSleep, whoopLoad] = await Promise.all([
         safely("whoop recovery", null, () => fetchWhoopRecovery(supabase, whoopToken, date)),
-        safely("whoop sleep", null, () => fetchWhoopSleepHours(supabase, whoopToken, date)),
+        safely("whoop sleep", EMPTY_SLEEP_STAGES, () => fetchWhoopSleepHours(supabase, whoopToken, date)),
         safely(
           "whoop training load",
           { strainScore: null, recentHighStrain: false },
@@ -101,20 +102,32 @@ Deno.serve(async (req: Request) => {
       ]);
       whoopRecovery = recovery;
       if (whoopLoad.recentHighStrain) recentHighStrain = true;
-      if (recovery || whoopSleepHours !== null || whoopLoad.strainScore !== null) {
+      if (recovery || whoopSleep.totalHours !== null || whoopLoad.strainScore !== null) {
         await upsertSnapshot(supabase, userId, date, "whoop", {
           recovery_score: recovery?.recoveryScore,
           hrv_ms: recovery?.hrvMs,
           resting_hr: recovery?.restingHr,
-          sleep_hours: whoopSleepHours ?? undefined,
+          sleep_hours: whoopSleep.totalHours ?? undefined,
           strain_score: whoopLoad.strainScore ?? undefined,
+          sleep_light_hours: whoopSleep.lightHours ?? undefined,
+          sleep_deep_hours: whoopSleep.deepHours ?? undefined,
+          sleep_rem_hours: whoopSleep.remHours ?? undefined,
+          sleep_awake_hours: whoopSleep.awakeHours ?? undefined,
         });
       }
     }
 
     const ouraToken = (tokens ?? []).find((t: WearableTokenRow) => t.provider === "oura");
     if (ouraToken) {
-      const emptySleepData = { sleepHours: null, hrvMs: null, restingHr: null };
+      const emptySleepData = {
+        sleepHours: null,
+        hrvMs: null,
+        restingHr: null,
+        lightHours: null,
+        deepHours: null,
+        remHours: null,
+        awakeHours: null,
+      };
       const [readiness, ouraSleep, ouraLoad, ouraStress] = await Promise.all([
         safely("oura readiness", null, () => fetchOuraReadiness(supabase, ouraToken, date)),
         safely("oura sleep", emptySleepData, () => fetchOuraSleepData(supabase, ouraToken, date)),
@@ -138,6 +151,10 @@ Deno.serve(async (req: Request) => {
           resting_hr: ouraSleep.restingHr ?? undefined,
           strain_score: ouraLoad.strainScore ?? undefined,
           stress_score: ouraStress ?? undefined,
+          sleep_light_hours: ouraSleep.lightHours ?? undefined,
+          sleep_deep_hours: ouraSleep.deepHours ?? undefined,
+          sleep_rem_hours: ouraSleep.remHours ?? undefined,
+          sleep_awake_hours: ouraSleep.awakeHours ?? undefined,
         });
       }
     }
@@ -147,6 +164,10 @@ Deno.serve(async (req: Request) => {
         sleep_hours: healthkit.sleepHours,
         hrv_ms: healthkit.hrvMs,
         resting_hr: healthkit.restingHr,
+        sleep_light_hours: healthkit.sleepLightHours,
+        sleep_deep_hours: healthkit.sleepDeepHours,
+        sleep_rem_hours: healthkit.sleepRemHours,
+        sleep_awake_hours: healthkit.sleepAwakeHours,
       });
     }
 
@@ -164,10 +185,12 @@ Deno.serve(async (req: Request) => {
     // moderate max for the day, same safety-first pattern as the sleep cap.
     const { data: userRow } = await supabase
       .from("users")
-      .select("injury_tags")
+      .select("injury_tags, pregnancy, experience_level")
       .eq("id", userId)
       .maybeSingle();
     const hasInjury = ((userRow?.injury_tags as string[] | null) ?? []).length > 0;
+    const hasPregnancy = userRow?.pregnancy === true;
+    const experienceLevel = ((userRow?.experience_level as ExperienceLevel | null) ?? "moderate");
 
     // Any moderate/severe-tier injury protocol currently active/recovering
     // -- a soft cap (product decision), not a hard block like pregnancy:
@@ -265,13 +288,15 @@ Deno.serve(async (req: Request) => {
     // label instead of "healthkit_medium" -- category/message stay the same
     // cautious "moderate", only the presented reason differs.
     const reason = insufficientData ? "insufficient_data" : `${source}_${band}`;
-    const { category: bandCategory, sleepCapApplied, injuryCapApplied, loadCapApplied } = mapBandToCategory(
-      band,
-      sleepHours,
-      clearlyPoorRecovery,
-      hasInjury,
-      recentHighStrain,
-    );
+    const { category: bandCategory, sleepCapApplied, injuryCapApplied, loadCapApplied, pregnancyCapApplied } =
+      mapBandToCategory(
+        band,
+        sleepHours,
+        clearlyPoorRecovery,
+        hasInjury,
+        recentHighStrain,
+        hasPregnancy,
+      );
 
     // Consecutive-training-days cap: unlike the three caps above (which act
     // on the recovery band before the category is chosen), this acts on the
@@ -298,6 +323,19 @@ Deno.serve(async (req: Request) => {
     const consecutiveDaysRestEscalated = consecutiveDaysCapApplied &&
       consecutiveDays >= REST_ESCALATION_THRESHOLD;
     // Same post-processing-on-final-category mechanism as the consecutive-
+    // days cap above, and independent of it -- catches a DIFFERENT pattern:
+    // hard training on most days of a rolling week even with gaps breaking
+    // any consecutive streak (e.g. hard-hard-hard-rest-hard-hard-hard is
+    // only a 3-day streak but 6 of the last 7 days). Reuses
+    // VOLUME_LANDMARKS.full_body's MRV (session-count-shaped, unlike the
+    // sets/week landmarks for upper/lower body) as the threshold, since
+    // workout_log only has session-level data, not per-set volume --
+    // an honest proxy, not true per-muscle-group volume tracking.
+    const recentTrainingDays = await countRecentTrainingDays(supabase, userId, date);
+    const volumeCapApplied = recentTrainingDays >= VOLUME_LANDMARKS.full_body[experienceLevel].mrv &&
+      !exceptionalReadinessToday &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
+    // Same post-processing-on-final-category mechanism as the consecutive-
     // days cap just above, and independent of it -- either or both can fire.
     const injuryProtocolCapApplied = hasSevereInjuryProtocol &&
       (bandCategory === "moderate" || bandCategory === "push_hard");
@@ -311,7 +349,7 @@ Deno.serve(async (req: Request) => {
       hasModerateInjuryProtocol && bandCategory === "push_hard";
     const category: Category = consecutiveDaysRestEscalated
       ? "rest"
-      : (consecutiveDaysCapApplied || injuryProtocolCapApplied)
+      : (consecutiveDaysCapApplied || injuryProtocolCapApplied || volumeCapApplied)
       ? "light"
       : injuryProtocolModerateCapApplied
       ? "moderate"
@@ -330,6 +368,8 @@ Deno.serve(async (req: Request) => {
           sleep_cap_applied: sleepCapApplied,
           injury_cap_applied: injuryCapApplied,
           load_cap_applied: loadCapApplied,
+          pregnancy_cap_applied: pregnancyCapApplied,
+          volume_cap_applied: volumeCapApplied,
           consecutive_days_cap_applied: consecutiveDaysCapApplied,
           injury_protocol_cap_applied: injuryProtocolCapApplied,
           injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
@@ -355,6 +395,8 @@ Deno.serve(async (req: Request) => {
       sleep_cap_applied: sleepCapApplied,
       injury_cap_applied: injuryCapApplied,
       load_cap_applied: loadCapApplied,
+      pregnancy_cap_applied: pregnancyCapApplied,
+      volume_cap_applied: volumeCapApplied,
       consecutive_days_cap_applied: consecutiveDaysCapApplied,
       injury_protocol_cap_applied: injuryProtocolCapApplied,
       injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
@@ -389,11 +431,19 @@ function mapBandToCategory(
   clearlyPoorRecovery: boolean,
   hasInjury: boolean,
   recentHighStrain: boolean,
-): { category: Category; sleepCapApplied: boolean; injuryCapApplied: boolean; loadCapApplied: boolean } {
+  hasPregnancy: boolean,
+): {
+  category: Category;
+  sleepCapApplied: boolean;
+  injuryCapApplied: boolean;
+  loadCapApplied: boolean;
+  pregnancyCapApplied: boolean;
+} {
   let effectiveBand = band;
   let sleepCapApplied = false;
   let injuryCapApplied = false;
   let loadCapApplied = false;
+  let pregnancyCapApplied = false;
 
   // Sleep safety cap: never push_hard on severe sleep deprivation.
   if (effectiveBand === "high" && sleepHours !== null && sleepHours < 5.5) {
@@ -417,17 +467,26 @@ function mapBandToCategory(
     loadCapApplied = true;
   }
 
+  // Pregnancy safety cap: never push_hard while pregnant, regardless of
+  // trimester -- same independent-cap shape as the others above. This
+  // replaces the old hard block (see safetyFlags.ts): generation still
+  // proceeds, just never at max intensity.
+  if (effectiveBand === "high" && hasPregnancy) {
+    effectiveBand = "medium";
+    pregnancyCapApplied = true;
+  }
+
   if (effectiveBand === "high") {
-    return { category: "push_hard", sleepCapApplied, injuryCapApplied, loadCapApplied };
+    return { category: "push_hard", sleepCapApplied, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
   }
   if (effectiveBand === "medium_high" || effectiveBand === "medium") {
-    return { category: "moderate", sleepCapApplied, injuryCapApplied, loadCapApplied };
+    return { category: "moderate", sleepCapApplied, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
   }
 
   // effectiveBand === "low": split into light vs rest.
   const severelyShortSleep = sleepHours !== null && sleepHours < 5.5;
   const category = severelyShortSleep || clearlyPoorRecovery ? "rest" : "light";
-  return { category, sleepCapApplied, injuryCapApplied, loadCapApplied };
+  return { category, sleepCapApplied, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
 }
 
 /// Consecutive prior days with a logged TRAINING workout (moderate or
@@ -470,6 +529,29 @@ async function countConsecutiveTrainingDays(
     cursor = addDays(cursor, -1);
   }
   return count;
+}
+
+/// Rolling count of moderate/push_hard training days in the trailing 7
+/// days, gaps allowed -- distinct from countConsecutiveTrainingDays above
+/// (which stops at the first gap). A user who trains hard 6 of the last 7
+/// days with one rest day in the middle has a LOW consecutive-streak count
+/// but a real accumulated-fatigue signal this rolling count catches
+/// instead. Reuses the same query as countConsecutiveTrainingDays (same
+/// window, same category filter) -- only the aggregation differs.
+async function countRecentTrainingDays(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  userId: string,
+  date: string,
+): Promise<number> {
+  const { data } = await supabase
+    .from("workout_log")
+    .select("date")
+    .eq("user_id", userId)
+    .in("category", ["moderate", "push_hard"])
+    .gte("date", addDays(date, -7))
+    .lt("date", date);
+  return new Set((data ?? []).map((r: { date: string }) => r.date)).size;
 }
 
 function pickSleepHours(
@@ -610,14 +692,30 @@ async function fetchWhoopRecovery(
 /// Real sleep hours from Whoop's own sleep data, used instead of relying
 /// on an on-device HealthKit reading for Whoop users -- feeds the same
 /// sleep safety cap as HealthKit/Oura sleep does.
+interface SleepStageHours {
+  totalHours: number | null;
+  lightHours: number | null;
+  deepHours: number | null;
+  remHours: number | null;
+  awakeHours: number | null;
+}
+
+const EMPTY_SLEEP_STAGES: SleepStageHours = {
+  totalHours: null,
+  lightHours: null,
+  deepHours: null,
+  remHours: null,
+  awakeHours: null,
+};
+
 async function fetchWhoopSleepHours(
   // deno-lint-ignore no-explicit-any
   supabase: any,
   token: WearableTokenRow,
   date: string,
-): Promise<number | null> {
+): Promise<SleepStageHours> {
   const accessToken = await ensureFreshWhoopToken(supabase, token);
-  if (!accessToken) return null;
+  if (!accessToken) return EMPTY_SLEEP_STAGES;
 
   const start = `${addDays(date, -1)}T00:00:00.000Z`;
   const end = `${date}T23:59:59.999Z`;
@@ -625,16 +723,29 @@ async function fetchWhoopSleepHours(
     `${WHOOP_SLEEP_URL}?start=${start}&end=${end}&limit=5`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
-  if (!res.ok) return null;
+  if (!res.ok) return EMPTY_SLEEP_STAGES;
   const json = await res.json();
   const record = (json?.records ?? json ?? [])[0];
   const stages = record?.score?.stage_summary;
-  if (!stages) return null;
+  if (!stages) return EMPTY_SLEEP_STAGES;
 
-  const totalMs = (stages.total_light_sleep_time_milli ?? 0) +
-    (stages.total_slow_wave_sleep_time_milli ?? 0) +
-    (stages.total_rem_sleep_time_milli ?? 0);
-  return totalMs > 0 ? totalMs / 3_600_000 : null;
+  // Previously only the total (light+SWS+REM, no awake time) was kept --
+  // the per-stage split was computed and immediately discarded. NOTE:
+  // verify these exact field names against Whoop's current docs at deploy
+  // time, same standing caveat this file already applies to its own URLs.
+  const lightMs = stages.total_light_sleep_time_milli ?? 0;
+  const deepMs = stages.total_slow_wave_sleep_time_milli ?? 0;
+  const remMs = stages.total_rem_sleep_time_milli ?? 0;
+  const awakeMs = stages.total_awake_time_milli ?? 0;
+  const totalMs = lightMs + deepMs + remMs;
+  const toHours = (ms: number) => ms > 0 ? ms / 3_600_000 : null;
+  return {
+    totalHours: totalMs > 0 ? totalMs / 3_600_000 : null,
+    lightHours: toHours(lightMs),
+    deepHours: toHours(deepMs),
+    remHours: toHours(remMs),
+    awakeHours: toHours(awakeMs),
+  };
 }
 
 /// Yesterday's Whoop day strain (from the cycle endpoint) plus whether any
@@ -748,8 +859,26 @@ async function fetchOuraSleepData(
   supabase: any,
   token: WearableTokenRow,
   date: string,
-): Promise<{ sleepHours: number | null; hrvMs: number | null; restingHr: number | null }> {
-  const empty = { sleepHours: null, hrvMs: null, restingHr: null };
+): Promise<
+  {
+    sleepHours: number | null;
+    hrvMs: number | null;
+    restingHr: number | null;
+    lightHours: number | null;
+    deepHours: number | null;
+    remHours: number | null;
+    awakeHours: number | null;
+  }
+> {
+  const empty = {
+    sleepHours: null,
+    hrvMs: null,
+    restingHr: null,
+    lightHours: null,
+    deepHours: null,
+    remHours: null,
+    awakeHours: null,
+  };
   const accessToken = await ensureFreshOuraToken(supabase, token);
   if (!accessToken) return empty;
 
@@ -767,12 +896,22 @@ async function fetchOuraSleepData(
   const longest = records.reduce((a: any, b: any) =>
     (b.total_sleep_duration ?? 0) > (a.total_sleep_duration ?? 0) ? b : a
   );
+  // Per-stage fields already exist on the same record -- previously only
+  // total_sleep_duration/average_hrv/lowest_heart_rate were read, the rest
+  // of the payload discarded. NOTE: verify these exact field names against
+  // Oura's current API docs at deploy time, same standing caveat this file
+  // already applies to its own URLs.
+  const toHours = (seconds: number | null | undefined) => seconds ? seconds / 3600 : null;
   return {
     sleepHours: longest.total_sleep_duration ? longest.total_sleep_duration / 3600 : null,
     hrvMs: longest.average_hrv ?? null,
     // Lowest overnight HR is the standard resting-HR proxy; Oura's sleep
     // endpoint doesn't expose a separately-labeled "resting_heart_rate".
     restingHr: longest.lowest_heart_rate ?? null,
+    lightHours: toHours(longest.light_sleep_duration),
+    deepHours: toHours(longest.deep_sleep_duration),
+    remHours: toHours(longest.rem_sleep_duration),
+    awakeHours: toHours(longest.awake_time),
   };
 }
 

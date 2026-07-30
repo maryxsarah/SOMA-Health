@@ -50,7 +50,7 @@ struct PostSetupFlowView: View {
             case .trialReminder:
                 TrialReminderStepView(onContinue: advance)
             case .paywall:
-                PaywallView(onFinished: { appState.markOnboardingComplete() })
+                PaywallView(onFinished: { appState.markOnboardingComplete() }, allowsDismissal: false)
             }
         }
         .transition(.opacity)

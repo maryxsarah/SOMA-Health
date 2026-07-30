@@ -16,12 +16,12 @@ enum LegalContent {
     /// returning user needs to re-acknowledge -- see SupabaseClient's
     /// sign-in methods, which write both this and a timestamp on every
     /// successful gated sign-in.
-    static let currentVersion = "2026-07-30-2"
+    static let currentVersion = "2026-07-31-2"
 
     static let privacyPolicyTitle = "Privacy Policy"
 
     static let privacyPolicyBody = """
-    Last updated: 30th of July 2026 (revised)
+    Last updated: 31st of July 2026 (revised)
 
     Soma ("the app", "we", "our") helps you decide how hard to train each \
     day by reading data from Apple Health, Whoop, and/or Oura. This policy \
@@ -40,15 +40,20 @@ enum LegalContent {
     us, what gets in your way, diet preference, available equipment, \
     training experience, and any injuries you choose to note (including \
     free-text notes).
-    - Pregnancy, only if you choose to tell us. This is never assumed or \
-    inferred, is entirely optional, and is used for one purpose: to \
-    withhold an automatically generated workout and suggest you speak to a \
-    qualified professional instead. You can clear it at any time in your \
-    profile.
+    - Pregnancy, and the week if you provide it, only if you choose to tell \
+    us. This is never assumed or inferred, and is entirely optional. It is \
+    used to adjust the workouts and intensity we generate for you to your \
+    pregnancy stage -- it is never used to withhold a workout outright. You \
+    can clear it at any time in your profile.
     - Photographs you take of gym or workout equipment, if you use the \
     gym-photo feature. These are sent for equipment recognition and are \
     NOT stored by us -- we keep only the resulting list of equipment after \
     you confirm it.
+    - Photographs you choose to add of your current body and goal body, if \
+    you use that optional feature. Unlike gym-equipment photos, these ARE \
+    stored (so you can view your history and compare over time) in a \
+    private storage location only your account can access. You can delete \
+    them at any time in your profile.
     - Workouts you mark as complete, and any feedback you write about them.
     - Account information depending on how you sign in: with Apple, a \
     unique ID (and your email only if Apple shares it and you allow it); \
@@ -90,7 +95,12 @@ enum LegalContent {
     - Anthropic -- generates workout plans and workout suggestions from the \
     context described above
     - OpenAI -- recognizes equipment in gym photos and writes exercise \
-    instructions
+    instructions; separately, and only if you've added both a goal-body and \
+    current-body photo, compares those already-stored photos to suggest \
+    which training emphasis may help close the gap between them. That \
+    comparison returns only a category-level suggestion -- never a numeric \
+    or clinical-sounding score -- and quietly informs your workout plan; we \
+    do not show you the comparison result directly.
     - Firebase (Google) -- analytics on how the app is used
     - PostHog -- a second analytics service processing the same app-usage \
     events as Firebase, above
@@ -121,7 +131,7 @@ enum LegalContent {
     static let termsOfServiceTitle = "Terms of Service"
 
     static let termsOfServiceBody = """
-    Last updated: 30th of July 2026 (revised)
+    Last updated: 31st of July 2026 (revised)
 
     By using Soma ("the app"), you agree to these Terms of Service.
 

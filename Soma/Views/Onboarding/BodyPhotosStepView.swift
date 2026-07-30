@@ -102,6 +102,11 @@ struct BodyPhotosStepView: View {
         do {
             try await SupabaseClient.shared.uploadBodyPhoto(kind: kind, imageData: compressed)
             if kind == .goal { goalPhoto = image } else { currentPhoto = image }
+            // Silent, fire-and-forget -- see ProfileView's matching hook for
+            // why this has no loading state or surfaced error.
+            if goalPhoto != nil, currentPhoto != nil {
+                Task { try? await SupabaseClient.shared.analyzeBodyPhotos() }
+            }
         } catch {
             errorMessage = "Couldn't upload that photo. Try again."
         }

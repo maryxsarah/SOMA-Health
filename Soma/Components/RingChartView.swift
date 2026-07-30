@@ -10,6 +10,10 @@ struct RingChartView: View {
     let label: String
     var color: Color = Theme.pillFill
     var lineWidth: CGFloat = 14
+    /// Default preserves every existing call site. Pass a smaller value
+    /// (with a proportionally smaller lineWidth) to fit a denser layout,
+    /// e.g. HealthDashboardView's 2-up metric grid.
+    var diameter: CGFloat = 120
 
     private var fraction: Double {
         guard maxValue > 0 else { return 0 }
@@ -34,7 +38,7 @@ struct RingChartView: View {
                     .multilineTextAlignment(.center)
             }
         }
-        .frame(width: 120, height: 120)
+        .frame(width: diameter, height: diameter)
     }
 }
 

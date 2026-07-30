@@ -17,4 +17,5 @@ struct GymPhotoEquipmentResult: Decodable {
 enum GymWorkoutOutcome {
     case plan(AIWorkoutPlan, title: String, bodyPart: String)
     case safetyBlocked(message: String)
+    case generationLimitReached(message: String)
 }

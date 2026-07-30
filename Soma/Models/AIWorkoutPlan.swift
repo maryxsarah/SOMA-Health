@@ -84,9 +84,14 @@ struct AIWorkoutPlan: Codable {
     /// injury/split conflict -- drives the "Optional finisher -- you're
     /// well recovered today" badge. Absent-means-false, same reasoning.
     let exceptionalFinisher: Bool
+    /// "suggestion" (the normal fixed-suggestion-list flow) or "gym_photo"
+    /// -- drives the "Generated with your gym picture" label. Absent-means-
+    /// "suggestion" for plans cached before this field existed, since that
+    /// was the only flow that existed then.
+    let source: String
 
     enum CodingKeys: String, CodingKey {
-        case date, category, focus, blocks
+        case date, category, focus, blocks, source
         case warmUp = "warm_up"
         case coolDown = "cool_down"
         case actualDurationMinutes = "actual_duration_minutes"
@@ -105,5 +110,27 @@ struct AIWorkoutPlan: Codable {
         actualDurationMinutes = try container.decodeIfPresent(Int.self, forKey: .actualDurationMinutes)
         substitutedBodyPart = try container.decodeIfPresent(String.self, forKey: .substitutedBodyPart)
         exceptionalFinisher = try container.decodeIfPresent(Bool.self, forKey: .exceptionalFinisher) ?? false
+        source = try container.decodeIfPresent(String.self, forKey: .source) ?? "suggestion"
+    }
+}
+
+/// Mirrors an `ai_workout_plan` row -- used for the persistent Home card
+/// (today's plan survives app relaunch, not just the current view session).
+/// `plan`/`source` here are the sibling top-level columns, not nested inside
+/// the `plan` jsonb blob's own fields.
+struct TodaysAIPlan: Codable {
+    let category: String
+    let plan: AIWorkoutPlan
+    let selectedTitle: String
+    /// True once the user tapped "Add to today's plan" -- distinct from
+    /// having merely generated/previewed it, and distinct from having
+    /// completed it (see WorkoutLogEntry, a separate table).
+    let addedToPlan: Bool
+    let source: String
+
+    enum CodingKeys: String, CodingKey {
+        case category, plan, source
+        case selectedTitle = "selected_title"
+        case addedToPlan = "added_to_plan"
     }
 }

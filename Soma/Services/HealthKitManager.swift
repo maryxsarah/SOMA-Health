@@ -60,7 +60,17 @@ final class HealthKitManager {
             .restingHeartRate,
             unit: HKUnit.count().unitDivided(by: .minute())
         )
-        return await HealthKitSnapshot(sleepHours: sleep, hrvMs: hrv, restingHr: restingHR)
+        async let stages = fetchSleepStageBreakdown()
+        let stageBreakdown = await stages
+        return await HealthKitSnapshot(
+            sleepHours: sleep,
+            hrvMs: hrv,
+            restingHr: restingHR,
+            sleepLightHours: stageBreakdown.light,
+            sleepDeepHours: stageBreakdown.deep,
+            sleepRemHours: stageBreakdown.rem,
+            sleepAwakeHours: stageBreakdown.awake
+        )
     }
 
     /// Trailing daily average step count -- used only for display context
@@ -198,6 +208,48 @@ final class HealthKitManager {
                     asleepSamples.map { (start: $0.startDate, end: $0.endDate) }
                 )
                 continuation.resume(returning: totalSeconds > 0 ? totalSeconds / 3600 : nil)
+            }
+            store.execute(query)
+        }
+    }
+
+    /// Same window/query as fetchSleepHours() above, but grouped by stage
+    /// instead of merged into one total -- the per-stage split HealthKit
+    /// already classifies samples into (asleepCore/asleepDeep/asleepREM,
+    /// plus .awake) was previously computed and immediately discarded.
+    /// mergedDuration() still runs PER BUCKET (not just once overall) to
+    /// avoid double-counting overlapping samples from different sources
+    /// within the same stage, same reasoning as fetchSleepHours().
+    private func fetchSleepStageBreakdown() async -> (light: Double?, deep: Double?, rem: Double?, awake: Double?) {
+        let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!
+        let now = Date()
+        let windowStart = Calendar.current.startOfDay(for: now).addingTimeInterval(-12 * 3600)
+        let predicate = HKQuery.predicateForSamples(withStart: windowStart, end: now, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: sleepType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, _ in
+                let categorySamples = (samples as? [HKCategorySample]) ?? []
+                func hours(for values: Set<Int>) -> Double? {
+                    let matching = categorySamples.filter { values.contains($0.value) }
+                    let seconds = Self.mergedDuration(matching.map { (start: $0.startDate, end: $0.endDate) })
+                    return seconds > 0 ? seconds / 3600 : nil
+                }
+                // asleepUnspecified (a source that reports sleep without a
+                // stage breakdown) has no matching Oura/Whoop concept and no
+                // clear stage to fold it into -- left out of every bucket
+                // rather than guessed, so the four stages here can undercount
+                // fetchSleepHours()'s total for a mixed-source night. That's
+                // an honest gap, not a bug.
+                let light = hours(for: [HKCategoryValueSleepAnalysis.asleepCore.rawValue])
+                let deep = hours(for: [HKCategoryValueSleepAnalysis.asleepDeep.rawValue])
+                let rem = hours(for: [HKCategoryValueSleepAnalysis.asleepREM.rawValue])
+                let awake = hours(for: [HKCategoryValueSleepAnalysis.awake.rawValue])
+                continuation.resume(returning: (light: light, deep: deep, rem: rem, awake: awake))
             }
             store.execute(query)
         }

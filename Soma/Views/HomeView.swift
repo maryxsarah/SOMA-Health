@@ -21,14 +21,26 @@ struct HomeView: View {
     @State private var showSeededDetail = false
     @State private var pendingGymPlan: (AIWorkoutPlan, String, String)?
 
+    /// Today's confirmed ("Add to today's plan") AI plan, if any -- distinct
+    /// from todaysWorkoutLog (completed). Persists across relaunch, unlike
+    /// pendingGymPlan which only exists for the current view session.
+    @State private var todaysAIPlan: TodaysAIPlan?
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 28) {
+            // Spacing/orb size are deliberately tighter than other screens
+            // that reuse OrbView (e.g. onboarding) -- Home has more content
+            // below the orb (recommendation card, CTA, today's-workout card)
+            // that needs to fit on a standard-height device without
+            // scrolling. ScrollView stays in place as a fallback for smaller
+            // devices and larger Dynamic Type sizes, not because scrolling
+            // here is expected in the common case.
+            VStack(spacing: 14) {
                 CalendarStripView(recommendations: recentRecommendations, completedDates: completedDates, onSelectDay: { selectedDay = $0 })
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
 
-                OrbView(state: orbState)
+                OrbView(state: orbState, size: 130)
 
                 Group {
                     if let recommendation = appState.currentRecommendation {
@@ -42,13 +54,13 @@ struct HomeView: View {
                 // Primary CTA for the gym-photo feature -- reachable without
                 // scrolling, matching the rest of the app's PillButton
                 // styling rather than a bespoke look. Disabled once today's
-                // workout is logged, same lock the fixed suggestion list
-                // already has, so this is the one place that needs it now
-                // that the entry point lives here instead of also inside
-                // RecommendationDetailView.
+                // workout is logged OR already added to today's plan --
+                // only one AI-generated workout is committed per day
+                // (before the separate, later Premium multi-generation
+                // limit even comes into play server-side).
                 PillButton(
                     title: "Take a Picture of Your Gym",
-                    isEnabled: todaysWorkoutLog == nil
+                    isEnabled: todaysWorkoutLog == nil && todaysAIPlan?.addedToPlan != true
                 ) {
                     if hasDetailAccess {
                         AnalyticsManager.shared.featureUsed(name: "gym_photo_workout")
@@ -61,6 +73,9 @@ struct HomeView: View {
 
                 if let todaysWorkoutLog {
                     todaysWorkoutCard(todaysWorkoutLog)
+                        .padding(.horizontal, 20)
+                } else if let todaysAIPlan, todaysAIPlan.addedToPlan {
+                    aiGeneratedWorkoutCard(todaysAIPlan)
                         .padding(.horizontal, 20)
                 }
 
@@ -94,6 +109,7 @@ struct HomeView: View {
             await loadTodaysWorkoutLog()
             await loadCompletedDates()
             await loadTimeline()
+            await loadTodaysAIPlan()
         }
         .refreshable {
             await checkNow()
@@ -101,12 +117,14 @@ struct HomeView: View {
             await loadTodaysWorkoutLog()
             await loadCompletedDates()
             await loadTimeline()
+            await loadTodaysAIPlan()
         }
         .sheet(isPresented: $showDetail, onDismiss: {
             Task {
                 await loadTodaysWorkoutLog()
                 await loadCompletedDates()
                 await loadTimeline()
+                await loadTodaysAIPlan()
             }
         }) {
             if let recommendation = appState.currentRecommendation {
@@ -117,6 +135,7 @@ struct HomeView: View {
             ProfileView()
         }
         .sheet(isPresented: $showGymPhotoFlow, onDismiss: {
+            Task { await loadTodaysAIPlan() }
             guard pendingGymPlan != nil else { return }
             Task {
                 // The seeded sheet needs today's recommendation, which can
@@ -148,6 +167,7 @@ struct HomeView: View {
                 await loadTodaysWorkoutLog()
                 await loadCompletedDates()
                 await loadTimeline()
+                await loadTodaysAIPlan()
             }
         }) {
             if let recommendation = appState.currentRecommendation, let pendingGymPlan {
@@ -233,6 +253,41 @@ struct HomeView: View {
         }
     }
 
+    /// Shown once a plan is added to today's plan but not yet completed --
+    /// distinct from todaysWorkoutCard (completed, via workout_log). Tapping
+    /// opens the same detail sheet the recommendation card does, so "Mark
+    /// Workout Complete" stays a separate, explicit action from here.
+    private func aiGeneratedWorkoutCard(_ aiPlan: TodaysAIPlan) -> some View {
+        Button {
+            if hasDetailAccess {
+                showDetail = true
+            } else {
+                showPaywall = true
+            }
+        } label: {
+            CardView {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Today's AI-generated workout")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(aiPlan.selectedTitle)
+                            .font(.body.bold())
+                        if aiPlan.source == "gym_photo" {
+                            Text("Generated with your gym picture")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     /// What was actually recorded today, across every connected source --
     /// distinct from `todaysWorkoutCard` above (which reflects what the
     /// user told Soma they did). Merged client-side since HealthKit can
@@ -316,6 +371,13 @@ struct HomeView: View {
     /// as the other plain reads.
     private func loadCompletedDates() async {
         completedDates = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates()) ?? completedDates
+    }
+
+    /// Feeds the "Take a Picture of Your Gym" disable gate and the
+    /// persistent AI-generated-workout card -- silent on failure, same as
+    /// the other plain reads.
+    private func loadTodaysAIPlan() async {
+        todaysAIPlan = (try? await SupabaseClient.shared.fetchTodaysAIPlan(date: Self.todayDateString())) ?? todaysAIPlan
     }
 
     /// Merges HealthKit's on-device workouts with Oura/Whoop's

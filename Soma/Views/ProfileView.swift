@@ -30,6 +30,7 @@ struct ProfileView: View {
     @State private var injuryNotesText = ""
     @State private var experienceLevel: ExperienceLevel?
     @State private var pregnancy: Bool?
+    @State private var pregnancyWeek: Int?
 
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -229,18 +230,31 @@ struct ProfileView: View {
                 CardView {
                     Text("Pregnancy")
                         .font(.body.bold())
-                    // States the actual consequence rather than a vague
-                    // "keeps things safe" -- this setting does not soften
-                    // the generated workout, it withholds it entirely, and
-                    // a user who discovers that only after setting it will
-                    // reasonably feel misled.
-                    Text("Optional, and never assumed -- only set if you tell us. While this is on, Soma won't auto-generate workouts for you and will point you to a qualified professional instead. Your daily recommendation keeps working as normal.")
+                    // States the actual behavior: Soma adjusts workouts to
+                    // pregnancy stage rather than withholding them entirely
+                    // (an earlier, medically overcautious version of this
+                    // feature did withhold workouts outright -- that's no
+                    // longer the case).
+                    Text("Optional, and never assumed -- only set if you tell us. Soma will adjust your workouts to your pregnancy stage rather than withhold them. This is general guidance only -- please follow your doctor's or midwife's advice, especially if you have any pregnancy complications.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     FlowLayout {
                         ChipToggle(title: "I'm currently pregnant", isSelected: pregnancy == true) {
                             pregnancy = (pregnancy == true) ? nil : true
+                            if pregnancy != true { pregnancyWeek = nil }
                         }
+                    }
+                    if pregnancy == true {
+                        Stepper(
+                            "Week: \(pregnancyWeek.map(String.init) ?? "not set")",
+                            value: Binding(
+                                get: { pregnancyWeek ?? 1 },
+                                set: { pregnancyWeek = $0 }
+                            ),
+                            in: 1...42
+                        )
+                        .font(.caption)
+                        .padding(.top, 4)
                     }
                 }
 
@@ -459,6 +473,7 @@ struct ProfileView: View {
         injuryNotesText = profile.injuryNotes ?? ""
         experienceLevel = profile.experienceLevel
         pregnancy = profile.pregnancy
+        pregnancyWeek = profile.pregnancyWeek
 
         goalBodyPhotoPath = profile.goalBodyPhotoPath
         currentBodyPhotoPath = profile.currentBodyPhotoPath
@@ -536,6 +551,13 @@ struct ProfileView: View {
                 goalBodyPhotoPath = refreshed.goalBodyPhotoPath
                 currentBodyPhotoPath = refreshed.currentBodyPhotoPath
             }
+            // Silent, fire-and-forget -- fires the instant both photos
+            // exist, whichever upload just completed the pair. No loading
+            // state, no error surfaced: a failed/skipped analysis is
+            // invisible by design (see Config.enableBodyPhotoVisionAnalysis).
+            if goalBodyPhotoPath != nil, currentBodyPhotoPath != nil {
+                Task { try? await SupabaseClient.shared.analyzeBodyPhotos() }
+            }
             if kind == .goal {
                 goalPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .goal)) ?? []
             } else {
@@ -580,7 +602,8 @@ struct ProfileView: View {
             injuryTags: Array(injuryTags),
             injuryNotes: injuryNotesText.isEmpty ? nil : injuryNotesText,
             experienceLevel: experienceLevel,
-            pregnancy: pregnancy
+            pregnancy: pregnancy,
+            pregnancyWeek: pregnancy == true ? pregnancyWeek : nil
         )
 
         let currentInjuryTags = Array(injuryTags)

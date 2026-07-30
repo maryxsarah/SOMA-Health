@@ -1,13 +1,11 @@
 import SwiftUI
 
 /// Consolidated view of everything Soma already pulls from connected
-/// wearables/HealthKit -- reachable from ProfileView. Deliberately shows
-/// only metrics with a real data source today (Recovery, Readiness, HRV,
-/// resting HR, sleep hours, strain, stress, workout summary). Health Age
-/// vs Actual Age, cycle day, body composition, weight trend, and
-/// sleep-stage breakdown have no data source in this app or from
-/// Whoop/Oura/HealthKit today and are intentionally omitted rather than
-/// faked -- see TrainingHistoryView for the daily workout-by-workout list.
+/// wearables/HealthKit -- reachable from ProfileView. A denser 2-up grid,
+/// one card per metric family with a real value today -- see
+/// HealthMetricFamily's own doc comment for the full, deliberate list of
+/// what's omitted vs. a richer reference design and why (no fabrication).
+/// See TrainingHistoryView for the daily workout-by-workout list.
 struct HealthDashboardView: View {
     @State private var todaysSnapshots: [DailySnapshotRow] = []
     @State private var recentSnapshots: [DailySnapshotRow] = []
@@ -49,73 +47,50 @@ struct HealthDashboardView: View {
         .task { await load() }
     }
 
+    /// Denser 2-up grid, one card per family with a real value today --
+    /// replaces the old per-source ring+rows layout, which read like a
+    /// data dump rather than the "quick, scannable overview" a Level 1
+    /// should be. Every card uses the same style for visual consistency;
+    /// Recovery/Readiness is distinguished by its qualitative pill
+    /// (High/Medium/Low), not a different layout.
     private var todayCard: some View {
-        CardView {
-            Text("Today")
-                .font(.body.bold())
-            ForEach(todaysSnapshots, id: \.source) { snapshot in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(snapshot.source.capitalized)
-                        .font(.caption.bold())
-                        .foregroundStyle(Theme.pillFill)
-                    HStack(alignment: .top, spacing: 16) {
-                        // Recovery (Whoop, 0-100) and readiness (Oura, 0-100)
-                        // are both already treated as roughly the same scale
-                        // elsewhere in this app (bandFromWhoop/bandFromOura),
-                        // so one ring covers whichever this source reports.
-                        if let primary = snapshot.recoveryScore ?? snapshot.readinessScore {
-                            NavigationLink(value: HealthMetricFamily.recoveryReadiness) {
-                                RingChartView(
-                                    value: primary,
-                                    maxValue: 100,
-                                    label: snapshot.recoveryScore != nil ? "Recovery" : "Readiness"
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(metricLineRows(for: snapshot), id: \.family) { row in
-                                NavigationLink(value: row.family) {
-                                    HStack {
-                                        Text(row.text)
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption2)
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            ForEach(HealthMetricFamily.allCases) { family in
+                if let value = todaysValue(for: family) {
+                    metricCard(family: family, value: value)
                 }
-                .padding(.top, 4)
             }
         }
     }
 
-    private struct MetricLineRow {
-        let family: HealthMetricFamily
-        let text: String
+    private func todaysValue(for family: HealthMetricFamily) -> Double? {
+        todaysSnapshots.compactMap { family.value(from: $0) }.first
     }
 
-    /// Only rows with a real value -- a source that doesn't report a
-    /// metric (e.g. Whoop has no stress score) simply contributes nothing,
-    /// rather than showing a placeholder. Recovery/readiness are shown as
-    /// the ring above instead of repeating them here. Each row is tappable
-    /// -- Level 1 -> Level 2 (MetricDetailView).
-    private func metricLineRows(for snapshot: DailySnapshotRow) -> [MetricLineRow] {
-        var rows: [MetricLineRow] = []
-        if let hrv = snapshot.hrvMs { rows.append(.init(family: .hrv, text: "HRV: \(Int(hrv))ms")) }
-        if let restingHr = snapshot.restingHr { rows.append(.init(family: .restingHR, text: "Resting HR: \(Int(restingHr))bpm")) }
-        if let sleepHours = snapshot.sleepHours { rows.append(.init(family: .sleep, text: "Sleep: \(String(format: "%.1f", sleepHours))h")) }
-        if let strain = snapshot.strainScore {
-            let text = snapshot.source == "whoop" ? "Strain: \(String(format: "%.1f", strain))/21" : "Strain: \(Int(strain)) hard session(s)"
-            rows.append(.init(family: .strain, text: text))
+    private func metricCard(family: HealthMetricFamily, value: Double) -> some View {
+        let qualitativeLabel: String? = {
+            guard family == .recoveryReadiness else { return nil }
+            let isWhoopRecovery = todaysSnapshots.first { $0.recoveryScore != nil }?.recoveryScore != nil
+            return HealthMetricFamily.qualitativeLabel(recoveryOrReadiness: value, isWhoopRecovery: isWhoopRecovery)
+        }()
+        let priorValues = dailyValues(for: family).dropLast().map(\.value)
+        let trend = HealthMetricFamily.trendDescription(today: value, priorValues: Array(priorValues))
+        return HealthMetricCardView(
+            family: family,
+            value: value,
+            qualitativeLabel: qualitativeLabel,
+            trend: trend,
+            ringDiameter: family == .recoveryReadiness ? 64 : nil
+        )
+    }
+
+    /// Pools whichever source(s) reported this metric per day -- same
+    /// coalescing MetricDetailView's own dailyValues(for:) does.
+    private func dailyValues(for family: HealthMetricFamily) -> [(date: String, value: Double)] {
+        recentSnapshots.compactMap { row -> (String, Double)? in
+            guard let value = family.value(from: row), let date = row.date else { return nil }
+            return (date, value)
         }
-        if let stress = snapshot.stressScore { rows.append(.init(family: .stress, text: "Stress: \(Int(stress)) min high-stress today")) }
-        return rows
     }
 
     private struct TrendMetric {

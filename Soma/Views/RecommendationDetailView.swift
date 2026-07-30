@@ -26,6 +26,11 @@ struct RecommendationDetailView: View {
     @State private var planStartedAt: Date?
     @State private var isLoadingAIPlan = false
     @State private var aiPlanError: String?
+    /// True once "Add to today's plan" has been confirmed for `aiPlan` --
+    /// distinct from `isCompletedToday` (a separate, later, explicit action).
+    @State private var addedToPlan = false
+    @State private var isAddingToPlan = false
+    @State private var addToPlanError: String?
 
     @State private var isMarkingComplete = false
     @State private var feedbackText = ""
@@ -118,6 +123,17 @@ struct RecommendationDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    // Fixed, non-LLM-generated -- never rely on the model to
+                    // include this in its own output. Shown whenever the
+                    // user's profile has pregnancy set, regardless of what
+                    // plan is displayed below.
+                    if profile.pregnancy == true {
+                        Text(Self.pregnancyDisclaimer)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .padding(.top, 2)
+                    }
+
                     if let aiPlan {
                         AIWorkoutPlanView(plan: aiPlan)
 
@@ -153,6 +169,24 @@ struct RecommendationDetailView: View {
                                     .font(.caption)
                                     .foregroundStyle(.red)
                             }
+
+                            if addedToPlan {
+                                Label("Added to today's plan", systemImage: "checkmark.circle.fill")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.green)
+                                    .padding(.top, 4)
+                            } else {
+                                if let addToPlanError {
+                                    Text(addToPlanError)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                                PillButton(title: "Add to today's plan", isEnabled: !isAddingToPlan) {
+                                    Task { await addToTodaysPlan() }
+                                }
+                                .padding(.top, 4)
+                            }
+
                             TextField("Feedback for next time (optional)", text: $feedbackText, axis: .vertical)
                                 .textFieldStyle(.roundedBorder)
                                 .lineLimit(2...4)
@@ -212,6 +246,11 @@ struct RecommendationDetailView: View {
                     }
                     if recommendation.loadCapApplied {
                         Text("Note: today's intensity was capped because of a strenuous session very recently, even though recovery looked strong.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if recommendation.volumeCapApplied {
+                        Text("Note: today's intensity was capped because of a high training volume over the last week, even though recovery looked strong.")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -443,14 +482,34 @@ struct RecommendationDetailView: View {
             )
             AnalyticsManager.shared.aiResponseReceived()
             if planStartedAt == nil { planStartedAt = Date() }
+            // A freshly generated plan always starts unconfirmed, matching
+            // the server resetting added_to_plan on every real generation.
+            // (loadContext's restore path is what sets this true again for
+            // an already-confirmed plan on reopen -- this line only runs
+            // right after this view itself triggered a generation.)
+            addedToPlan = false
         } catch SupabaseError.safetyBlocked(let message) {
             // Shown verbatim. A generic "try again in a moment" would be a
             // lie -- retrying cannot help, and the user would keep tapping.
             aiPlanError = message
         } catch SupabaseError.workoutLocked(let message) {
             aiPlanError = message
+        } catch SupabaseError.generationLimitReached(let message) {
+            aiPlanError = message
         } catch {
             aiPlanError = "Couldn't generate a plan right now. Try again in a moment."
+        }
+    }
+
+    private func addToTodaysPlan() async {
+        isAddingToPlan = true
+        addToPlanError = nil
+        defer { isAddingToPlan = false }
+        do {
+            try await SupabaseClient.shared.confirmAIPlan(date: recommendation.date)
+            addedToPlan = true
+        } catch {
+            addToPlanError = "Couldn't add to today's plan. Try again."
         }
     }
 
@@ -528,6 +587,26 @@ struct RecommendationDetailView: View {
             selectedTitle = alreadyLogged.title
             selectedBodyPart = alreadyLogged.bodyPart
             await loadAIPlan()
+        } else if aiPlan == nil, selectedTitle == nil {
+            // Not completed, but a plan may already exist for today (e.g.
+            // generated and/or added to plan, then the sheet was closed and
+            // reopened -- from Home's persistent AI-generated-workout card,
+            // most commonly). Restore it instead of showing a blank
+            // generator, same reasoning as the completed-log branch above.
+            if let existing = try? await SupabaseClient.shared.fetchTodaysAIPlan(date: recommendation.date) {
+                aiPlan = existing.plan
+                selectedTitle = existing.selectedTitle
+                // bodyPart isn't a persisted column -- recover it from a
+                // substitution record if one exists, else from matching the
+                // title against the fixed suggestion list (works for the
+                // normal flow; a gym-photo title won't match, so fall back
+                // to full_body rather than leaving this nil, which would
+                // silently no-op "Mark Workout Complete").
+                selectedBodyPart = existing.plan.substitutedBodyPart
+                    ?? recommendation.category.workoutSuggestions.first(where: { $0.title == existing.selectedTitle })?.bodyPart.rawValue
+                    ?? BodyPartFocus.fullBody.rawValue
+                addedToPlan = existing.addedToPlan
+            }
         }
     }
 
@@ -567,6 +646,11 @@ struct RecommendationDetailView: View {
             injuryCheckinMessage = "Couldn't record that check-in. Try again."
         }
     }
+
+    /// Mirrors pregnancyGuidance.ts's PREGNANCY_DISCLAIMER verbatim -- fixed
+    /// UI copy, not sourced from the LLM response, so it always renders
+    /// regardless of what the model actually returned.
+    static let pregnancyDisclaimer = "This is general guidance only, not medical advice -- please follow your doctor's or midwife's recommendations, especially if you have any pregnancy complications."
 
     private func fetchProfileSafely() async -> UserProfile {
         guard let userId = SupabaseClient.shared.currentUserID else { return .empty }
@@ -611,6 +695,8 @@ private struct SeededGenerator: RandomNumberGenerator {
             consecutiveDaysCapApplied: false,
             injuryProtocolCapApplied: false,
             injuryProtocolModerateCapApplied: false,
+            pregnancyCapApplied: false,
+            volumeCapApplied: false,
             preCapCategory: nil,
             dataConfidence: .low
         )

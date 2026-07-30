@@ -117,9 +117,12 @@ struct UserProfile: Codable, Equatable {
     /// Self-reported pain level, 1-10. Also purely informational.
     var injuryPainLevel: [String: Int] = [:]
     var experienceLevel: ExperienceLevel?
-    /// Self-reported only, never assumed -- one of the deterministic
-    /// safety-guardrail triggers for the gym-photo-workout feature.
+    /// Self-reported only, never assumed -- adjusts (never withholds)
+    /// generated workouts, and caps the day's category at moderate.
     var pregnancy: Bool?
+    /// Optional, only meaningful when `pregnancy == true`. Drives
+    /// trimester-scaled guidance -- see pregnancyGuidance.ts.
+    var pregnancyWeek: Int?
     /// Storage paths (not the image itself), behind Config.enableBodyPhotoUpload
     /// -- managed only via SupabaseClient's uploadBodyPhoto/deleteBodyPhoto,
     /// not through the general profile save() flow, hence the defaults.
@@ -139,6 +142,7 @@ struct UserProfile: Codable, Equatable {
         case injuryPainLevel = "injury_pain_level"
         case experienceLevel = "experience_level"
         case pregnancy
+        case pregnancyWeek = "pregnancy_week"
         case goalBodyPhotoPath = "goal_body_photo_path"
         case currentBodyPhotoPath = "current_body_photo_path"
     }
@@ -153,6 +157,7 @@ struct UserProfile: Codable, Equatable {
         injuryNotes: nil,
         experienceLevel: nil,
         pregnancy: nil,
+        pregnancyWeek: nil,
         goalBodyPhotoPath: nil,
         currentBodyPhotoPath: nil
     )

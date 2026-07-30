@@ -5,8 +5,10 @@ import SwiftUI
 /// day-strip history scroller, the restated score with a fixed template
 /// insight sentence (never LLM-generated, matching this app's existing
 /// "fixed, rule-based" copy convention), a Contributors section for
-/// families that have real sub-inputs, and a Key Metrics grid whose rows
-/// open Level 3.
+/// families that have real sub-inputs, a sleep-stage chart for `.sleep`
+/// (the one reference-design tile that's real, not fabricated -- see
+/// HealthMetricFamily's doc comment for the full omission list), and a
+/// Key Metrics grid whose rows open Level 3.
 struct MetricDetailView: View {
     let metric: HealthMetricFamily
     /// Passed down from HealthDashboardView -- already a 14-day window,
@@ -18,6 +20,9 @@ struct MetricDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 dayStrip
                 scoreCard
+                if metric == .sleep, !sleepStageEntries.isEmpty {
+                    sleepStageCard
+                }
                 if !metric.contributors.isEmpty {
                     contributorsCard
                 }
@@ -92,28 +97,80 @@ struct MetricDetailView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
+
+            // Real, cheap reuse of history already fetched -- not new
+            // data. Distinct from Oura's "Cumulative Stress" (a genuinely
+            // different multi-day construct this app doesn't track), this
+            // is just the plain trailing average of the same stress_score
+            // history every other section on this page already has.
+            if metric == .stress, let trailingAverage = trailingStressAverage(entries: entries) {
+                Text("7-day average: \(AxisLabeledTrendChart.formattedAxisValue(trailingAverage))\(metric.unit.isEmpty ? "" : metric.unit)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+            }
         }
     }
 
     /// Fixed template, never LLM-generated -- compares today's value
     /// against the trailing average, same "plain arithmetic + a fixed
-    /// sentence" approach as RecommendationCategory's messages.
+    /// sentence" approach as RecommendationCategory's messages. Shares its
+    /// arithmetic with HealthDashboardView's Level-1 cards via
+    /// HealthMetricFamily.trendDescription rather than two hand-copies.
     private func insightSentence(entries: [(date: String, value: Double)]) -> String {
         guard let today = entries.last else {
             return "Not enough data yet to show a trend for \(metric.displayTitle.lowercased())."
         }
-        let priorEntries = entries.dropLast()
-        guard !priorEntries.isEmpty else {
+        let priorValues = entries.dropLast().map(\.value)
+        guard let trend = HealthMetricFamily.trendDescription(today: today.value, priorValues: priorValues) else {
             return "This is your first recorded reading for \(metric.displayTitle.lowercased())."
         }
-        let average = priorEntries.map(\.value).reduce(0, +) / Double(priorEntries.count)
-        let diffPercent = average != 0 ? (today.value - average) / average * 100 : 0
-        if abs(diffPercent) < 5 {
+        switch trend.direction {
+        case .flat:
             return "Today's \(metric.displayTitle.lowercased()) is in line with your recent average."
-        } else if diffPercent > 0 {
-            return "Today's \(metric.displayTitle.lowercased()) is about \(Int(abs(diffPercent)))% above your recent average."
-        } else {
-            return "Today's \(metric.displayTitle.lowercased()) is about \(Int(abs(diffPercent)))% below your recent average."
+        case .up:
+            return "Today's \(metric.displayTitle.lowercased()) is about \(trend.percent)% above your recent average."
+        case .down:
+            return "Today's \(metric.displayTitle.lowercased()) is about \(trend.percent)% below your recent average."
+        }
+    }
+
+    /// Trailing average over the last 7 available entries, excluding
+    /// today -- plain arithmetic over data already fetched, not a new
+    /// backend concept.
+    private func trailingStressAverage(entries: [(date: String, value: Double)]) -> Double? {
+        let prior = entries.dropLast().suffix(7)
+        guard !prior.isEmpty else { return nil }
+        return prior.map(\.value).reduce(0, +) / Double(prior.count)
+    }
+
+    /// Only days that report at least one real stage -- a day with none is
+    /// absent, not a zero-height bar pretending to be data.
+    private var sleepStageEntries: [SleepStageBarChart.Entry] {
+        recentSnapshots.compactMap { row -> SleepStageBarChart.Entry? in
+            guard let date = row.date,
+                  row.sleepLightHours != nil || row.sleepDeepHours != nil ||
+                  row.sleepRemHours != nil || row.sleepAwakeHours != nil
+            else { return nil }
+            return SleepStageBarChart.Entry(
+                date: date,
+                light: row.sleepLightHours,
+                deep: row.sleepDeepHours,
+                rem: row.sleepRemHours,
+                awake: row.sleepAwakeHours
+            )
+        }
+    }
+
+    private var sleepStageCard: some View {
+        CardView {
+            Text("Sleep stages")
+                .font(.body.bold())
+            Text("The one real, non-fabricated breakdown available -- computed from whichever source reported it, not every night.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            SleepStageBarChart(entries: sleepStageEntries)
+                .padding(.top, 8)
         }
     }
 

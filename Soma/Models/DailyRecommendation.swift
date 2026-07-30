@@ -303,6 +303,8 @@ struct DailyRecommendation: Codable, Equatable {
     let consecutiveDaysCapApplied: Bool
     let injuryProtocolCapApplied: Bool
     let injuryProtocolModerateCapApplied: Bool
+    let pregnancyCapApplied: Bool
+    let volumeCapApplied: Bool
     /// The uncapped recovery-band category, when the server has it on
     /// record -- lets RecommendationDetailView offer "a standard workout
     /// anyway" without re-deriving the recovery band client-side. Nil for
@@ -319,6 +321,8 @@ struct DailyRecommendation: Codable, Equatable {
         case consecutiveDaysCapApplied = "consecutive_days_cap_applied"
         case injuryProtocolCapApplied = "injury_protocol_cap_applied"
         case injuryProtocolModerateCapApplied = "injury_protocol_moderate_cap_applied"
+        case pregnancyCapApplied = "pregnancy_cap_applied"
+        case volumeCapApplied = "volume_cap_applied"
         case preCapCategory = "pre_cap_category"
     }
 }
@@ -344,6 +348,8 @@ extension DailyRecommendation {
         consecutiveDaysCapApplied = try container.decodeIfPresent(Bool.self, forKey: .consecutiveDaysCapApplied) ?? false
         injuryProtocolCapApplied = try container.decodeIfPresent(Bool.self, forKey: .injuryProtocolCapApplied) ?? false
         injuryProtocolModerateCapApplied = try container.decodeIfPresent(Bool.self, forKey: .injuryProtocolModerateCapApplied) ?? false
+        pregnancyCapApplied = try container.decodeIfPresent(Bool.self, forKey: .pregnancyCapApplied) ?? false
+        volumeCapApplied = try container.decodeIfPresent(Bool.self, forKey: .volumeCapApplied) ?? false
         preCapCategory = try container.decodeIfPresent(RecommendationCategory.self, forKey: .preCapCategory)
         dataConfidence = try container.decodeIfPresent(DataConfidence.self, forKey: .dataConfidence)
     }

@@ -133,6 +133,8 @@ final class DailyRecommendationDecodingTests: XCTestCase {
         XCTAssertFalse(recommendation.consecutiveDaysCapApplied)
         XCTAssertFalse(recommendation.injuryProtocolCapApplied)
         XCTAssertFalse(recommendation.injuryProtocolModerateCapApplied)
+        XCTAssertFalse(recommendation.pregnancyCapApplied)
+        XCTAssertFalse(recommendation.volumeCapApplied)
     }
 
     // MARK: - Caveat copy

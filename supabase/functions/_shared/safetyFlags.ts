@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { describeContraindications, type InjurySeverityLevel } from "./contraindications.ts";
+import { describePregnancyGuidance } from "./pregnancyGuidance.ts";
 
 // Fixed, non-LLM-generated message -- never let the model diagnose/treat/
 // infer a medical condition; this copy is authored once, here, and never
@@ -29,21 +30,22 @@ export interface SafetyCheckResult {
  *
  * Two tiers, deliberately:
  *
- * HARD BLOCK -- self-reported pregnancy, or today's resting HR deviating
- * >20% from the trailing 14-day average. Both warrant a conversation with
- * a professional rather than an automatically generated session.
+ * HARD BLOCK -- only today's resting HR deviating >20% from the trailing
+ * 14-day average. That warrants a conversation with a professional rather
+ * than an automatically generated session.
  *
- * SOFT ADJUSTMENT -- a noted injury excludes high-impact templates but
- * still produces a workout. This used to be a hard block, which was both
- * inconsistent and ineffective: `generate-recommendation` ALREADY caps the
- * day's category at moderate when an injury is noted (injuryCapApplied),
- * and this function reads that already-capped category, so the intensity
- * was reduced upstream regardless. Meanwhile the normal AI-plan path hands
- * the same user a full session on the next screen after filtering
- * high-impact options. Blocking only here protected nobody -- it just made
- * one feature refuse while another obliged, and the user learned to press
- * the other button. Matching the main path's behaviour is both consistent
- * and, in practice, no less safe.
+ * SOFT ADJUSTMENT -- a noted injury OR self-reported pregnancy excludes
+ * high-impact/unsafe templates but still produces a workout. Pregnancy used
+ * to be a hard block; that was medically overcautious (pregnant people can
+ * generally train, with appropriate adjustments) and inconsistent with how
+ * injuries are already handled: `generate-recommendation` ALREADY caps the
+ * day's category when pregnant (pregnancyCapApplied) or injured
+ * (injuryCapApplied), so intensity is reduced upstream regardless. This
+ * function's job is narrowing WHAT gets suggested (via excludedKeywords,
+ * scaled by trimester for pregnancy -- see pregnancyGuidance.ts), not
+ * whether anything gets suggested at all. The disclaimer directing users to
+ * their doctor/midwife is shown as a fixed, non-LLM UI banner instead
+ * (see RecommendationDetailView), not by refusing to generate.
  *
  * NOTE: this is a change to a safety control and should be signed off by
  * whoever owns that decision.
@@ -62,23 +64,30 @@ export async function checkSafetyFlags(
   // is the correct outcome when we cannot establish whether it is safe.
   const { data: userRow, error: userError } = await supabase
     .from("users")
-    .select("injury_tags, injury_severity, pregnancy")
+    .select("injury_tags, injury_severity, pregnancy, pregnancy_week")
     .eq("id", userId)
     .maybeSingle();
   if (userError) {
     throw new Error(`safety check could not read users: ${userError.message}`);
   }
 
-  if (userRow?.pregnancy === true) {
-    await logFlag(supabase, userId, date, "pregnancy", null);
-    return { flagged: true, message: SAFETY_MESSAGE, excludeHighImpact: true, excludedKeywords: [] };
-  }
-
   const injuryTags = (userRow?.injury_tags as string[] | null) ?? [];
   const severityMap = (userRow?.injury_severity as Record<string, InjurySeverityLevel> | null) ?? {};
-  const excludeHighImpact = injuryTags.length > 0;
-  const { excludedKeywords } = describeContraindications(injuryTags, severityMap);
-  if (excludeHighImpact) {
+  const isPregnant = userRow?.pregnancy === true;
+  const excludeHighImpact = injuryTags.length > 0 || isPregnant;
+
+  const { excludedKeywords: injuryKeywords } = describeContraindications(injuryTags, severityMap);
+  const excludedKeywords = [...injuryKeywords];
+  if (isPregnant) {
+    const { excludedKeywords: pregnancyKeywords } = describePregnancyGuidance(
+      (userRow?.pregnancy_week as number | null) ?? null,
+    );
+    for (const kw of pregnancyKeywords) {
+      if (!excludedKeywords.includes(kw)) excludedKeywords.push(kw);
+    }
+    await logFlag(supabase, userId, date, "pregnancy_adjusted", null);
+  }
+  if (injuryTags.length > 0) {
     await logFlag(supabase, userId, date, "injury_high_impact_excluded", injuryTags.join(", "));
   }
 

@@ -41,6 +41,9 @@ struct GymPhotoWorkoutView: View {
     @State private var errorMessage: String?
     @State private var resultPlan: AIWorkoutPlan?
     @State private var safetyMessage: String?
+    @State private var isAddingToPlan = false
+    @State private var addedToPlan = false
+    @State private var addToPlanError: String?
 
     var body: some View {
         NavigationStack {
@@ -341,15 +344,47 @@ struct GymPhotoWorkoutView: View {
                         .foregroundStyle(.red)
                 }
 
+                if let addToPlanError {
+                    Text(addToPlanError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
                 if resultPlan != nil {
-                    Button {
-                        step = .confirmingEquipment
-                    } label: {
-                        Text("Adjust manually")
+                    if addedToPlan {
+                        Label("Added to today's plan", systemImage: "checkmark.circle.fill")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.green)
                             .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                    } else {
+                        Button {
+                            Task { await addToTodaysPlan() }
+                        } label: {
+                            if isAddingToPlan {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Text("Add to today's plan")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isAddingToPlan)
+                        .padding(.top, 4)
+
+                        // Kept available even after generating -- the
+                        // workout stays on screen (resultPlan is never
+                        // cleared by this tap), it's just a re-entry into
+                        // the equipment step in case the plan isn't right.
+                        Button {
+                            step = .confirmingEquipment
+                        } label: {
+                            Text("Adjust manually")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
-                    .padding(.top, 4)
                 }
             }
             .padding(20)
@@ -440,11 +475,26 @@ struct GymPhotoWorkoutView: View {
             case .safetyBlocked(let message):
                 safetyMessage = message
                 resultPlan = nil
+            case .generationLimitReached(let message):
+                safetyMessage = message
+                resultPlan = nil
             }
             step = .result
         } catch {
             errorMessage = "Couldn't build a workout right now. Try again."
             step = .confirmingEquipment
+        }
+    }
+
+    private func addToTodaysPlan() async {
+        isAddingToPlan = true
+        addToPlanError = nil
+        defer { isAddingToPlan = false }
+        do {
+            try await SupabaseClient.shared.confirmAIPlan(date: date)
+            addedToPlan = true
+        } catch {
+            addToPlanError = "Couldn't add to today's plan. Try again."
         }
     }
 

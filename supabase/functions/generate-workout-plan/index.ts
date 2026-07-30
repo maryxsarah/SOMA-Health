@@ -28,8 +28,13 @@
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
+import { checkGenerationLimit, GENERATION_LIMIT_MESSAGE, logGeneration, type SubscriptionTier } from "../_shared/generationLimits.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
 import { describeContraindications, type InjurySeverityLevel } from "../_shared/contraindications.ts";
+import { describePregnancyGuidance } from "../_shared/pregnancyGuidance.ts";
+import { describeVolumeGuidance, type ExperienceLevel } from "../_shared/volumeLandmarks.ts";
+import { describeRirGuidance } from "./rirGuidance.ts";
+import { describeSexAwareConsiderations } from "./sexAwareGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
@@ -114,6 +119,17 @@ interface UserRow {
   sex: string | null;
   date_of_birth: string | null;
   weight_kg: number | null;
+  pregnancy: boolean | null;
+  pregnancy_week: number | null;
+  body_photo_emphasis_tags: string[] | null;
+  // Collected at onboarding, previously never read here despite being
+  // free, real signal already on the row.
+  workouts_per_week: string | null;
+  diet_type: string | null;
+  goal_pace: string | null;
+  blockers: string[] | null;
+  accomplishment_goal: string | null;
+  desired_weight_kg: number | null;
 }
 
 interface SnapshotRow {
@@ -184,17 +200,12 @@ Deno.serve(async (req: Request) => {
     // Guardrail BEFORE the cache read, so a plan generated before the user
     // reported a condition is not replayed back to them afterwards.
     //
-    // ProfileView tells the user that while pregnancy is set "Soma won't
-    // auto-generate workouts for you" -- but only the gym-photo path honoured
-    // that, so the main Generate button handed them a full plan anyway. The
-    // promise was strengthened without checking every path that has to keep
-    // it.
-    //
-    // Only the hard-block tier applies here. An injury must NOT block this
-    // path: generate-recommendation already caps the day's category when one
-    // is noted, and RecommendationDetailView filters high-impact suggestions,
-    // so injured users are handled -- blocking them here would break the
-    // app's main feature for them.
+    // Only the hard-block tier (abnormal resting HR) applies here. Neither
+    // an injury nor pregnancy blocks this path: generate-recommendation
+    // already caps the day's category for both, and safetyFlags.ts's
+    // excludedKeywords (merged into the prompt via `injuries` below) narrows
+    // what gets suggested -- blocking generation entirely would break the
+    // app's main feature for these users instead of adjusting it for them.
     const safety = await checkSafetyFlags(supabase, userId, date);
     if (safety.flagged) {
       return jsonResponse({ date, safety_flag: true, message: safety.message });
@@ -207,12 +218,12 @@ Deno.serve(async (req: Request) => {
     // silently handing back a plan for something else.
     const { data: cached } = await supabase
       .from("ai_workout_plan")
-      .select("category, plan, selected_title")
+      .select("category, plan, selected_title, source")
       .eq("user_id", userId)
       .eq("date", date)
       .maybeSingle();
     if (cached && cached.selected_title === selection.title) {
-      return jsonResponse({ date, category: cached.category, ...cached.plan });
+      return jsonResponse({ date, category: cached.category, source: cached.source, ...cached.plan });
     }
 
     // A different selection than what's cached, but the day is already
@@ -241,6 +252,19 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // Only a genuinely new generation reaches here (a matching cache hit
+    // already returned above) -- check the daily cap before paying for one.
+    const { data: tierRow } = await supabase
+      .from("users")
+      .select("subscription_tier")
+      .eq("id", userId)
+      .maybeSingle();
+    const subscriptionTier = ((tierRow?.subscription_tier as SubscriptionTier | null) ?? "free");
+    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier);
+    if (!limitCheck.allowed) {
+      return jsonResponse({ date, generation_limit_reached: true, message: GENERATION_LIMIT_MESSAGE });
+    }
+
     const { data: recommendation } = await supabase
       .from("daily_recommendation")
       .select("category")
@@ -254,7 +278,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow } = await supabase
       .from("users")
-      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg")
+      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goal, desired_weight_kg")
       .eq("id", userId)
       .maybeSingle();
 
@@ -351,14 +375,19 @@ Deno.serve(async (req: Request) => {
       exceptional_finisher: finisherDecision.exceptional,
     };
 
+    // A freshly generated plan always starts unconfirmed -- added_to_plan is
+    // reset explicitly so regenerating requires a fresh "Add to today's
+    // plan" confirmation for the NEW content (see generate-gym-workout's
+    // matching comment).
     await supabase
       .from("ai_workout_plan")
       .upsert(
-        { user_id: userId, date, category, plan: planWithDuration, selected_title: selection.title },
+        { user_id: userId, date, category, plan: planWithDuration, selected_title: selection.title, source: "suggestion", added_to_plan: false, added_at: null },
         { onConflict: "user_id,date" },
       );
+    await logGeneration(supabase, userId, date, "suggestion");
 
-    return jsonResponse({ date, category, ...planWithDuration });
+    return jsonResponse({ date, category, source: "suggestion", ...planWithDuration });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const status = msg === "unauthorized" ? 401 : 500;
@@ -407,6 +436,38 @@ function buildLoadGuidance(weightKg: number | null, experience: string): string 
     return `${(low * weightKg).toFixed(0)}-${(high * weightKg).toFixed(0)}kg`;
   };
   return `The user weighs ${weightKg}kg, ${experience} experience. For any working set targeting these patterns, keep weight_guidance's suggested load within these guideline ranges once warmed up (not a strict per-rep ceiling, use professional judgment for warm-ups): squat pattern ${range("squat_pattern")}; hinge pattern (deadlift-style) ${range("hinge_pattern")}; overhead press ${range("overhead_press")}; horizontal press (bench/push-up-with-added-load) ${range("horizontal_press")}; row/pull ${range("row_pull")}.`;
+}
+
+/// Mirrors Soma/Models/OnboardingSurveyModels.swift's WorkoutFrequency enum.
+function workoutsPerWeekLabel(raw: string | null): string {
+  switch (raw) {
+    case "zero_to_two": return "Trains 0-2 times/week currently.";
+    case "three_to_five": return "Trains 3-5 times/week currently.";
+    case "six_plus": return "Trains 6+ times/week currently.";
+    default: return "";
+  }
+}
+
+/// Mirrors Soma/Models/OnboardingSurveyModels.swift's DietType enum.
+function dietLabel(raw: string): string {
+  switch (raw) {
+    case "whole_food": return "whole food";
+    case "low_carb": return "low carb";
+    case "none": return "no specific diet";
+    default: return raw;
+  }
+}
+
+/// Mirrors Soma/Models/OnboardingSurveyModels.swift's BlockerTag enum.
+function blockerLabel(raw: string): string {
+  switch (raw) {
+    case "lack_of_consistency": return "lack of consistency";
+    case "unhealthy_habits": return "unhealthy habits";
+    case "lack_of_support": return "lack of support";
+    case "busy_schedule": return "busy schedule";
+    case "no_idea_where_to_start": return "not knowing where to start";
+    default: return raw;
+  }
 }
 
 /// Fallback title used only when generate-workout-plan itself substitutes
@@ -458,6 +519,14 @@ function buildPrompt(
   notes: string | undefined,
 ): string {
   const goals = userRow?.goals?.length ? userRow.goals.join(", ") : "general fitness";
+  // A secondary, lower-confidence signal from comparing the user's stored
+  // goal/current body photos (see analyze-body-photo) -- kept separate from
+  // the user's own stated `goals` above rather than merged into it, so
+  // "the user said X" is never indistinguishable from "the model guessed
+  // X". Only appended when non-empty.
+  const bodyPhotoEmphasisLine = userRow?.body_photo_emphasis_tags?.length
+    ? `\nA comparison of the user's current and goal-body photos additionally suggests emphasizing: ${userRow.body_photo_emphasis_tags.join(", ")}. Treat this as a secondary signal alongside -- not a replacement for -- the stated goals above.`
+    : "";
   const equipment = userRow?.equipment?.length
     ? userRow.equipment.join(", ")
     : "no equipment (bodyweight only)";
@@ -473,6 +542,36 @@ function buildPrompt(
   const loadGuidance = buildLoadGuidance(userRow?.weight_kg ?? null, experience);
   const ageLine = userRow?.date_of_birth ? `The user is ${ageFromDOB(userRow.date_of_birth)} years old -- use general caution appropriate to their age, but this is context, not a numeric load rule.` : "";
   const sexLine = userRow?.sex ? `Sex: ${userRow.sex}.` : "";
+  // Deterministic, trimester-scaled guidance -- never left to the model to
+  // infer what's safe during pregnancy, same rule as injuries above. The
+  // doctor/midwife disclaimer is shown as a fixed UI banner client-side
+  // (RecommendationDetailView), not relied on to appear in the LLM's output.
+  const pregnancyLine = userRow?.pregnancy === true
+    ? `\nThe user is pregnant. ${describePregnancyGuidance(userRow?.pregnancy_week ?? null).promptLine}.`
+    : "";
+
+  // Generic, published exercise-science guidance -- deterministic strings,
+  // never left to the model to invent. See volumeLandmarks.ts/rirGuidance.ts/
+  // sexAwareGuidance.ts for the framing constraint (principles, never
+  // attributed to a named individual).
+  const experienceLevel = experience as ExperienceLevel;
+  const volumeGuidanceLine = describeVolumeGuidance(experienceLevel, category);
+  const rirGuidanceLine = describeRirGuidance(goals, experienceLevel, category);
+  const sexAwareLine = describeSexAwareConsiderations(userRow?.sex ?? null, category);
+
+  // Free, real signal already collected at onboarding but not previously
+  // threaded into this prompt.
+  const workoutsPerWeekLine = workoutsPerWeekLabel(userRow?.workouts_per_week ?? null);
+  const dietLine = userRow?.diet_type ? `Diet preference: ${dietLabel(userRow.diet_type)}.` : "";
+  const goalPaceLine = userRow?.goal_pace
+    ? `Target pace toward their goal: ${userRow.goal_pace} -- treat this as a cue for how aggressive vs. conservative to make today's session, not a numeric calorie rule.`
+    : "";
+  const blockersLine = userRow?.blockers?.length
+    ? `What's gotten in their way before: ${userRow.blockers.map(blockerLabel).join(", ")} -- bias toward simplicity and consistency in how the session is framed if relevant (e.g. shorter/clearer instructions for "busy schedule" or "overwhelmed").`
+    : "";
+  const accomplishmentLine = userRow?.accomplishment_goal
+    ? `In their own words, what they want to accomplish: "${userRow.accomplishment_goal}".`
+    : "";
 
   const healthLines = describeHealthData(snapshots);
 
@@ -509,12 +608,16 @@ The user has already chosen today's workout from the app's suggestion list: "${s
 
 Today's training intensity (already decided by the app's recovery-based rules -- do not override it): ${category}.
 Today's actual health data driving that intensity: ${healthLines}
-User's goals: ${goals}.
+User's goals: ${goals}.${bodyPhotoEmphasisLine}
 Training experience: ${experience}. ${experienceGuidance}
 Available equipment: ${equipment}.
 Noted injuries: ${injuries}.${injuryNotes}
-${sexLine}${ageLine ? `\n${ageLine}` : ""}
+${sexLine}${ageLine ? `\n${ageLine}` : ""}${pregnancyLine}
 ${loadGuidance}
+${volumeGuidanceLine ? `\n${volumeGuidanceLine}` : ""}
+${rirGuidanceLine ? `\n${rirGuidanceLine}` : ""}
+${sexAwareLine ? `\n${sexAwareLine}` : ""}
+${workoutsPerWeekLine ? `\n${workoutsPerWeekLine}` : ""}${dietLine ? `\n${dietLine}` : ""}${goalPaceLine ? `\n${goalPaceLine}` : ""}${blockersLine ? `\n${blockersLine}` : ""}${accomplishmentLine ? `\n${accomplishmentLine}` : ""}
 
 Recent logged workouts (last 14 days, oldest first) -- use this for progressive overload: if the user has repeated an exercise, suggest a sensible progression (more reps, more weight, or more sets) rather than repeating the exact same prescription. If an exercise is new, prescribe a safe, moderate starting point.
 ${historyLines}

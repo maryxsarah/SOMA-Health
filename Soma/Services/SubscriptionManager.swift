@@ -1,8 +1,8 @@
 import StoreKit
 
 /// Wraps StoreKit 2 for Soma Premium's two auto-renewable subscription
-/// options: monthly ($4.99/mo, no trial) and annual ($39.99/yr, with a
-/// 7-day free trial as its introductory offer). This is the source of
+/// options: monthly ($14.99/mo, no trial) and annual ($119.99/yr, with a
+/// 3-day free trial as its introductory offer). This is the source of
 /// truth for "does this device have an active subscription" -- separate
 /// from and additive to the referral-code bonus tracked server-side in
 /// `users.referral_bonus_until` (see AppState).
@@ -142,9 +142,19 @@ final class SubscriptionManager: ObservableObject {
                   transaction.productID == Self.monthlyProductID || transaction.productID == Self.annualProductID
             else { continue }
             isSubscribed = transaction.revocationDate == nil
+            let tier = isSubscribed ? (transaction.productID == Self.annualProductID ? "annual" : "monthly") : "free"
+            updateSubscriptionTierRemote(tier)
             return
         }
         isSubscribed = false
+        updateSubscriptionTierRemote("free")
+    }
+
+    /// Fire-and-forget, best-effort -- see SupabaseClient.updateSubscriptionTier's
+    /// own comment on why a client-reported tier is an acceptable trust
+    /// model here (a cost-control soft limit, not a security boundary).
+    private func updateSubscriptionTierRemote(_ tier: String) {
+        Task { try? await SupabaseClient.shared.updateSubscriptionTier(tier) }
     }
 
     private func listenForTransactionUpdates() async {
