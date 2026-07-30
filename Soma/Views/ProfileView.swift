@@ -236,6 +236,7 @@ struct ProfileView: View {
                         }
                         if let goalBodyPhotoImage, let currentBodyPhotoImage {
                             Button {
+                                AnalyticsManager.shared.featureUsed(name: "body_photo_comparison")
                                 showingPhotoComparison = true
                             } label: {
                                 Label("Compare Goal vs. Current", systemImage: "arrow.left.and.right.square")
@@ -266,9 +267,11 @@ struct ProfileView: View {
                     Text("Insights")
                         .font(.body.bold())
                     PillButton(title: "Training History") {
+                        AnalyticsManager.shared.featureUsed(name: "training_history")
                         showTrainingHistory = true
                     }
                     PillButton(title: "Health Dashboard") {
+                        AnalyticsManager.shared.featureUsed(name: "health_dashboard")
                         showHealthDashboard = true
                     }
                 }

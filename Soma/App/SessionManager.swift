@@ -40,6 +40,7 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
 
         do {
             try await performSignIn()
+            AnalyticsManager.shared.loginCompleted()
             return true
         } catch {
             errorMessage = Self.userFacingMessage(for: error)
@@ -95,6 +96,7 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
 
         do {
             try await GoogleOAuthManager.shared.signIn()
+            AnalyticsManager.shared.loginCompleted()
             return true
         } catch {
             errorMessage = Self.userFacingMessage(forGoogleOrEmail: error)
@@ -115,7 +117,9 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
         defer { isSigningIn = false }
 
         do {
-            return try await SupabaseClient.shared.signUpWithEmail(email: email, password: password)
+            let sessionEstablished = try await SupabaseClient.shared.signUpWithEmail(email: email, password: password)
+            AnalyticsManager.shared.signupCompleted()
+            return sessionEstablished
         } catch {
             errorMessage = Self.userFacingMessage(forGoogleOrEmail: error)
             return nil
@@ -130,6 +134,7 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
 
         do {
             try await SupabaseClient.shared.signInWithEmail(email: email, password: password)
+            AnalyticsManager.shared.loginCompleted()
             return true
         } catch {
             errorMessage = Self.userFacingMessage(forGoogleOrEmail: error)

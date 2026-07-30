@@ -76,6 +76,7 @@ final class AppState: ObservableObject {
         onboardingComplete = true
         UserDefaults.standard.set(true, forKey: Self.onboardingCompleteKey)
         screen = .home
+        AnalyticsManager.shared.onboardingCompleted()
     }
 
     /// Refreshes the referral bonus expiry from Supabase. Called on Home

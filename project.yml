@@ -23,6 +23,21 @@ settings:
     DEVELOPMENT_TEAM: G52G32NA32
     CODE_SIGN_STYLE: Automatic
 
+packages:
+  # Firebase (Analytics/Core only -- no other Firebase product is used).
+  # `from:` maps to SwiftPM's .upToNextMajor(from:) -- pinned to the current
+  # major (12.x, as of this writing) so it can pick up any 12.x point
+  # release but won't silently jump to a future breaking major. Bump this
+  # deliberately when you want to move to 13.x.
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk
+    from: 12.0.0
+  # PostHog -- pinned to current major (3.x) for the same reason as Firebase
+  # above.
+  PostHog:
+    url: https://github.com/PostHog/posthog-ios
+    from: 3.0.0
+
 targets:
   Soma:
     type: application
@@ -37,6 +52,13 @@ targets:
       # dev-time-only test config, not something that should ship.
       - path: Soma/Soma.storekit
         buildPhase: none
+    dependencies:
+      - package: Firebase
+        product: FirebaseAnalytics
+      - package: Firebase
+        product: FirebaseCore
+      - package: PostHog
+        product: PostHog
     info:
       path: Soma/Resources/Info.plist
       # XcodeGen regenerates this file from these properties on every
@@ -91,6 +113,8 @@ targets:
         SUPABASE_ANON_KEY: $(SUPABASE_ANON_KEY)
         WHOOP_CLIENT_ID: $(WHOOP_CLIENT_ID)
         OURA_CLIENT_ID: $(OURA_CLIENT_ID)
+        POSTHOG_API_KEY: $(POSTHOG_API_KEY)
+        POSTHOG_HOST: $(POSTHOG_HOST)
     entitlements:
       path: Soma/Resources/Soma.entitlements
       properties:

@@ -51,6 +51,7 @@ struct HomeView: View {
                     isEnabled: todaysWorkoutLog == nil
                 ) {
                     if hasDetailAccess {
+                        AnalyticsManager.shared.featureUsed(name: "gym_photo_workout")
                         showGymPhotoFlow = true
                     } else {
                         showPaywall = true

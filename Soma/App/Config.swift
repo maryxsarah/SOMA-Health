@@ -19,6 +19,14 @@ enum Config {
         string(for: "OURA_CLIENT_ID")
     }
 
+    static var posthogAPIKey: String {
+        string(for: "POSTHOG_API_KEY")
+    }
+
+    static var posthogHost: URL {
+        URL(string: "https://\(string(for: "POSTHOG_HOST"))")!
+    }
+
     /// Fixed by convention (matches CFBundleURLTypes in Info.plist), not
     /// per-environment config -- these never need to change per deployment.
     static let oauthURLScheme = "soma"

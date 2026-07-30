@@ -144,6 +144,7 @@ struct PaywallView: View {
         .scrollDismissesKeyboard(.interactively)
         .somaBackground()
         .task {
+            AnalyticsManager.shared.paywallViewed()
             checkReferralBonusSkip()
         }
     }

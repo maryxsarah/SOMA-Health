@@ -12,6 +12,13 @@ build/
 Config/Config-Debug.xcconfig
 Config/Config-Release.xcconfig
 
+# Firebase project config -- ties to a real Firebase project (API key,
+# project ID, app ID). This repo is public, so this stays local-only, same
+# reasoning as the Config-*.xcconfig secrets above. Each developer downloads
+# their own from https://console.firebase.google.com/ and places it here --
+# see SETUP.md.
+Soma/Resources/GoogleService-Info.plist
+
 # Open Wearables deployment secrets -- backend.env.template and
 # docker-compose.prod.secure.yml in this repo hold PLACEHOLDERS only.
 # Real generated values live here instead, never committed.

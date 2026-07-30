@@ -1,3 +1,5 @@
+import FirebaseCore
+import PostHog
 import UIKit
 import UserNotifications
 
@@ -6,6 +8,19 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        // Must run before any other Firebase API is touched -- reads
+        // GoogleService-Info.plist from the main bundle. See SETUP.md for
+        // where that file needs to be placed in the Xcode project.
+        FirebaseApp.configure()
+
+        // Must run before any AnalyticsManager call reaches PostHog --
+        // reads POSTHOG_API_KEY/POSTHOG_HOST from Config (xcconfig), same
+        // pattern as every other per-environment credential in this app.
+        let postHogConfig = PostHogConfig(apiKey: Config.posthogAPIKey, host: Config.posthogHost.absoluteString)
+        PostHogSDK.shared.setup(postHogConfig)
+
+        AnalyticsManager.shared.appOpened()
+
         // BGTaskScheduler registration must happen synchronously here,
         // before this method returns -- it cannot live in a SwiftUI .task.
         BackgroundTaskManager.shared.register()

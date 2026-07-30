@@ -70,6 +70,7 @@ final class SubscriptionManager: ObservableObject {
                 if case .verified(let transaction) = verification {
                     await transaction.finish()
                     isSubscribed = true
+                    AnalyticsManager.shared.subscriptionStarted(plan: transaction.productID)
                 } else {
                     errorMessage = "Purchase couldn't be verified."
                 }
@@ -101,6 +102,18 @@ final class SubscriptionManager: ObservableObject {
     }
 
     func refreshEntitlement() async {
+        // StoreKit has no direct "user cancelled" push -- this is the one
+        // observable signal available: isSubscribed flipping true -> false
+        // across a refresh (expired, revoked/refunded, or no longer in
+        // currentEntitlements at all). Doesn't change the entitlement logic
+        // below, just observes its before/after result.
+        let wasSubscribed = isSubscribed
+        defer {
+            if wasSubscribed, !isSubscribed {
+                AnalyticsManager.shared.subscriptionCancelled()
+            }
+        }
+
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result,
                   transaction.productID == Self.monthlyProductID || transaction.productID == Self.annualProductID

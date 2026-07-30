@@ -140,7 +140,64 @@ cp Config/Config.sample.xcconfig Config/Config-Release.xcconfig
 ```
 Edit both with your real `SUPABASE_HOST` (bare host, no `https://` —
 xcconfig treats `//` as a comment, see the file's own comment),
-`SUPABASE_ANON_KEY`, `WHOOP_CLIENT_ID`, `OURA_CLIENT_ID`.
+`SUPABASE_ANON_KEY`, `WHOOP_CLIENT_ID`, `OURA_CLIENT_ID`, `POSTHOG_API_KEY`
+(step 6c below), `POSTHOG_HOST` (bare host, same `//` reason).
+
+## 6b. Google Analytics for Firebase (GA4)
+
+1. Place your downloaded `GoogleService-Info.plist` at
+   `Soma/Resources/GoogleService-Info.plist` (same folder as `Info.plist`
+   and `Soma.entitlements`). The existing `sources: - path: Soma` glob in
+   `project.yml` picks up any file placed under `Soma/` automatically as a
+   bundle resource -- no `project.yml` change needed for the file itself,
+   just re-run `xcodegen generate` (or reopen the project) so Xcode's
+   project index picks up the new file reference.
+2. `xcodegen generate` also resolves the `Firebase` Swift Package
+   dependency (`FirebaseAnalytics` + `FirebaseCore`, declared in
+   `project.yml`'s `packages:` block) the first time you open/build the
+   project -- this downloads the Firebase SDK, which can take a few
+   minutes on a fresh checkout.
+3. `FirebaseApp.configure()` runs once, at the very top of
+   `AppDelegate.application(_:didFinishLaunchingWithOptions:)` -- before
+   that line runs, the plist from step 1 must already be in place or the
+   app crashes on launch with a "could not locate configuration file"
+   error.
+4. To verify events are reaching Firebase (DebugView), run the app with
+   this launch argument (Xcode → Edit Scheme → Run → Arguments →
+   Arguments Passed On Launch):
+   ```
+   -FIRAnalyticsDebugEnabled
+   ```
+   Then in the Firebase console: **Analytics → DebugView** and select
+   your device. Events typically appear within a few seconds to a minute.
+
+## 6c. PostHog
+
+1. Grab your **Project API Key** from the PostHog dashboard (**Project
+   Settings → Project API Key**) and set `POSTHOG_API_KEY` in both
+   `Config-Debug.xcconfig`/`Config-Release.xcconfig` (step 6 above).
+2. `POSTHOG_HOST` is pre-filled to `us.i.posthog.com` (US Cloud ingestion
+   host). If your project is on **EU Cloud**, change it to
+   `eu.i.posthog.com`; if self-hosted, use your instance's host instead.
+   This is the *ingestion* host, not the dashboard URL (`app.posthog.com`/
+   `eu.posthog.com`) -- they're different hostnames.
+3. `xcodegen generate` resolves the `PostHog` Swift Package dependency the
+   same way as Firebase's, above.
+4. `PostHogSDK.shared.setup(...)` runs right after `FirebaseApp.configure()`
+   in `AppDelegate`, reading the two config values from step 1-2 via
+   `Config.swift`.
+5. To verify events, PostHog dashboard → **Activity** (or your project's
+   live events view) — events typically appear within a few seconds.
+   PostHog doesn't have a separate "debug mode" flag like Firebase; if an
+   event doesn't show up, first confirm `POSTHOG_API_KEY`/`POSTHOG_HOST`
+   are real (not the placeholder values) and that the device has network
+   access.
+
+Both backends are driven from the same call: every method on
+`Soma/Services/AnalyticsManager.swift` (`AnalyticsManager.shared.<method>()`)
+fans out to Firebase Analytics **and** PostHog in one place. Never call
+`Analytics.logEvent` or `PostHogSDK.shared.capture` directly elsewhere --
+event names/parameter keys are defined exactly once, in `AnalyticsManager`.
 
 ## 7. Build and run
 

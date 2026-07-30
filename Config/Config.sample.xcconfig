@@ -9,3 +9,7 @@ SUPABASE_HOST = your-project.supabase.co
 SUPABASE_ANON_KEY = your-anon-key-here
 WHOOP_CLIENT_ID = your-whoop-client-id
 OURA_CLIENT_ID = your-oura-client-id
+// US Cloud ingestion host -- use eu.i.posthog.com if your PostHog project
+// is on EU Cloud, or your own instance's host if self-hosted.
+POSTHOG_API_KEY = your-posthog-project-api-key
+POSTHOG_HOST = us.i.posthog.com

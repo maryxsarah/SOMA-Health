@@ -372,6 +372,7 @@ struct RecommendationDetailView: View {
         aiPlanError = nil
         defer { isLoadingAIPlan = false }
         let trimmedNotes = preGenerationNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        AnalyticsManager.shared.promptSubmitted()
         do {
             aiPlan = try await SupabaseClient.shared.fetchOrGenerateAIWorkoutPlan(
                 date: recommendation.date,
@@ -380,6 +381,7 @@ struct RecommendationDetailView: View {
                 notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
                 targetDurationMinutes: selectedDurationRange
             )
+            AnalyticsManager.shared.aiResponseReceived()
         } catch SupabaseError.safetyBlocked(let message) {
             // Shown verbatim. A generic "try again in a moment" would be a
             // lie -- retrying cannot help, and the user would keep tapping.
