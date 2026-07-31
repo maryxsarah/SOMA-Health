@@ -17,12 +17,23 @@ struct AIExercise: Codable, Identifiable {
     /// exercise in the template, never LLM-guessed); nil for the normal
     /// generate-workout-plan flow, which doesn't send this field.
     let targetArea: String?
+    /// exercise_library.id -- only sent by generate-gym-workout, and only
+    /// for the subset of fixed template exercises hand-verified against the
+    /// library (see generate-gym-workout/templates.ts). Nil there means "no
+    /// confident media match," a deliberate no-image fallback rather than a
+    /// guess. Always nil for generate-workout-plan; that flow instead
+    /// guarantees `name` itself is a real exercise_library.name (its `name`
+    /// field is schema-constrained to a request-scoped enum drawn from the
+    /// library, see _shared/exerciseLibraryMatch.ts), so the client looks
+    /// that flow's media up by exact name instead of by id.
+    let libraryId: String?
 
     enum CodingKeys: String, CodingKey {
         case name, sets, reps, intensity, instructions
         case weightGuidance = "weight_guidance"
         case durationMinutes = "duration_minutes"
         case targetArea = "target_area"
+        case libraryId = "library_id"
     }
 }
 

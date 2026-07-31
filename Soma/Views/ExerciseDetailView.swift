@@ -1,0 +1,145 @@
+import SwiftUI
+
+/// "What does this exercise actually look like" detail sheet -- tapped from
+/// any AIExercise row (AIWorkoutPlanSections.swift). Looks the real
+/// exercise_library entry up server-side (by id when generate-gym-workout
+/// supplied one, otherwise by exact name) rather than trusting anything
+/// pre-fetched, since the same exercise name can appear in many plans.
+struct ExerciseDetailView: View {
+    let exercise: AIExercise
+
+    @State private var entry: ExerciseLibraryEntry?
+    @State private var isLoading = true
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if isLoading {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 60)
+                    } else if let entry, !entry.imagePaths.isEmpty {
+                        imagePager(entry)
+                    } else {
+                        noMediaPlaceholder
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(exercise.name)
+                            .font(.title3.bold())
+                        Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.pillFill)
+                    }
+
+                    if let entry {
+                        tagsRow(entry)
+                        if !entry.instructions.isEmpty {
+                            instructionsSection(entry)
+                        }
+                    }
+
+                    if !exercise.instructions.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Coaching cue")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            Text(exercise.instructions)
+                                .font(.subheadline)
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .navigationTitle("Exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    private func imagePager(_ entry: ExerciseLibraryEntry) -> some View {
+        TabView {
+            ForEach(entry.imageURLs, id: \.absoluteString) { url in
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFit()
+                    case .failure:
+                        noMediaPlaceholder
+                    default:
+                        ProgressView()
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                    }
+                }
+            }
+        }
+        .tabViewStyle(.page)
+        .frame(height: 260)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.systemGray6)))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var noMediaPlaceholder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "figure.strengthtraining.traditional")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("No reference photo for this exercise")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 180)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.systemGray6)))
+    }
+
+    private func tagsRow(_ entry: ExerciseLibraryEntry) -> some View {
+        let tags = ([entry.equipment] + entry.primaryMuscles).compactMap { $0 }.filter { !$0.isEmpty }
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(tags, id: \.self) { tag in
+                    Text(tag.capitalized)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Theme.pillFill.opacity(0.12)))
+                        .foregroundStyle(Theme.pillFill)
+                }
+            }
+        }
+    }
+
+    private func instructionsSection(_ entry: ExerciseLibraryEntry) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("How to perform it")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            ForEach(Array(entry.instructions.enumerated()), id: \.offset) { index, step in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("\(index + 1).")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.secondary)
+                    Text(step)
+                        .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        // A failed lookup collapses to the same "no reference photo" state
+        // as a genuine no-match -- there's no useful distinct error UI for
+        // a background media lookup that isn't blocking the actual workout.
+        entry = try? await SupabaseClient.shared.fetchExerciseLibraryEntry(
+            libraryId: exercise.libraryId,
+            name: exercise.name
+        )
+        isLoading = false
+    }
+}

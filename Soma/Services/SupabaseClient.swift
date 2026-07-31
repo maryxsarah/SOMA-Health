@@ -736,6 +736,29 @@ final class SupabaseClient {
         return Set(rows.map(\.date))
     }
 
+    /// Looks up one exercise_library row for the "what does this look like"
+    /// detail view. Prefers exact id (generate-gym-workout's hand-verified
+    /// library_id); falls back to exact name (generate-workout-plan's
+    /// `name` is schema-constrained to a real library name, see
+    /// _shared/exerciseLibraryMatch.ts). Returns nil rather than guessing
+    /// when neither is available or nothing matches -- an honest "no media"
+    /// state, not a fuzzy best-effort match.
+    func fetchExerciseLibraryEntry(libraryId: String?, name: String) async throws -> ExerciseLibraryEntry? {
+        let path: String
+        if let libraryId, !libraryId.isEmpty {
+            let encodedId = libraryId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? libraryId
+            path = "rest/v1/exercise_library?id=eq.\(encodedId)&select=*&limit=1"
+        } else {
+            let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+            path = "rest/v1/exercise_library?name=eq.\(encodedName)&select=*&limit=1"
+        }
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([ExerciseLibraryEntry].self, from: data)
+        return rows.first
+    }
+
     /// Today's actual recorded workout sessions from connected wearables
     /// (Oura/Whoop) -- distinct from workout_log (what the user told Soma
     /// they did). HealthKit's own workouts are read separately, on-device,

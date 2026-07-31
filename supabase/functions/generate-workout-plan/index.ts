@@ -38,6 +38,7 @@ import { describeSexAwareConsiderations } from "./sexAwareGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
+import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -45,59 +46,72 @@ const ANTHROPIC_VERSION = "2023-06-01";
 // generation task like this one.
 const MODEL = "claude-haiku-4-5";
 
-const EXERCISE_SCHEMA = {
-  type: "object",
-  properties: {
-    name: { type: "string" },
-    sets: { type: "integer" },
-    reps: { type: "string" },
-    weight_guidance: { type: "string" },
-    intensity: { type: "string" },
-    duration_minutes: { type: "integer" },
-    instructions: { type: "string" },
-  },
-  required: [
-    "name",
-    "sets",
-    "reps",
-    "weight_guidance",
-    "intensity",
-    "duration_minutes",
-    "instructions",
-  ],
-  additionalProperties: false,
-};
+// Exercise `name` is constrained to a request-scoped closed vocabulary
+// (see _shared/exerciseLibraryMatch.ts) via a JSON-schema enum so every
+// name the model can possibly return has real, correctly matched media --
+// same "deterministic vocabulary, never free text" pattern already used
+// for equipment/goal tags elsewhere in this codebase.
+function buildExerciseSchema(candidateNames: string[]) {
+  return {
+    type: "object",
+    properties: {
+      name: { type: "string", enum: candidateNames },
+      sets: { type: "integer" },
+      reps: { type: "string" },
+      weight_guidance: { type: "string" },
+      intensity: { type: "string" },
+      duration_minutes: { type: "integer" },
+      instructions: { type: "string" },
+    },
+    required: [
+      "name",
+      "sets",
+      "reps",
+      "weight_guidance",
+      "intensity",
+      "duration_minutes",
+      "instructions",
+    ],
+    additionalProperties: false,
+  };
+}
 
-const BLOCK_SCHEMA = {
-  type: "object",
-  properties: {
-    // e.g. "Block 1", "Superset A", "Block 3 - Optional Finisher"
-    name: { type: "string" },
-    // How many times to cycle through this block's exercises -- 1 for a
-    // straight-through block, >1 for a circuit/superset.
-    rounds: { type: "integer" },
-    rest_between_rounds: { type: "string" },
-    exercises: { type: "array", items: EXERCISE_SCHEMA },
-    // True only for the optional finisher block, if one is included today
-    // -- an explicit flag rather than string-matching the block name, so
-    // the client can reliably show the "optional finisher" badge.
-    is_finisher: { type: "boolean" },
-  },
-  required: ["name", "rounds", "rest_between_rounds", "exercises", "is_finisher"],
-  additionalProperties: false,
-};
+function buildBlockSchema(exerciseSchema: ReturnType<typeof buildExerciseSchema>) {
+  return {
+    type: "object",
+    properties: {
+      // e.g. "Block 1", "Superset A", "Block 3 - Optional Finisher"
+      name: { type: "string" },
+      // How many times to cycle through this block's exercises -- 1 for a
+      // straight-through block, >1 for a circuit/superset.
+      rounds: { type: "integer" },
+      rest_between_rounds: { type: "string" },
+      exercises: { type: "array", items: exerciseSchema },
+      // True only for the optional finisher block, if one is included today
+      // -- an explicit flag rather than string-matching the block name, so
+      // the client can reliably show the "optional finisher" badge.
+      is_finisher: { type: "boolean" },
+    },
+    required: ["name", "rounds", "rest_between_rounds", "exercises", "is_finisher"],
+    additionalProperties: false,
+  };
+}
 
-const WORKOUT_SCHEMA = {
-  type: "object",
-  properties: {
-    focus: { type: "string" },
-    warm_up: { type: "array", items: EXERCISE_SCHEMA },
-    blocks: { type: "array", items: BLOCK_SCHEMA },
-    cool_down: { type: "array", items: EXERCISE_SCHEMA },
-  },
-  required: ["focus", "warm_up", "blocks", "cool_down"],
-  additionalProperties: false,
-};
+function buildWorkoutSchema(candidateNames: string[]) {
+  const exerciseSchema = buildExerciseSchema(candidateNames);
+  const blockSchema = buildBlockSchema(exerciseSchema);
+  return {
+    type: "object",
+    properties: {
+      focus: { type: "string" },
+      warm_up: { type: "array", items: exerciseSchema },
+      blocks: { type: "array", items: blockSchema },
+      cool_down: { type: "array", items: exerciseSchema },
+    },
+    required: ["focus", "warm_up", "blocks", "cool_down"],
+    additionalProperties: false,
+  };
+}
 
 interface Selection {
   title: string;
@@ -343,7 +357,22 @@ Deno.serve(async (req: Request) => {
       (recentLogs ?? []) as WorkoutLogRow[],
       notes,
     );
-    let plan = await callClaude(prompt);
+
+    // Same closed-vocabulary keyword exclusions used to keep the finisher
+    // decision safe also keep the candidate exercise-name list safe --
+    // pregnancy adds its own trimester-scaled exclusions on top.
+    const pregnancyExcludedKeywords = (userRow as UserRow | null)?.pregnancy
+      ? describePregnancyGuidance((userRow as UserRow | null)?.pregnancy_week ?? null).excludedKeywords
+      : [];
+    const candidateExerciseNames = await fetchCandidateExerciseNames(
+      supabase,
+      resolvedBodyPart,
+      (userRow as UserRow | null)?.equipment ?? [],
+      [...finisherExcludedKeywords, ...pregnancyExcludedKeywords],
+    );
+    const workoutSchema = buildWorkoutSchema(candidateExerciseNames);
+
+    let plan = await callClaude(prompt, workoutSchema);
     let actualDurationMinutes = computeTotalDuration(plan);
 
     // One bounded retry when a target was given and the total misses by
@@ -356,7 +385,7 @@ Deno.serve(async (req: Request) => {
       (actualDurationMinutes < targetDurationRange.min - 2 || actualDurationMinutes > targetDurationRange.max + 2)
     ) {
       const gapPrompt = `${prompt}\n\nYour previous attempt totaled ~${actualDurationMinutes} min but the target is ${targetDurationRange.min}-${targetDurationRange.max} min -- ${actualDurationMinutes < targetDurationRange.min ? "add 1-2 more working sets or an extra exercise to close the gap" : "trim a set or exercise to fit the target"}, don't just pad or shrink rest periods.`;
-      const retryPlan = await callClaude(gapPrompt);
+      const retryPlan = await callClaude(gapPrompt, workoutSchema);
       const retryDuration = computeTotalDuration(retryPlan);
       const targetMid = (targetDurationRange.min + targetDurationRange.max) / 2;
       if (Math.abs(retryDuration - targetMid) < Math.abs(actualDurationMinutes - targetMid)) {
@@ -671,7 +700,11 @@ function describeHealthData(snapshots: SnapshotRow[]): string {
   return parts.length > 0 ? parts.join("; ") : "Wearable connected but no metrics reported today.";
 }
 
-async function callClaude(prompt: string): Promise<WorkoutPlanResult> {
+async function callClaude(
+  prompt: string,
+  // deno-lint-ignore no-explicit-any
+  schema: any,
+): Promise<WorkoutPlanResult> {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
@@ -683,7 +716,7 @@ async function callClaude(prompt: string): Promise<WorkoutPlanResult> {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 4096,
-      output_config: { format: { type: "json_schema", schema: WORKOUT_SCHEMA } },
+      output_config: { format: { type: "json_schema", schema } },
       messages: [{ role: "user", content: prompt }],
     }),
   });

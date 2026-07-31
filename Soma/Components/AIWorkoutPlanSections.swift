@@ -7,6 +7,8 @@ import SwiftUI
 struct AIWorkoutPlanView: View {
     let plan: AIWorkoutPlan
 
+    @State private var selectedExercise: AIExercise?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(plan.focus)
@@ -22,6 +24,9 @@ struct AIWorkoutPlanView: View {
                 aiBlockSection(block)
             }
             aiPhaseSection(title: "Cool-down", exercises: plan.coolDown)
+        }
+        .sheet(item: $selectedExercise) { exercise in
+            ExerciseDetailView(exercise: exercise)
         }
     }
 
@@ -68,29 +73,38 @@ struct AIWorkoutPlanView: View {
     }
 
     private func aiExerciseRow(_ exercise: AIExercise) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(exercise.name)
-                    .font(.subheadline.bold())
-                Spacer()
-                Text("\(exercise.durationMinutes) min")
+        Button {
+            selectedExercise = exercise
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(exercise.name)
+                        .font(.subheadline.bold())
+                    Image(systemName: "photo.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(exercise.durationMinutes) min")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.pillFill)
+                // Only populated by the gym-photo-workout flow -- nil for the
+                // normal generate-workout-plan flow.
+                if let targetArea = exercise.targetArea {
+                    Text("Targets: \(targetArea)")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                }
+                Text(exercise.instructions)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)")
-                .font(.caption)
-                .foregroundStyle(Theme.pillFill)
-            // Only populated by the gym-photo-workout flow -- nil for the
-            // normal generate-workout-plan flow.
-            if let targetArea = exercise.targetArea {
-                Text("Targets: \(targetArea)")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.secondary)
-            }
-            Text(exercise.instructions)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 6)
+        .buttonStyle(.plain)
     }
 }
