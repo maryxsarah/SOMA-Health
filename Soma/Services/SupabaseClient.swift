@@ -258,7 +258,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,goal_body_photo_path,current_body_photo_path&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -287,6 +287,7 @@ final class SupabaseClient {
         body["experience_level"] = profile.experienceLevel?.rawValue ?? NSNull()
         body["pregnancy"] = profile.pregnancy ?? NSNull()
         body["pregnancy_week"] = profile.pregnancy == true ? (profile.pregnancyWeek ?? NSNull()) : NSNull()
+        body["weekly_session_target"] = profile.weeklySessionTarget ?? NSNull()
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
@@ -590,6 +591,7 @@ final class SupabaseClient {
         bodyPart: String,
         category: String,
         feedback: String? = nil,
+        feelRating: WorkoutFeelRating? = nil,
         planSnapshot: AIWorkoutPlan? = nil,
         startedAt: Date? = nil,
         endedAt: Date? = nil
@@ -604,6 +606,9 @@ final class SupabaseClient {
         ]
         if let feedback, !feedback.isEmpty {
             body["feedback"] = feedback
+        }
+        if let feelRating {
+            body["feel_rating"] = feelRating.rawValue
         }
         // Real workout start/end, distinct from completed_at (the log
         // action's own timestamp) -- needed to match wearable HR data to
@@ -634,7 +639,7 @@ final class SupabaseClient {
     /// which of today's/yesterday's suggestions are already logged) and
     /// DayDetailView (calendar day drill-down).
     func fetchWorkoutLogs(date: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at&order=completed_at.asc"
+        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating&order=completed_at.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -645,11 +650,28 @@ final class SupabaseClient {
     /// TrainingHistoryView's 30-day list and RecommendationDetailView's
     /// 7-day body-part balancing.
     func fetchWorkoutLogs(fromDate: String, toDate: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at&order=date.desc"
+        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating&order=date.desc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
         return try JSONDecoder().decode([WorkoutLogEntry].self, from: data)
+    }
+
+    /// "Edit this log" on CompletedWorkoutView -- updates the feel rating
+    /// (and optionally the free-text feedback) on an already-logged
+    /// workout, by its own row id. RLS restricts this to the row's owner,
+    /// same as every other workout_log write.
+    func updateWorkoutLog(id: String, feelRating: WorkoutFeelRating?, feedback: String?) async throws {
+        var body: [String: Any] = ["feel_rating": feelRating?.rawValue ?? NSNull()]
+        if let feedback {
+            body["feedback"] = feedback.isEmpty ? NSNull() : feedback
+        }
+        var request = try await authorizedRequest(path: "rest/v1/workout_log?id=eq.\(id)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
     }
 
     /// Turns freeform post-workout feedback into 3 concrete add-on
@@ -685,6 +707,27 @@ final class SupabaseClient {
         let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
         let path = "rest/v1/workout_log?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&select=date"
         var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct Row: Decodable { let date: String }
+        let rows = try JSONDecoder().decode([Row].self, from: data)
+        return Set(rows.map(\.date))
+    }
+
+    /// Real dates the user scanned their gym setup (a gym_photo generation
+    /// actually happened, per ai_generation_log) -- feeds Home's "Scan
+    /// today's setup" streak, distinct from workout completion.
+    func fetchGymPhotoScanDates(days: Int = 30) async throws -> Set<String> {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+
+        let end = Date()
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
+        let path = "rest/v1/ai_generation_log?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&source=eq.gym_photo&select=date"
+        let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
 

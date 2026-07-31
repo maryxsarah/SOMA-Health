@@ -11,6 +11,7 @@ struct HomeView: View {
     @State private var showDetail = false
     @State private var showProfile = false
     @State private var showPaywall = false
+    @State private var showHealthDashboard = false
     @State private var recentRecommendations: [DailyRecommendation] = []
     @State private var selectedDay: String?
     @State private var todaysWorkoutLog: WorkoutLogEntry?
@@ -25,6 +26,10 @@ struct HomeView: View {
     /// from todaysWorkoutLog (completed). Persists across relaunch, unlike
     /// pendingGymPlan which only exists for the current view session.
     @State private var todaysAIPlan: TodaysAIPlan?
+    /// Real consecutive-day streak of gym-photo scans (ai_generation_log,
+    /// source = gym_photo), not workout completion -- see
+    /// fetchGymPhotoScanDates's own doc comment.
+    @State private var scanStreak = 0
 
     var body: some View {
         ScrollView {
@@ -36,37 +41,27 @@ struct HomeView: View {
             // devices and larger Dynamic Type sizes, not because scrolling
             // here is expected in the common case.
             VStack(spacing: 14) {
-                CalendarStripView(recommendations: recentRecommendations, completedDates: completedDates, onSelectDay: { selectedDay = $0 })
+                topRow
                     .padding(.horizontal, 20)
-                    .padding(.top, 8)
+
+                CalendarStripView(
+                    recommendations: recentRecommendations,
+                    completedDates: completedDates,
+                    selectedDate: selectedDay,
+                    onSelectDay: { selectedDay = $0 }
+                )
+                .padding(.horizontal, 20)
 
                 OrbView(state: orbState, size: 130)
+
+                scanSetupCard
+                    .padding(.horizontal, 20)
 
                 Group {
                     if let recommendation = appState.currentRecommendation {
                         recommendationCard(recommendation)
                     } else {
                         needsDataCard
-                    }
-                }
-                .padding(.horizontal, 20)
-
-                // Primary CTA for the gym-photo feature -- reachable without
-                // scrolling, matching the rest of the app's PillButton
-                // styling rather than a bespoke look. Disabled once today's
-                // workout is logged OR already added to today's plan --
-                // only one AI-generated workout is committed per day
-                // (before the separate, later Premium multi-generation
-                // limit even comes into play server-side).
-                PillButton(
-                    title: "Take a Picture of Your Gym",
-                    isEnabled: todaysWorkoutLog == nil && todaysAIPlan?.addedToPlan != true
-                ) {
-                    if hasDetailAccess {
-                        AnalyticsManager.shared.featureUsed(name: "gym_photo_workout")
-                        showGymPhotoFlow = true
-                    } else {
-                        showPaywall = true
                     }
                 }
                 .padding(.horizontal, 20)
@@ -88,20 +83,6 @@ struct HomeView: View {
             .padding(.bottom, 40)
         }
         .somaBackground()
-        .safeAreaInset(edge: .top) {
-            HStack {
-                Spacer()
-                Button {
-                    showProfile = true
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.title3)
-                        .foregroundStyle(Theme.pillFill)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-        }
         .task {
             await loadTodaysRecommendation()
             await appState.refreshReferralBonus()
@@ -110,6 +91,7 @@ struct HomeView: View {
             await loadCompletedDates()
             await loadTimeline()
             await loadTodaysAIPlan()
+            await loadWeeklyProgressAndStreak()
         }
         .refreshable {
             await checkNow()
@@ -118,6 +100,7 @@ struct HomeView: View {
             await loadCompletedDates()
             await loadTimeline()
             await loadTodaysAIPlan()
+            await loadWeeklyProgressAndStreak()
         }
         .sheet(isPresented: $showDetail, onDismiss: {
             Task {
@@ -133,6 +116,9 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showProfile) {
             ProfileView()
+        }
+        .sheet(isPresented: $showHealthDashboard) {
+            HealthDashboardView()
         }
         .sheet(isPresented: $showGymPhotoFlow, onDismiss: {
             Task { await loadTodaysAIPlan() }
@@ -187,7 +173,7 @@ struct HomeView: View {
             set: { if !$0 { selectedDay = nil } }
         )) {
             if let selectedDay {
-                DayDetailView(date: selectedDay)
+                DayDetailView(date: selectedDay, recentRecommendations: recentRecommendations)
             }
         }
     }
@@ -199,6 +185,99 @@ struct HomeView: View {
         if subscriptionManager.isSubscribed { return true }
         if let until = appState.referralBonusUntil, until > Date() { return true }
         return false
+    }
+
+    /// guide 02: pill top-left (opposite the gear), badge top-right --
+    /// nothing else in that row. Previously the Dashboard was reachable
+    /// only from deep inside Profile, easy to miss entirely.
+    private var topRow: some View {
+        HStack {
+            Button {
+                AnalyticsManager.shared.featureUsed(name: "health_dashboard")
+                showHealthDashboard = true
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Dashboard")
+                        .font(.system(size: 13.5, weight: .semibold))
+                    // The badge counts filled hearts in the strip below,
+                    // computed from the exact same 7-day window/dataset --
+                    // if they ever disagreed, guide 02 says the strip wins,
+                    // so this reuses `completedDates` rather than a
+                    // separately-fetched calendar-week count.
+                    if doneThisWeekCount > 0 {
+                        Text("\(doneThisWeekCount) done")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(SomaTokens.heart)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(SomaTokens.heartSoft))
+                    }
+                }
+                .foregroundStyle(SomaTokens.accentDeep)
+                .padding(.leading, 10)
+                .padding(.trailing, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(SomaTokens.surface)
+                        .overlay(Capsule().stroke(SomaTokens.hairline, lineWidth: 1))
+                        .somaCardShadow()
+                )
+            }
+            .buttonStyle(SomaNavPillButtonStyle())
+
+            Spacer()
+
+            Button {
+                showProfile = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.title3)
+                    .foregroundStyle(Theme.pillFill)
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private var doneThisWeekCount: Int {
+        Set(CalendarStripView.lastDayStrings()).intersection(completedDates).count
+    }
+
+    /// Restyled gym-photo CTA as a card (title + real scan streak) rather
+    /// than a plain filled button -- same underlying action and disable
+    /// logic as before (one AI plan committed per day).
+    private var scanSetupCard: some View {
+        Button {
+            if hasDetailAccess {
+                AnalyticsManager.shared.featureUsed(name: "gym_photo_workout")
+                showGymPhotoFlow = true
+            } else {
+                showPaywall = true
+            }
+        } label: {
+            CardView {
+                HStack(spacing: 12) {
+                    Image(systemName: "camera.fill")
+                        .font(.title3)
+                        .foregroundStyle(Theme.pillFill)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Scan today's setup")
+                            .font(.body.bold())
+                        Text(scanStreak > 0 ? "\(scanStreak)-day scan streak" : "Take a photo of your gym or equipment")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(todaysWorkoutLog != nil || todaysAIPlan?.addedToPlan == true)
+        .opacity(todaysWorkoutLog != nil || todaysAIPlan?.addedToPlan == true ? 0.5 : 1)
     }
 
     private func recommendationCard(_ recommendation: DailyRecommendation) -> some View {
@@ -378,6 +457,33 @@ struct HomeView: View {
     /// the other plain reads.
     private func loadTodaysAIPlan() async {
         todaysAIPlan = (try? await SupabaseClient.shared.fetchTodaysAIPlan(date: Self.todayDateString())) ?? todaysAIPlan
+    }
+
+    /// Feeds the scan card's streak -- the Dashboard pill's "N done" badge
+    /// no longer needs its own fetch here, since it's derived directly from
+    /// `completedDates` (see `doneThisWeekCount`), the same data the
+    /// calendar strip itself renders.
+    private func loadWeeklyProgressAndStreak() async {
+        let scanDates = (try? await SupabaseClient.shared.fetchGymPhotoScanDates()) ?? []
+        scanStreak = Self.streak(from: scanDates)
+    }
+
+    /// Consecutive days up to and including today present in `dates`.
+    private static func streak(from dates: Set<String>) -> Int {
+        var count = 0
+        var cursor = Date()
+        while dates.contains(dateString(cursor)) {
+            count += 1
+            cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor) ?? cursor
+        }
+        return count
+    }
+
+    private static func dateString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        return formatter.string(from: date)
     }
 
     /// Merges HealthKit's on-device workouts with Oura/Whoop's

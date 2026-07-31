@@ -197,13 +197,8 @@ struct RecommendationDetailView: View {
                             .padding(.top, 8)
                         }
                     } else if isLoadingAIPlan {
-                        HStack {
-                            ProgressView()
-                            Text("Building your plan…")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.top, 4)
+                        GenerationProgressView(message: "Building your plan…", estimatedSeconds: 8)
+                            .padding(.top, 4)
                     } else {
                         if let aiPlanError {
                             Text(aiPlanError)
@@ -316,7 +311,7 @@ struct RecommendationDetailView: View {
                 CardView {
                     Text("Look out for tomorrow")
                         .font(.body.bold())
-                    Text(recommendation.reason.tomorrowTip)
+                    Text(personalizedTomorrowTip)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -345,6 +340,42 @@ struct RecommendationDetailView: View {
     private func formattedNumber(_ value: Double?) -> String {
         guard let value else { return "—" }
         return String(Int(value.rounded()))
+    }
+
+    /// Deterministic, never LLM-generated -- same standing rule this
+    /// codebase applies to every other safety/guidance-adjacent string.
+    /// Layers real, currently-known context (which cap fired today, recent
+    /// body-part frequency, stated goals) on top of the base band-based
+    /// tip, checked in priority order -- so two days with the same
+    /// recommendation category genuinely differ in what they tell the
+    /// user, instead of repeating identical copy. Falls through to the
+    /// original per-reason tip only when none of the richer signals apply.
+    private var personalizedTomorrowTip: String {
+        if recommendation.volumeCapApplied {
+            return "Today was capped for high training volume over the last week. Tomorrow, favor a lighter session or full rest -- accumulated fatigue, not just last night's sleep, is driving this one."
+        }
+        if recommendation.consecutiveDaysCapApplied {
+            return "You've trained several days in a row. A genuine rest or active-recovery day tomorrow (short walk, light mobility) will do more for your next hard session than pushing through again."
+        }
+        if recommendation.injuryProtocolCapApplied || recommendation.injuryProtocolModerateCapApplied {
+            return "You're in an active injury-recovery window. Keep tomorrow's intensity conservative even if recovery data looks good -- the check-ins are what actually clear you to progress, not a single good reading."
+        }
+        if recommendation.pregnancyCapApplied {
+            return "General guidance for tomorrow: favor controlled, moderate sessions and listen to how your body responds -- your care provider's advice takes priority over this app's recommendation."
+        }
+        // Body-part imbalance: the same focus trained on most of the last
+        // 4 logged days -- a real, evidence-based nudge toward variety
+        // (recovery and balanced development both benefit from it),
+        // not a fabricated observation.
+        if let (dominant, count) = recentBodyPartCounts.max(by: { $0.value < $1.value }), count >= 3 {
+            return "You've focused on \(dominant.displayName.lowercased()) \(count) of your last 4 logged sessions. Consider shifting focus tomorrow -- both recovery and balanced progress benefit from rotating which areas you load."
+        }
+        // Goal-aware: cardio-focused goal but no cardio-tagged session in
+        // recent history (recentBodyPartCounts has no .cardio entry at all).
+        if profile.goals.contains(.cardioEndurance), recentBodyPartCounts[.cardio] == nil {
+            return "Your goals include cardio endurance, but recent sessions haven't included one. If tomorrow's intensity allows, a cardio-focused session would round things out."
+        }
+        return recommendation.reason.tomorrowTip
     }
 
     /// A single-select checkbox per suggestion -- checking one is what

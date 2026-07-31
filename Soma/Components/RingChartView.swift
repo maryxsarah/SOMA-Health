@@ -31,11 +31,21 @@ struct RingChartView: View {
                 .animation(.easeOut(duration: 0.4), value: fraction)
             VStack(spacing: 2) {
                 Text(String(format: "%.0f", value))
-                    .font(.title2.bold())
-                Text(label)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                    .font(.system(size: diameter * 0.28, weight: .bold))
+                    .minimumScaleFactor(0.6)
+                // An empty label still reserves a line of height even
+                // though it renders nothing -- that was silently pushing
+                // the value text off-center within the ring for any
+                // caller passing "" (e.g. the denser dashboard card,
+                // which already shows the metric name above the ring and
+                // doesn't want it repeated inside). Only reserve that
+                // line when there's real text to show.
+                if !label.isEmpty {
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
             }
         }
         .frame(width: diameter, height: diameter)

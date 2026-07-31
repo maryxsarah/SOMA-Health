@@ -101,8 +101,18 @@ struct AIWorkoutPlan: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        date = try container.decode(String.self, forKey: .date)
-        category = try container.decode(String.self, forKey: .category)
+        // Absent-means-default: neither field is nested inside the stored
+        // `plan` jsonb blob (generate-workout-plan/generate-gym-workout only
+        // add `date`/`category` at the top level of their own JSON
+        // response, never inside the plan object they cache) -- reading
+        // the *stored* row's `plan` column directly (TodaysAIPlan, used by
+        // Home's persistent card and RecommendationDetailView's reopen-
+        // restore) always hit this and silently failed the whole decode
+        // via `try?`, which is why the confirmed-plan state never actually
+        // stuck. Neither field is read anywhere in the app (confirmed by
+        // search), so a safe placeholder default is fine either way.
+        date = try container.decodeIfPresent(String.self, forKey: .date) ?? ""
+        category = try container.decodeIfPresent(String.self, forKey: .category) ?? ""
         focus = try container.decode(String.self, forKey: .focus)
         warmUp = try container.decode([AIExercise].self, forKey: .warmUp)
         blocks = try container.decode([AIWorkoutBlock].self, forKey: .blocks)

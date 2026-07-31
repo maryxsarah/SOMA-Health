@@ -33,6 +33,7 @@ struct HealthDashboardView: View {
                         if !trendMetrics.isEmpty {
                             trendPickerCard
                         }
+                        summaryCard
                     }
                 }
                 .padding(20)
@@ -164,6 +165,53 @@ struct HealthDashboardView: View {
 
     private func trendCard(_ metric: TrendMetric) -> some View {
         AxisLabeledTrendChart(values: metric.values)
+    }
+
+    /// Fixed, educational copy -- not personalized to today's numbers
+    /// (that would risk implying a clinical read this app doesn't
+    /// generate), just a plain explanation of what each metric is and why
+    /// it's here, so a reader can build their own understanding of their
+    /// data instead of only seeing raw numbers.
+    private var summaryCard: some View {
+        CardView {
+            Text("What these mean")
+                .font(.body.bold())
+            summaryRow(
+                title: "Recovery / Readiness",
+                text: "A single score blending your heart rate variability, resting heart rate, and sleep from last night -- Whoop calls it Recovery, Oura calls it Readiness. Higher generally means your body is better prepared for a harder effort today."
+            )
+            summaryRow(
+                title: "HRV (Heart Rate Variability)",
+                text: "The variation in time between heartbeats. Generally, a higher HRV relative to your own baseline suggests your nervous system is well-recovered; a lower one can signal fatigue, stress, or incomplete recovery."
+            )
+            summaryRow(
+                title: "Resting HR",
+                text: "Your heart rate at rest, usually measured overnight. A notably higher-than-usual resting heart rate can be an early sign of accumulated fatigue, illness, or poor sleep."
+            )
+            summaryRow(
+                title: "Sleep",
+                text: "Total time asleep. Both duration and consistency matter for recovery -- see the sleep-stage breakdown on the Sleep detail page for how that time was split between light, deep, and REM sleep."
+            )
+            summaryRow(
+                title: "Strain",
+                text: "How much cardiovascular and muscular load your body has taken on. Whoop scores this 0-21; other sources report the count of harder sessions. Consistently high strain without matching recovery is what today's training caps (see \"Why today\" on your recommendation) are designed to catch."
+            )
+            summaryRow(
+                title: "Stress",
+                text: "Time spent in a high-stress physiological state today, as reported by Oura. This reflects the body's stress response generally, not necessarily how you feel emotionally."
+            )
+        }
+    }
+
+    private func summaryRow(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption.bold())
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
     }
 
     private func load() async {

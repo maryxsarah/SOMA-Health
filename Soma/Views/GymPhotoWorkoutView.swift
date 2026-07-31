@@ -214,17 +214,9 @@ struct GymPhotoWorkoutView: View {
     }
 
     private func loadingContent(text: String) -> some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 12) {
-                ProgressView()
-                Text(text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.top, 40)
+        GenerationProgressView(message: text, estimatedSeconds: 7)
+            .padding(.horizontal, 32)
+            .padding(.top, 60)
     }
 
     private var confirmingEquipmentContent: some View {

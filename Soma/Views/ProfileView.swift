@@ -6,11 +6,20 @@ import SwiftUI
 /// available equipment/access, and injuries. Feeds into workout-suggestion
 /// filtering (RecommendationDetailView) and the injury-based intensity cap
 /// (generate-recommendation Edge Function).
+///
+/// Guide 05 of the handoff: three tabs (Training / Health & Safety /
+/// Account), each field collapsed to a summary row (label / one-line
+/// consequence / current value / chevron) that taps through to a detail
+/// sheet -- replacing the previous expand-in-place DisclosureGroup rows.
+/// The editor content inside each sheet is unchanged from before; only the
+/// container changed.
 struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
     @State private var showPaywall = false
+    @State private var section: ProfileSection = .training
+    @State private var activeSheet: ProfileSheet?
 
     // Plain @State strings bound directly via `$` (not a computed
     // Binding(get:set:) built inline in the view body) -- the latter
@@ -31,6 +40,8 @@ struct ProfileView: View {
     @State private var experienceLevel: ExperienceLevel?
     @State private var pregnancy: Bool?
     @State private var pregnancyWeek: Int?
+    @State private var weeklySessionTarget: Int?
+    @State private var sessionsDoneThisWeek = 0
 
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -46,9 +57,10 @@ struct ProfileView: View {
     @State private var showSignOutConfirmation = false
     @State private var showTrainingHistory = false
     @State private var showHealthDashboard = false
+    @State private var completedWorkoutStreak = 0
 
     // Body photos -- gated by Config.enableBodyPhotoUpload, see the
-    // "Goal & Current Photos" card below.
+    // "Goal & Current Photos" row below.
     @State private var goalBodyPhotoPath: String?
     @State private var currentBodyPhotoPath: String?
     @State private var goalBodyPhotoImage: UIImage?
@@ -63,316 +75,27 @@ struct ProfileView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Your Profile")
-                        .font(Theme.display)
-                    Text("Soma uses this to tailor which workouts it suggests, and to keep intensity safer if you have an active injury.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 16) {
+                header
+
+                if !nudges.isEmpty {
+                    completionNotice
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Connect more devices")
-                        .font(.body.bold())
-                        .padding(.horizontal, 4)
-                    ForEach(Provider.allCases) { provider in
-                        ProviderCardView(
-                            provider: provider,
-                            isConnected: appState.connectedProviders.contains(provider),
-                            isConnecting: connecting.contains(provider),
-                            action: { connectDevice(provider) }
-                        )
-                    }
-                    if let deviceErrorMessage {
-                        Text(deviceErrorMessage)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .padding(.horizontal, 4)
-                    }
-                }
+                SomaSegmentedControl(selection: $section) { $0.title }
 
-                CardView {
-                    Text("Contact email")
-                        .font(.body.bold())
-                    TextField("you@example.com", text: $contactEmailText)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.emailAddress)
-                        .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                CardView {
-                    Text("Training experience")
-                        .font(.body.bold())
-                    Text("Adjusts the AI workout plan's structure -- how many blocks, whether it uses supersets, and rest periods.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    FlowLayout {
-                        ForEach(ExperienceLevel.allCases) { level in
-                            ChipToggle(title: level.displayName, isSelected: experienceLevel == level) {
-                                experienceLevel = experienceLevel == level ? nil : level
-                            }
-                        }
-                    }
-                }
-
-                CardView {
-                    Text("Goals")
-                        .font(.body.bold())
-                    FlowLayout {
-                        ForEach(GoalTag.allCases) { tag in
-                            ChipToggle(title: tag.displayName, isSelected: goals.contains(tag)) {
-                                toggle(tag, in: &goals)
-                            }
-                        }
-                    }
-                    if goals.contains(.other) {
-                        TextField("What's your goal?", text: $otherGoalText)
-                            .textFieldStyle(.roundedBorder)
-                            .padding(.top, 4)
-                    }
-                }
-
-                CardView {
-                    Text("Equipment & access")
-                        .font(.body.bold())
-                    FlowLayout {
-                        ForEach(EquipmentTag.allCases) { tag in
-                            ChipToggle(title: tag.displayName, isSelected: equipment.contains(tag)) {
-                                toggle(tag, in: &equipment)
-                            }
-                        }
-                    }
-                    if equipment.contains(.other) {
-                        TextField("What else do you have access to?", text: $otherEquipmentText)
-                            .textFieldStyle(.roundedBorder)
-                            .padding(.top, 4)
-                    }
-                }
-
-                CardView {
-                    Text("Injuries")
-                        .font(.body.bold())
-                    Text("Any active injury caps today's intensity at Moderate and hides high-impact workouts.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    FlowLayout {
-                        ForEach(InjuryTag.allCases) { tag in
-                            ChipToggle(title: tag.displayName, isSelected: injuryTags.contains(tag)) {
-                                toggle(tag, in: &injuryTags)
-                                if injuryTags.contains(tag), injurySeverity[tag] == nil {
-                                    injurySeverity[tag] = .moderate
-                                }
-                            }
-                        }
-                    }
-                    // One severity picker per selected tag -- defaults to
-                    // .moderate the moment a tag is toggled on, above.
-                    ForEach(InjuryTag.allCases.filter { injuryTags.contains($0) }) { tag in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(tag.displayName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Picker(tag.displayName, selection: Binding(
-                                get: { injurySeverity[tag] ?? .moderate },
-                                set: { injurySeverity[tag] = $0 }
-                            )) {
-                                ForEach(InjurySeverity.allCases) { severity in
-                                    Text(severity.displayName).tag(severity)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            // Both optional and purely informational --
-                            // neither affects generation, just richer
-                            // context for the user's own records.
-                            Picker("Type (optional)", selection: Binding(
-                                get: { injuryType[tag] },
-                                set: { injuryType[tag] = $0 }
-                            )) {
-                                Text("Not specified").tag(InjuryType?.none)
-                                ForEach(InjuryType.allCases) { type in
-                                    Text(type.displayName).tag(InjuryType?.some(type))
-                                }
-                            }
-                            .font(.caption)
-
-                            Stepper(
-                                "Pain level: \(injuryPainLevel[tag].map(String.init) ?? "not set")",
-                                value: Binding(
-                                    get: { injuryPainLevel[tag] ?? 1 },
-                                    set: { injuryPainLevel[tag] = $0 }
-                                ),
-                                in: 1...10
-                            )
-                            .font(.caption)
-
-                            // Proactive -- shown the moment moderate/severe
-                            // is selected, not only after a bad check-in
-                            // trend later (record-injury-checkin's
-                            // escalation message is the reactive version
-                            // of this same guidance).
-                            if injurySeverity[tag] == .moderate || injurySeverity[tag] == .severe {
-                                Text("Given the severity you've selected, consider seeing a physician or physiotherapist before continuing to train this area. Soma's guidance here is informational only, not a diagnosis.")
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
-                                    .padding(.top, 2)
-                            }
-                        }
-                        .padding(.top, 4)
-                    }
-                    TextField("Notes (optional)", text: $injuryNotesText, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(2...5)
-                }
-
-                CardView {
-                    Text("Pregnancy")
-                        .font(.body.bold())
-                    // States the actual behavior: Soma adjusts workouts to
-                    // pregnancy stage rather than withholding them entirely
-                    // (an earlier, medically overcautious version of this
-                    // feature did withhold workouts outright -- that's no
-                    // longer the case).
-                    Text("Optional, and never assumed -- only set if you tell us. Soma will adjust your workouts to your pregnancy stage rather than withhold them. This is general guidance only -- please follow your doctor's or midwife's advice, especially if you have any pregnancy complications.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    FlowLayout {
-                        ChipToggle(title: "I'm currently pregnant", isSelected: pregnancy == true) {
-                            pregnancy = (pregnancy == true) ? nil : true
-                            if pregnancy != true { pregnancyWeek = nil }
-                        }
-                    }
-                    if pregnancy == true {
-                        Stepper(
-                            "Week: \(pregnancyWeek.map(String.init) ?? "not set")",
-                            value: Binding(
-                                get: { pregnancyWeek ?? 1 },
-                                set: { pregnancyWeek = $0 }
-                            ),
-                            in: 1...42
-                        )
-                        .font(.caption)
-                        .padding(.top, 4)
-                    }
-                }
-
-                if Config.enableBodyPhotoUpload {
-                    CardView {
-                        Text("Goal & Current Photos")
-                            .font(.body.bold())
-                        Text("Optional -- helps personalize your plan toward your goal.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 16) {
-                            bodyPhotoSlot(
-                                title: "Goal body",
-                                image: goalBodyPhotoImage,
-                                isUploading: isUploadingGoalPhoto,
-                                selection: $goalPhotoItem,
-                                onRemove: { Task { await removeBodyPhoto(kind: .goal) } }
-                            )
-                            bodyPhotoSlot(
-                                title: "Current body",
-                                image: currentBodyPhotoImage,
-                                isUploading: isUploadingCurrentPhoto,
-                                selection: $currentPhotoItem,
-                                onRemove: { Task { await removeBodyPhoto(kind: .current) } }
-                            )
-                        }
-                        if !goalPhotoHistory.isEmpty || !currentPhotoHistory.isEmpty {
-                            Text("\(goalPhotoHistory.count) goal photo(s), \(currentPhotoHistory.count) current photo(s) saved")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let goalBodyPhotoImage, let currentBodyPhotoImage {
-                            Button {
-                                AnalyticsManager.shared.featureUsed(name: "body_photo_comparison")
-                                showingPhotoComparison = true
-                            } label: {
-                                Label("Compare Goal vs. Current", systemImage: "arrow.left.and.right.square")
-                                    .font(.caption.bold())
-                            }
-                            .padding(.top, 4)
-                            .sheet(isPresented: $showingPhotoComparison) {
-                                BodyPhotoComparisonView(goalImage: goalBodyPhotoImage, currentImage: currentBodyPhotoImage)
-                            }
-                        }
-                    }
-                }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-                if savedConfirmation {
-                    Text("Saved.")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-
-                PillButton(title: "Save Profile", isEnabled: !isSaving, action: save)
-
-                CardView {
-                    Text("Insights")
-                        .font(.body.bold())
-                    PillButton(title: "Training History") {
-                        AnalyticsManager.shared.featureUsed(name: "training_history")
-                        showTrainingHistory = true
-                    }
-                    PillButton(title: "Health Dashboard") {
-                        AnalyticsManager.shared.featureUsed(name: "health_dashboard")
-                        showHealthDashboard = true
-                    }
-                }
-
-                // The only place to subscribe on purpose. Both other
-                // paywall presentations are gates that dismiss themselves
-                // while a referral bonus is active, so without this a user
-                // on a 14-day bonus who wants to pay early simply cannot.
-                CardView {
-                    Text("Subscription")
-                        .font(.body.bold())
-                    Text(subscriptionStatusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if !subscriptionManager.isSubscribed {
-                        PillButton(title: "View Soma Premium") {
-                            showPaywall = true
-                        }
-                    }
-                }
-
-                // Discoverable twin of the shake gesture -- shake works
-                // everywhere, but nothing advertises it; this card does.
-                CardView {
-                    Text("Feedback")
-                        .font(.body.bold())
-                    Text("Spotted a bug or have an idea? You can also shake your phone anywhere in the app.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    PillButton(title: "Send Feedback") {
-                        // Same presenter as the shake path -- one route,
-                        // and it dedupes against an already-open sheet.
-                        FeedbackPresenter.present()
-                    }
-                }
-
-                CardView {
-                    Text("Account")
-                        .font(.body.bold())
-                    PillButton(title: "Log Out") {
-                        showSignOutConfirmation = true
-                    }
+                switch section {
+                case .training: trainingSection
+                case .healthSafety: healthSafetySection
+                case .account: accountSection
                 }
             }
             .padding(20)
-            .dismissKeyboardOnTap()
         }
-        .scrollDismissesKeyboard(.interactively)
         .somaBackground()
+        .sheet(item: $activeSheet) { sheet in
+            detailSheet(for: sheet)
+        }
         .sheet(isPresented: $showPaywall) {
             // autoDismissIfBonusActive: false -- opened deliberately, so it
             // must not close itself just because a bonus is running.
@@ -405,6 +128,511 @@ struct ProfileView: View {
         }
     }
 
+    // MARK: - Header
+
+    /// No display-name field exists anywhere in this app (only contact
+    /// email, which is optional and never shown as an identity) -- a
+    /// generic icon here rather than fabricated initials.
+    private var header: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(SomaTokens.accentSoft)
+                .frame(width: 52, height: 52)
+                .overlay(Image(systemName: "person.fill").foregroundStyle(SomaTokens.accent))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your profile")
+                    .font(Theme.display)
+                Text(headerStatusLine)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(SomaTokens.ink3)
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    /// Every clause here is real, currently-known data -- connected
+    /// providers, an actual completed-workout streak (same source as the
+    /// calendar strip's crown badges), and today's real category. No
+    /// placeholder/fabricated clause is added just to match a reference
+    /// design's copy.
+    private var headerStatusLine: String {
+        var parts: [String] = []
+        let connected = Provider.allCases.filter { appState.connectedProviders.contains($0) }
+        if !connected.isEmpty {
+            parts.append(connected.map(\.displayName).joined(separator: " & ") + " connected")
+        }
+        if completedWorkoutStreak > 0 {
+            parts.append("\(completedWorkoutStreak)-day streak")
+        }
+        if let category = appState.currentRecommendation?.category.displayTitle {
+            parts.append(category)
+        }
+        return parts.isEmpty ? "Soma uses this to tailor which workouts it suggests." : parts.joined(separator: " · ")
+    }
+
+    // MARK: - Completion notice
+
+    private struct Nudge: Identifiable {
+        let id: String
+        let text: String
+    }
+
+    /// A short, real checklist -- not fixed placeholder copy. Only ever
+    /// names things that are actually true right now. Shown only while
+    /// something is missing (guide 05's own rule).
+    private var nudges: [Nudge] {
+        var items: [Nudge] = []
+        if !appState.connectedProviders.contains(.appleHealth) {
+            items.append(Nudge(id: "health", text: "Add Apple Health"))
+        }
+        if injuryTags.isEmpty {
+            items.append(Nudge(id: "injury", text: "confirm your injury"))
+        }
+        if weeklySessionTarget == nil {
+            items.append(Nudge(id: "target", text: "set a weekly target"))
+        }
+        return items
+    }
+
+    private var completionNotice: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(SomaTokens.warn)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(nudges.count) to finish")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(SomaTokens.warn)
+                Text("\(nudges.map(\.text).joined(separator: " and ").capitalized(with: nil)) to sharpen suggestions.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(SomaTokens.ink2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous)
+                .fill(SomaTokens.warnSoft)
+                .overlay(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).stroke(SomaTokens.warnLine, lineWidth: 1))
+        )
+    }
+
+    // MARK: - Training tab
+
+    private var trainingSection: some View {
+        VStack(spacing: 10) {
+            summaryRow(
+                title: "Experience",
+                consequence: "Sets block count, supersets and rest",
+                value: experienceLevel?.displayName ?? "Not set"
+            ) { activeSheet = .experience }
+
+            summaryRow(
+                title: "Goals",
+                consequence: "Prioritizes which workouts are suggested first",
+                value: goals.isEmpty ? "Not set" : "\(goals.count) selected"
+            ) { activeSheet = .goals }
+
+            summaryRow(
+                title: "Equipment & access",
+                consequence: "Only suggests workouts you can actually do",
+                value: equipment.isEmpty ? "Not set" : equipment.map(\.displayName).joined(separator: ", ")
+            ) { activeSheet = .equipment }
+
+            summaryRow(
+                title: "Weekly target",
+                consequence: "Personal tracking goal only -- doesn't change suggestions",
+                value: weeklySessionTarget.map { "\($0)/wk · \(sessionsDoneThisWeek) done" } ?? "Not set"
+            ) { activeSheet = .weeklyTarget }
+        }
+    }
+
+    // MARK: - Health & Safety tab
+
+    private var healthSafetySection: some View {
+        VStack(spacing: 10) {
+            groupEyebrow("SAFETY")
+
+            summaryRow(
+                title: "Injuries",
+                consequence: injuryTags.isEmpty ? "None noted" : "Caps today's intensity at Moderate, hides high impact",
+                value: injuryTags.isEmpty ? "None noted" : injuryTags.map(\.displayName).joined(separator: ", "),
+                valueColor: injuryTags.isEmpty ? nil : SomaTokens.danger
+            ) { activeSheet = .injuries }
+
+            summaryRow(
+                title: "Pregnancy",
+                consequence: "Withholds generated workouts until confirmed",
+                value: pregnancy == true ? (pregnancyWeek.map { "Week \($0)" } ?? "Yes") : "Not set"
+            ) { activeSheet = .pregnancy }
+
+            if Config.enableBodyPhotoUpload {
+                summaryRow(
+                    title: "Body photos",
+                    consequence: "Helps personalize your plan toward your goal",
+                    value: "\(goalPhotoHistory.count) goal, \(currentPhotoHistory.count) current"
+                ) { activeSheet = .bodyPhotos }
+            }
+
+            groupEyebrow("INSIGHTS")
+
+            summaryRow(title: "Training history", consequence: "Every logged workout", value: "") {
+                AnalyticsManager.shared.featureUsed(name: "training_history")
+                showTrainingHistory = true
+            }
+            summaryRow(title: "Health dashboard", consequence: "Recovery, sleep, HRV trends", value: "") {
+                AnalyticsManager.shared.featureUsed(name: "health_dashboard")
+                showHealthDashboard = true
+            }
+        }
+    }
+
+    // MARK: - Account tab
+
+    private var accountSection: some View {
+        VStack(spacing: 10) {
+            summaryRow(
+                title: "Contact email",
+                consequence: "Never used to sign in -- display only",
+                value: contactEmailText.isEmpty ? "Not set" : contactEmailText
+            ) { activeSheet = .contactEmail }
+
+            groupEyebrow("CONNECTED DEVICES")
+            ForEach(Provider.allCases) { provider in
+                deviceRow(provider)
+            }
+            if let deviceErrorMessage {
+                Text(deviceErrorMessage)
+                    .font(.caption)
+                    .foregroundStyle(SomaTokens.danger)
+            }
+
+            groupEyebrow("PLAN")
+            summaryRow(title: "Subscription", consequence: subscriptionStatusText, value: "") {
+                if !subscriptionManager.isSubscribed { showPaywall = true }
+            }
+            summaryRow(title: "Feedback", consequence: "Spotted a bug, or have an idea?", value: "") {
+                FeedbackPresenter.present()
+            }
+
+            if let errorMessage {
+                Text(errorMessage).font(.caption).foregroundStyle(SomaTokens.danger)
+            }
+            if savedConfirmation {
+                Text("Saved.").font(.caption).foregroundStyle(SomaTokens.success)
+            }
+
+            SomaButton(title: "Sign out", size: .md, variant: .danger, isBlock: true) {
+                showSignOutConfirmation = true
+            }
+            .padding(.top, 6)
+        }
+    }
+
+    // MARK: - Row primitives
+
+    private func groupEyebrow(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .bold))
+            .tracking(0.5)
+            .foregroundStyle(SomaTokens.ink4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
+    }
+
+    /// `label / one-line consequence / current value / ›` -- guide 05's
+    /// row shape. Tapping presents whatever detail the caller wired up
+    /// (usually `activeSheet = .someCase`).
+    private func summaryRow(title: String, consequence: String, value: String, valueColor: Color? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink)
+                    Text(consequence)
+                        .font(.system(size: 12))
+                        .foregroundStyle(SomaTokens.ink3)
+                        .lineLimit(1)
+                }
+                Spacer()
+                if !value.isEmpty {
+                    Text(value)
+                        .font(.system(size: 13))
+                        .foregroundStyle(valueColor ?? SomaTokens.ink2)
+                        .lineLimit(1)
+                        .multilineTextAlignment(.trailing)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink5)
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Device rows: status dot, value in success/accent, no chevron --
+    /// visually distinct from a setting row (guide 05's own distinction).
+    private func deviceRow(_ provider: Provider) -> some View {
+        let isConnected = appState.connectedProviders.contains(provider)
+        return Button {
+            if !isConnected { connectDevice(provider) }
+        } label: {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(isConnected ? SomaTokens.successDot : SomaTokens.neutralDot)
+                    .frame(width: 8, height: 8)
+                Text(provider.displayName)
+                    .font(.system(size: 14.5, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink)
+                Spacer()
+                if connecting.contains(provider) {
+                    ProgressView()
+                } else {
+                    Text(isConnected ? "Connected" : "Connect")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isConnected ? SomaTokens.success : SomaTokens.accent)
+                }
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
+        }
+        .buttonStyle(.plain)
+        .disabled(isConnected || connecting.contains(provider))
+    }
+
+    // MARK: - Detail sheets
+
+    @ViewBuilder
+    private func detailSheet(for sheet: ProfileSheet) -> some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    switch sheet {
+                    case .experience: experienceEditor
+                    case .goals: goalsEditor
+                    case .equipment: equipmentEditor
+                    case .weeklyTarget: weeklyTargetEditor
+                    case .injuries: injuriesEditor
+                    case .pregnancy: pregnancyEditor
+                    case .bodyPhotos: bodyPhotosEditor
+                    case .contactEmail: contactEmailEditor
+                    }
+                }
+                .padding(20)
+                .dismissKeyboardOnTap()
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .somaBackground()
+            .navigationTitle(sheet.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        save()
+                        activeSheet = nil
+                    }
+                    .disabled(isSaving)
+                }
+            }
+        }
+    }
+
+    private var experienceEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Adjusts the AI workout plan's structure -- how many blocks, whether it uses supersets, and rest periods.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FlowLayout {
+                ForEach(ExperienceLevel.allCases) { level in
+                    ChipToggle(title: level.displayName, isSelected: experienceLevel == level) {
+                        experienceLevel = experienceLevel == level ? nil : level
+                    }
+                }
+            }
+        }
+    }
+
+    private var goalsEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            FlowLayout {
+                ForEach(GoalTag.allCases) { tag in
+                    ChipToggle(title: tag.displayName, isSelected: goals.contains(tag)) {
+                        toggle(tag, in: &goals)
+                    }
+                }
+            }
+            if goals.contains(.other) {
+                TextField("What's your goal?", text: $otherGoalText)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private var equipmentEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            FlowLayout {
+                ForEach(EquipmentTag.allCases) { tag in
+                    ChipToggle(title: tag.displayName, isSelected: equipment.contains(tag)) {
+                        toggle(tag, in: &equipment)
+                    }
+                }
+            }
+            if equipment.contains(.other) {
+                TextField("What else do you have access to?", text: $otherEquipmentText)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private var weeklyTargetEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("A personal tracking goal -- doesn't change what Soma recommends, just what it shows you here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Stepper(
+                "Target: \(weeklySessionTarget.map(String.init) ?? "not set") sessions/week",
+                value: Binding(get: { weeklySessionTarget ?? 3 }, set: { weeklySessionTarget = $0 }),
+                in: 1...14
+            )
+            .font(.caption)
+            if weeklySessionTarget != nil {
+                Text("\(sessionsDoneThisWeek) done this week so far.")
+                    .font(.caption.bold())
+                    .foregroundStyle(SomaTokens.accent)
+            }
+        }
+    }
+
+    private var injuriesEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Any active injury caps today's intensity at Moderate and hides high-impact workouts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FlowLayout {
+                ForEach(InjuryTag.allCases) { tag in
+                    ChipToggle(title: tag.displayName, isSelected: injuryTags.contains(tag)) {
+                        toggle(tag, in: &injuryTags)
+                        if injuryTags.contains(tag), injurySeverity[tag] == nil {
+                            injurySeverity[tag] = .moderate
+                        }
+                    }
+                }
+            }
+            ForEach(InjuryTag.allCases.filter { injuryTags.contains($0) }) { tag in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(tag.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(tag.displayName, selection: Binding(
+                        get: { injurySeverity[tag] ?? .moderate },
+                        set: { injurySeverity[tag] = $0 }
+                    )) {
+                        ForEach(InjurySeverity.allCases) { severity in
+                            Text(severity.displayName).tag(severity)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("Type (optional)", selection: Binding(
+                        get: { injuryType[tag] },
+                        set: { injuryType[tag] = $0 }
+                    )) {
+                        Text("Not specified").tag(InjuryType?.none)
+                        ForEach(InjuryType.allCases) { type in
+                            Text(type.displayName).tag(InjuryType?.some(type))
+                        }
+                    }
+                    .font(.caption)
+
+                    Stepper(
+                        "Pain level: \(injuryPainLevel[tag].map(String.init) ?? "not set")",
+                        value: Binding(get: { injuryPainLevel[tag] ?? 1 }, set: { injuryPainLevel[tag] = $0 }),
+                        in: 1...10
+                    )
+                    .font(.caption)
+
+                    if injurySeverity[tag] == .moderate || injurySeverity[tag] == .severe {
+                        Text("Given the severity you've selected, consider seeing a physician or physiotherapist before continuing to train this area. Soma's guidance here is informational only, not a diagnosis.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .padding(.top, 4)
+            }
+            TextField("Notes (optional)", text: $injuryNotesText, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...5)
+        }
+    }
+
+    private var pregnancyEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Optional, and never assumed -- only set if you tell us. Soma will adjust your workouts to your pregnancy stage rather than withhold them. This is general guidance only -- please follow your doctor's or midwife's advice, especially if you have any pregnancy complications.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FlowLayout {
+                ChipToggle(title: "I'm currently pregnant", isSelected: pregnancy == true) {
+                    pregnancy = (pregnancy == true) ? nil : true
+                    if pregnancy != true { pregnancyWeek = nil }
+                }
+            }
+            if pregnancy == true {
+                Stepper(
+                    "Week: \(pregnancyWeek.map(String.init) ?? "not set")",
+                    value: Binding(get: { pregnancyWeek ?? 1 }, set: { pregnancyWeek = $0 }),
+                    in: 1...42
+                )
+                .font(.caption)
+            }
+        }
+    }
+
+    private var bodyPhotosEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Optional -- helps personalize your plan toward your goal.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 16) {
+                bodyPhotoSlot(
+                    title: "Goal body",
+                    image: goalBodyPhotoImage,
+                    isUploading: isUploadingGoalPhoto,
+                    selection: $goalPhotoItem,
+                    onRemove: { Task { await removeBodyPhoto(kind: .goal) } }
+                )
+                bodyPhotoSlot(
+                    title: "Current body",
+                    image: currentBodyPhotoImage,
+                    isUploading: isUploadingCurrentPhoto,
+                    selection: $currentPhotoItem,
+                    onRemove: { Task { await removeBodyPhoto(kind: .current) } }
+                )
+            }
+            if let goalBodyPhotoImage, let currentBodyPhotoImage {
+                Button {
+                    AnalyticsManager.shared.featureUsed(name: "body_photo_comparison")
+                    showingPhotoComparison = true
+                } label: {
+                    Label("Compare Goal vs. Current", systemImage: "arrow.left.and.right.square")
+                        .font(.caption.bold())
+                }
+                .sheet(isPresented: $showingPhotoComparison) {
+                    BodyPhotoComparisonView(goalImage: goalBodyPhotoImage, currentImage: currentBodyPhotoImage)
+                }
+            }
+        }
+    }
+
+    private var contactEmailEditor: some View {
+        TextField("you@example.com", text: $contactEmailText)
+            .textInputAutocapitalization(.never)
+            .keyboardType(.emailAddress)
+            .autocorrectionDisabled()
+            .textFieldStyle(.roundedBorder)
+    }
+
     /// Three distinct states worth telling apart: paying, on a referral
     /// bonus (free, but ending), or neither.
     private var subscriptionStatusText: String {
@@ -415,9 +643,9 @@ struct ProfileView: View {
             let formatter = DateFormatter()
             formatter.dateStyle = .medium
             formatter.timeStyle = .none
-            return "Free access until \(formatter.string(from: bonusUntil)). You can subscribe now if you'd rather not wait for it to end."
+            return "Free until \(formatter.string(from: bonusUntil)) -- tap to subscribe now instead."
         }
-        return "You're on the free plan -- today's category and message only."
+        return "Free plan -- today's category and message only."
     }
 
     private func connectDevice(_ provider: Provider) {
@@ -474,6 +702,7 @@ struct ProfileView: View {
         experienceLevel = profile.experienceLevel
         pregnancy = profile.pregnancy
         pregnancyWeek = profile.pregnancyWeek
+        weeklySessionTarget = profile.weeklySessionTarget
 
         goalBodyPhotoPath = profile.goalBodyPhotoPath
         currentBodyPhotoPath = profile.currentBodyPhotoPath
@@ -487,6 +716,39 @@ struct ProfileView: View {
             goalPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .goal)) ?? []
             currentPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .current)) ?? []
         }
+
+        completedWorkoutStreak = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates())
+            .map(Self.streak(from:)) ?? 0
+        sessionsDoneThisWeek = await Self.workoutsThisWeek()
+    }
+
+    /// Consecutive days up to and including today with a logged workout --
+    /// same underlying data (fetchRecentWorkoutLogDates) as the calendar
+    /// strip's crown badges, just aggregated into a streak count here.
+    private static func streak(from dates: Set<String>) -> Int {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        var count = 0
+        var cursor = Date()
+        while dates.contains(formatter.string(from: cursor)) {
+            count += 1
+            cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor) ?? cursor
+        }
+        return count
+    }
+
+    private static func workoutsThisWeek() async -> Int {
+        let calendar = Calendar.current
+        guard let weekStart = calendar.dateInterval(of: .weekOfYear, for: Date())?.start else { return 0 }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        let logs = (try? await SupabaseClient.shared.fetchWorkoutLogs(
+            fromDate: formatter.string(from: weekStart),
+            toDate: formatter.string(from: Date())
+        )) ?? []
+        return Set(logs.map(\.date)).count
     }
 
     private func loadBodyPhoto(path: String) async -> UIImage? {
@@ -524,6 +786,8 @@ struct ProfileView: View {
             if image != nil {
                 Button("Remove photo", role: .destructive, action: onRemove)
                     .font(.caption)
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
             }
         }
     }
@@ -570,7 +834,11 @@ struct ProfileView: View {
 
     private func removeBodyPhoto(kind: SupabaseClient.BodyPhotoKind) async {
         let path = kind == .goal ? goalBodyPhotoPath : currentBodyPhotoPath
-        guard let path else { return }
+        guard let path else {
+            errorMessage = "No photo to remove."
+            return
+        }
+        errorMessage = nil
         do {
             try await SupabaseClient.shared.deleteBodyPhoto(kind: kind, path: path)
             if kind == .goal {
@@ -603,7 +871,8 @@ struct ProfileView: View {
             injuryNotes: injuryNotesText.isEmpty ? nil : injuryNotesText,
             experienceLevel: experienceLevel,
             pregnancy: pregnancy,
-            pregnancyWeek: pregnancy == true ? pregnancyWeek : nil
+            pregnancyWeek: pregnancy == true ? pregnancyWeek : nil,
+            weeklySessionTarget: weeklySessionTarget
         )
 
         let currentInjuryTags = Array(injuryTags)
@@ -629,6 +898,35 @@ struct ProfileView: View {
     }
 }
 
+private enum ProfileSection: String, CaseIterable, Identifiable {
+    case training, healthSafety, account
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .training: "Training"
+        case .healthSafety: "Health & Safety"
+        case .account: "Account"
+        }
+    }
+}
+
+private enum ProfileSheet: String, Identifiable {
+    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, bodyPhotos, contactEmail
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .experience: "Experience"
+        case .goals: "Goals"
+        case .equipment: "Equipment & access"
+        case .weeklyTarget: "Weekly target"
+        case .injuries: "Injuries"
+        case .pregnancy: "Pregnancy"
+        case .bodyPhotos: "Body photos"
+        case .contactEmail: "Contact email"
+        }
+    }
+}
+
 private struct ChipToggle: View {
     let title: String
     let isSelected: Bool
@@ -642,7 +940,7 @@ private struct ChipToggle: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(Capsule().fill(isSelected ? Theme.pillFill : Color(.systemGray6)))
+                .background(Capsule().fill(isSelected ? SomaTokens.accent : Color(.systemGray6)))
                 .foregroundStyle(isSelected ? .white : .primary)
         }
         .buttonStyle(.plain)

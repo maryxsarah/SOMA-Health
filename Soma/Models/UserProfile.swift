@@ -123,6 +123,10 @@ struct UserProfile: Codable, Equatable {
     /// Optional, only meaningful when `pregnancy == true`. Drives
     /// trimester-scaled guidance -- see pregnancyGuidance.ts.
     var pregnancyWeek: Int?
+    /// Real, user-set weekly session-count goal, shown against actual
+    /// progress (workouts logged this week) on the Profile screen. Purely
+    /// a personal-tracking display -- not read by any recommendation logic.
+    var weeklySessionTarget: Int?
     /// Storage paths (not the image itself), behind Config.enableBodyPhotoUpload
     /// -- managed only via SupabaseClient's uploadBodyPhoto/deleteBodyPhoto,
     /// not through the general profile save() flow, hence the defaults.
@@ -143,6 +147,7 @@ struct UserProfile: Codable, Equatable {
         case experienceLevel = "experience_level"
         case pregnancy
         case pregnancyWeek = "pregnancy_week"
+        case weeklySessionTarget = "weekly_session_target"
         case goalBodyPhotoPath = "goal_body_photo_path"
         case currentBodyPhotoPath = "current_body_photo_path"
     }
@@ -158,6 +163,7 @@ struct UserProfile: Codable, Equatable {
         experienceLevel: nil,
         pregnancy: nil,
         pregnancyWeek: nil,
+        weeklySessionTarget: nil,
         goalBodyPhotoPath: nil,
         currentBodyPhotoPath: nil
     )
