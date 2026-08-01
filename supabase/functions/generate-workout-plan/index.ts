@@ -143,7 +143,7 @@ interface UserRow {
   diet_type: string | null;
   goal_pace: string | null;
   blockers: string[] | null;
-  accomplishment_goal: string | null;
+  accomplishment_goals: string[] | null;
   desired_weight_kg: number | null;
 }
 
@@ -291,11 +291,14 @@ Deno.serve(async (req: Request) => {
     }
     const category = recommendation.category as string;
 
-    const { data: userRow } = await supabase
+    const { data: userRow, error: userRowError } = await supabase
       .from("users")
-      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goal, desired_weight_kg")
+      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg")
       .eq("id", userId)
       .maybeSingle();
+    if (userRowError) {
+      throw new Error(`could not read user profile: ${userRowError.message}`);
+    }
 
     const { data: snapshots } = await supabase
       .from("daily_snapshot")
@@ -598,8 +601,8 @@ function buildPrompt(
   const blockersLine = userRow?.blockers?.length
     ? `What's gotten in their way before: ${userRow.blockers.map(blockerLabel).join(", ")} -- bias toward simplicity and consistency in how the session is framed if relevant (e.g. shorter/clearer instructions for "busy schedule" or "overwhelmed").`
     : "";
-  const accomplishmentLine = userRow?.accomplishment_goal
-    ? `In their own words, what they want to accomplish: "${userRow.accomplishment_goal}".`
+  const accomplishmentLine = userRow?.accomplishment_goals?.length
+    ? `In their own words, what they want to accomplish: ${userRow.accomplishment_goals.map((g) => `"${g}"`).join(", ")}.`
     : "";
 
   const healthLines = describeHealthData(snapshots);
