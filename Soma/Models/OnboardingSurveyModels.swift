@@ -113,6 +113,18 @@ enum GoalPace: String, Codable, CaseIterable, Identifiable {
         case .fast: 0.55
         }
     }
+
+    /// The same deterministic estimate GoalPaceQuestionView shows live
+    /// while picking a pace ("You should reach your goal in N months") --
+    /// pulled out here so the later on-track/plan-summary screens can show
+    /// this same real number instead of a generic, unrelated chart
+    /// timeline (tester feedback: "needs to be realistic with recommended
+    /// timeline").
+    static func estimatedMonths(deltaKg: Double, pace: GoalPace) -> Int {
+        let baselineMonthsPerKg = 0.9
+        let months = abs(deltaKg) * baselineMonthsPerKg * pace.timelineMultiplier
+        return max(1, Int(months.rounded()))
+    }
 }
 
 enum BlockerTag: String, Codable, CaseIterable, Identifiable {
@@ -219,11 +231,14 @@ struct OnboardingSurveyAnswers: Equatable {
     var referralSource: ReferralSource?
     var weightKg: Double?
     var worksWithTrainer: Bool?
-    var goal: GoalTag?
+    // Multi-select -- more than one goal/accomplishment genuinely applies
+    // for most people, and forcing a single pick here just meant whichever
+    // one they picked lost the others (tester feedback).
+    var goal: Set<GoalTag> = []
     var desiredWeightKg: Double?
     var goalPace: GoalPace?
     var blockers: Set<BlockerTag> = []
     var dietType: DietType?
-    var accomplishmentGoal: AccomplishmentGoal?
+    var accomplishmentGoals: Set<AccomplishmentGoal> = []
     var marketingOptIn = false
 }

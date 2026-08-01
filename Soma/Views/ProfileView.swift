@@ -1,4 +1,5 @@
 import PhotosUI
+import SuperwallKit
 import SwiftUI
 
 /// Editable profile: contact email (display-only, never a login credential
@@ -17,9 +18,9 @@ struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
-    @State private var showPaywall = false
     @State private var section: ProfileSection = .training
     @State private var activeSheet: ProfileSheet?
+    @State private var showReferralCodeSheet = false
 
     // Plain @State strings bound directly via `$` (not a computed
     // Binding(get:set:) built inline in the view body) -- the latter
@@ -96,10 +97,8 @@ struct ProfileView: View {
         .sheet(item: $activeSheet) { sheet in
             detailSheet(for: sheet)
         }
-        .sheet(isPresented: $showPaywall) {
-            // autoDismissIfBonusActive: false -- opened deliberately, so it
-            // must not close itself just because a bonus is running.
-            PaywallView(autoDismissIfBonusActive: false)
+        .sheet(isPresented: $showReferralCodeSheet) {
+            ReferralCodeSheet()
         }
         .sheet(isPresented: $showTrainingHistory) {
             TrainingHistoryView()
@@ -308,7 +307,10 @@ struct ProfileView: View {
 
             groupEyebrow("PLAN")
             summaryRow(title: "Subscription", consequence: subscriptionStatusText, value: "") {
-                if !subscriptionManager.isSubscribed { showPaywall = true }
+                if !subscriptionManager.isSubscribed { presentPremiumPaywall() }
+            }
+            summaryRow(title: "Referral code", consequence: "Redeem a code for free access", value: "") {
+                showReferralCodeSheet = true
             }
             summaryRow(title: "Feedback", consequence: "Spotted a bug, or have an idea?", value: "") {
                 FeedbackPresenter.present()
@@ -720,6 +722,35 @@ struct ProfileView: View {
         completedWorkoutStreak = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates())
             .map(Self.streak(from:)) ?? 0
         sessionsDoneThisWeek = await Self.workoutsThisWeek()
+
+        setSuperwallUserAttributes(profile: profile)
+    }
+
+    /// Real, already-collected profile fields only -- for paywall audience
+    /// targeting/personalization in the Superwall dashboard (e.g. showing
+    /// a different paywall to beginners vs. advanced users, or excluding
+    /// someone with an active referral bonus from a campaign). Never
+    /// fabricated, matches this app's standing "no decorative data"
+    /// convention -- see AnalyticsManager's own doc comment.
+    private func setSuperwallUserAttributes(profile: UserProfile) {
+        var attributes: [String: Any] = [
+            "goals": profile.goals.map(\.rawValue).joined(separator: ","),
+            "equipment_count": profile.equipment.count,
+            "referral_bonus_active": appState.referralBonusUntil.map { $0 > Date() } ?? false,
+        ]
+        attributes["experience_level"] = profile.experienceLevel?.rawValue
+        attributes["weekly_session_target"] = profile.weeklySessionTarget
+        Superwall.shared.setUserAttributes(attributes)
+    }
+
+    /// Opened deliberately from "Subscription" -- unlike the gating
+    /// placements in HomeView, there's nothing to unlock here (the user is
+    /// just browsing premium options), so the feature closure is empty.
+    /// Not skipped for an active referral bonus, unlike the gating
+    /// placements -- someone who explicitly taps in to see premium options
+    /// should see them regardless.
+    private func presentPremiumPaywall() {
+        Superwall.shared.register(placement: "view_premium")
     }
 
     /// Consecutive days up to and including today with a logged workout --

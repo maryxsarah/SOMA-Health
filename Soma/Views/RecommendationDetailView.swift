@@ -527,6 +527,11 @@ struct RecommendationDetailView: View {
             aiPlanError = message
         } catch SupabaseError.generationLimitReached(let message) {
             aiPlanError = message
+        } catch SupabaseError.serviceUnavailable {
+            // Distinct from the generic case below -- an Anthropic-side
+            // failure (rate limit, exhausted credits, bad key), not
+            // something a retry can fix. See classifyGenerationError.
+            aiPlanError = SupabaseError.serviceUnavailable.errorDescription
         } catch {
             aiPlanError = "Couldn't generate a plan right now. Try again in a moment."
         }

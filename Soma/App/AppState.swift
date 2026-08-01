@@ -1,4 +1,5 @@
 import Foundation
+import SuperwallKit
 
 /// Exactly the 4 screens in the spec -- no tab bar, no chat, no extra
 /// screens.
@@ -98,6 +99,7 @@ final class AppState: ObservableObject {
     /// re-tested in the same running app, without reinstalling.
     func signOut() {
         SupabaseClient.shared.signOut()
+        Superwall.shared.reset()
         onboardingComplete = false
         connectedProviders = []
         currentRecommendation = nil

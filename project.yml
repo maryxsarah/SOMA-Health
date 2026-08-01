@@ -37,6 +37,11 @@ packages:
   PostHog:
     url: https://github.com/PostHog/posthog-ios
     from: 3.0.0
+  # Superwall -- remote-configurable paywalls. Pinned to current major
+  # (4.x) for the same reason as Firebase/PostHog above.
+  Superwall:
+    url: https://github.com/superwall/Superwall-iOS
+    from: 4.0.0
 
 targets:
   Soma:
@@ -59,6 +64,8 @@ targets:
         product: FirebaseCore
       - package: PostHog
         product: PostHog
+      - package: Superwall
+        product: SuperwallKit
     info:
       path: Soma/Resources/Info.plist
       # XcodeGen regenerates this file from these properties on every
@@ -115,6 +122,7 @@ targets:
         OURA_CLIENT_ID: $(OURA_CLIENT_ID)
         POSTHOG_API_KEY: $(POSTHOG_API_KEY)
         POSTHOG_HOST: $(POSTHOG_HOST)
+        SUPERWALL_API_KEY: $(SUPERWALL_API_KEY)
     entitlements:
       path: Soma/Resources/Soma.entitlements
       properties:

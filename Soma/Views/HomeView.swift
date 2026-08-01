@@ -1,16 +1,15 @@
+import SuperwallKit
 import SwiftUI
 
 /// Screen 4 -- Home. No text input, no chat history, no voice button.
 struct HomeView: View {
     @EnvironmentObject private var appState: AppState
-    @EnvironmentObject private var subscriptionManager: SubscriptionManager
 
     @State private var orbState: OrbState = .idle
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showDetail = false
     @State private var showProfile = false
-    @State private var showPaywall = false
     @State private var showHealthDashboard = false
     @State private var recentRecommendations: [DailyRecommendation] = []
     @State private var selectedDay: String?
@@ -165,9 +164,6 @@ struct HomeView: View {
                 )
             }
         }
-        .sheet(isPresented: $showPaywall) {
-            PaywallView()
-        }
         .sheet(isPresented: Binding(
             get: { selectedDay != nil },
             set: { if !$0 { selectedDay = nil } }
@@ -181,10 +177,16 @@ struct HomeView: View {
     /// The Home card (today's category + message) always stays free --
     /// only the tap-through detail (step target, workout suggestions, why
     /// explanation) requires an active subscription or referral bonus.
-    private var hasDetailAccess: Bool {
-        if subscriptionManager.isSubscribed { return true }
-        if let until = appState.referralBonusUntil, until > Date() { return true }
-        return false
+    /// The bonus check stays in Swift (Superwall's dashboard has no
+    /// visibility into it); everything else -- is this user paying, and
+    /// does today's audience even show a paywall -- is entirely Superwall's
+    /// call via the "detail_access" placement's campaign configuration.
+    private func requestDetailAccess(then action: @escaping () -> Void) {
+        if let until = appState.referralBonusUntil, until > Date() {
+            action()
+            return
+        }
+        Superwall.shared.register(placement: "detail_access", feature: action)
     }
 
     /// guide 02: pill top-left (opposite the gear), badge top-right --
@@ -250,11 +252,9 @@ struct HomeView: View {
     /// logic as before (one AI plan committed per day).
     private var scanSetupCard: some View {
         Button {
-            if hasDetailAccess {
+            requestDetailAccess {
                 AnalyticsManager.shared.featureUsed(name: "gym_photo_workout")
                 showGymPhotoFlow = true
-            } else {
-                showPaywall = true
             }
         } label: {
             CardView {
@@ -282,11 +282,7 @@ struct HomeView: View {
 
     private func recommendationCard(_ recommendation: DailyRecommendation) -> some View {
         Button {
-            if hasDetailAccess {
-                showDetail = true
-            } else {
-                showPaywall = true
-            }
+            requestDetailAccess { showDetail = true }
         } label: {
             CardView {
                 HStack(alignment: .top) {
@@ -338,11 +334,7 @@ struct HomeView: View {
     /// Workout Complete" stays a separate, explicit action from here.
     private func aiGeneratedWorkoutCard(_ aiPlan: TodaysAIPlan) -> some View {
         Button {
-            if hasDetailAccess {
-                showDetail = true
-            } else {
-                showPaywall = true
-            }
+            requestDetailAccess { showDetail = true }
         } label: {
             CardView {
                 HStack(alignment: .top) {

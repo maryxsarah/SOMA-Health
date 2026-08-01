@@ -27,6 +27,7 @@
 
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
+import { classifyGenerationError } from "../_shared/anthropicErrors.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { checkGenerationLimit, GENERATION_LIMIT_MESSAGE, logGeneration, type SubscriptionTier } from "../_shared/generationLimits.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
@@ -418,9 +419,8 @@ Deno.serve(async (req: Request) => {
 
     return jsonResponse({ date, category, source: "suggestion", ...planWithDuration });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const status = msg === "unauthorized" ? 401 : 500;
-    return jsonResponse({ error: msg }, status);
+    const { status, body } = classifyGenerationError(err);
+    return jsonResponse(body, status);
   }
 });
 

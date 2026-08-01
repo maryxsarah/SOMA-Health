@@ -13,3 +13,6 @@ OURA_CLIENT_ID = your-oura-client-id
 // is on EU Cloud, or your own instance's host if self-hosted.
 POSTHOG_API_KEY = your-posthog-project-api-key
 POSTHOG_HOST = us.i.posthog.com
+// Public API key from Superwall Dashboard -> Settings -> Keys (same key for
+// Debug/Release -- Superwall separates environments by app, not by key).
+SUPERWALL_API_KEY = your-superwall-public-api-key

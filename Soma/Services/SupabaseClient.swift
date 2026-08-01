@@ -235,12 +235,12 @@ final class SupabaseClient {
         if let source = answers.referralSource { body["referral_source"] = source.rawValue }
         if let weight = answers.weightKg { body["weight_kg"] = weight }
         if let trainer = answers.worksWithTrainer { body["works_with_trainer"] = trainer }
-        if let goal = answers.goal { body["goals"] = [goal.rawValue] }
+        if !answers.goal.isEmpty { body["goals"] = answers.goal.map(\.rawValue) }
         if let desired = answers.desiredWeightKg { body["desired_weight_kg"] = desired }
         if let pace = answers.goalPace { body["goal_pace"] = pace.rawValue }
         if !answers.blockers.isEmpty { body["blockers"] = answers.blockers.map(\.rawValue) }
         if let diet = answers.dietType { body["diet_type"] = diet.rawValue }
-        if let accomplishment = answers.accomplishmentGoal { body["accomplishment_goal"] = accomplishment.rawValue }
+        if !answers.accomplishmentGoals.isEmpty { body["accomplishment_goals"] = answers.accomplishmentGoals.map(\.rawValue) }
         body["marketing_opt_in"] = answers.marketingOptIn
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
@@ -1134,6 +1134,16 @@ final class SupabaseClient {
     private static func assertSuccess(_ response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
+            // Generation functions (generate-workout-plan, generate-gym-
+            // workout) answer this way specifically when their own
+            // Anthropic/OpenAI call failed -- see
+            // _shared/anthropicErrors.ts. Surfaced as its own case so
+            // callers can show an honest "not your fault, retrying won't
+            // help" message instead of a generic request-failed one.
+            struct ServiceUnavailableResponse: Decodable { let service_unavailable: Bool }
+            if let flagged = try? JSONDecoder().decode(ServiceUnavailableResponse.self, from: data), flagged.service_unavailable {
+                throw SupabaseError.serviceUnavailable
+            }
             let message = String(data: data, encoding: .utf8) ?? "unknown error"
             throw SupabaseError.requestFailed(status: http.statusCode, message: message)
         }
@@ -1170,6 +1180,12 @@ enum SupabaseError: LocalizedError {
     /// used up -- distinct from workoutLocked, which is about an already-
     /// completed day, not a quota.
     case generationLimitReached(message: String)
+    /// The generation function's own LLM call failed (Anthropic/OpenAI
+    /// unavailable, rate-limited, or the account is out of credits) --
+    /// distinct from every case above, which are normal/expected server
+    /// decisions. Retrying immediately won't help; this needs the team to
+    /// go check the provider account. See _shared/anthropicErrors.ts.
+    case serviceUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -1181,6 +1197,8 @@ enum SupabaseError: LocalizedError {
             return message
         case .generationLimitReached(let message):
             return message
+        case .serviceUnavailable:
+            return "Soma's AI service is temporarily unavailable. We've been notified -- please try again later."
         case .requestFailed(let status, let message):
             return "Request failed (\(status)): \(message)"
         }

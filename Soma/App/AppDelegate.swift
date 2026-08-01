@@ -1,5 +1,6 @@
 import FirebaseCore
 import PostHog
+import SuperwallKit
 import UIKit
 import UserNotifications
 
@@ -20,6 +21,21 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         PostHogSDK.shared.setup(postHogConfig)
 
         AnalyticsManager.shared.appOpened()
+
+        // Custom PurchaseController: Soma's own SubscriptionManager stays
+        // the single reader of Transaction.currentEntitlements (needed for
+        // the Supabase subscription_tier sync generation limits depend on)
+        // and pushes the result into Superwall.shared.subscriptionStatus --
+        // see SubscriptionManager.refreshEntitlement().
+        Superwall.configure(apiKey: Config.superwallAPIKey, purchaseController: SomaPurchaseController.shared)
+        Superwall.shared.delegate = SuperwallEventForwarder.shared
+        // A returning signed-in user (persisted session from the keychain,
+        // not a fresh interactive sign-in) still needs to be identified on
+        // every cold launch -- the interactive sign-in call sites
+        // (SessionManager) only fire once, at the moment of login/signup.
+        if let userId = SupabaseClient.shared.currentUserID {
+            Superwall.shared.identify(userId: userId)
+        }
 
         // BGTaskScheduler registration must happen synchronously here,
         // before this method returns -- it cannot live in a SwiftUI .task.

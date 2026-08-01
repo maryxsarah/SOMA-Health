@@ -27,6 +27,10 @@ enum Config {
         URL(string: "https://\(string(for: "POSTHOG_HOST"))")!
     }
 
+    static var superwallAPIKey: String {
+        string(for: "SUPERWALL_API_KEY")
+    }
+
     /// Fixed by convention (matches CFBundleURLTypes in Info.plist), not
     /// per-environment config -- these never need to change per deployment.
     static let oauthURLScheme = "soma"

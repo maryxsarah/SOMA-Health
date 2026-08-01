@@ -1,3 +1,4 @@
+import SuperwallKit
 import SwiftUI
 
 private enum PostSetupStep: Int {
@@ -50,7 +51,15 @@ struct PostSetupFlowView: View {
             case .trialReminder:
                 TrialReminderStepView(onContinue: advance)
             case .paywall:
-                PaywallView(onFinished: { appState.markOnboardingComplete() }, allowsDismissal: false)
+                // Superwall presents its own paywall modally -- there's
+                // nothing to render inline here beyond a brief background
+                // while that happens. The onboarding paywall assigned to
+                // this placement must be configured non-dismissible (no
+                // close button) in the Superwall dashboard paywall editor
+                // -- that's what used to be `allowsDismissal: false`.
+                Color.clear
+                    .somaBackground()
+                    .task { presentOnboardingPaywall() }
             }
         }
         .transition(.opacity)
@@ -77,6 +86,23 @@ struct PostSetupFlowView: View {
         if let next = PostSetupStep(rawValue: nextRaw) {
             step = next
         } else {
+            appState.markOnboardingComplete()
+        }
+    }
+
+    /// Mirrors the old PaywallView(autoDismissIfBonusActive: true) behavior:
+    /// someone who already has free access via a redeemed referral bonus
+    /// skips the paywall entirely rather than being asked to pay.
+    /// Otherwise, registers the hard-gated onboarding placement -- there is
+    /// no "Not now" here; `markOnboardingComplete()` only fires once the
+    /// paywall's feature closure runs (a purchase, a restore, or -- if the
+    /// dashboard paywall is ever set to Non Gated -- any dismissal).
+    private func presentOnboardingPaywall() {
+        if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
+            appState.markOnboardingComplete()
+            return
+        }
+        Superwall.shared.register(placement: "onboarding_paywall") {
             appState.markOnboardingComplete()
         }
     }

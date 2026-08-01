@@ -117,11 +117,23 @@ struct ComparisonStepView: View {
     }
 }
 
-/// "You are right on track to reach your goal!" -- upward trend screen.
+/// "Here's your realistic timeline" -- upward trend screen, now driven by
+/// the real weight-delta + pace the user picked two screens ago (was a
+/// generic "you're right on track" claim before anything had happened,
+/// with a hardcoded 3/7/30-day chart unrelated to their actual answer --
+/// tester feedback: "needs to be realistic with recommended timeline").
 struct OnTrackStepView: View {
     let progress: Double
+    let weightDeltaKg: Double
+    let pace: GoalPace
     let onBack: () -> Void
     let onContinue: () -> Void
+
+    private var estimatedMonths: Int {
+        GoalPace.estimatedMonths(deltaKg: weightDeltaKg, pace: pace)
+    }
+
+    private var monthLabel: String { "\(estimatedMonths) month\(estimatedMonths == 1 ? "" : "s")" }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -134,18 +146,18 @@ struct OnTrackStepView: View {
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
 
-            Text("You are right on track to reach your goal!")
+            Text("Here's your realistic timeline")
                 .font(Theme.display)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.top, 4)
 
-            UpwardTrendChartView()
+            UpwardTrendChartView(xAxisLabels: ["Now", "Halfway", monthLabel])
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
 
-            Text("Reaching your health goal takes time -- consistency in the early weeks matters the most.")
+            Text("At a \(pace.displayName.lowercased()) pace, most people following their plan consistently reach a goal like this in about \(monthLabel). Consistency in the early weeks matters most.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

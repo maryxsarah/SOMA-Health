@@ -77,7 +77,7 @@ struct OnboardingSurveyView: View {
                     onAnswer: { answers.worksWithTrainer = $0; advance() }
                 )
             case .goal:
-                SingleSelectQuestionView(
+                MultiSelectQuestionView(
                     headline: "What is your goal?",
                     progress: progress,
                     options: GoalTag.onboardingOptions,
@@ -128,15 +128,21 @@ struct OnboardingSurveyView: View {
                     onContinue: advance
                 )
             case .accomplishment:
-                SingleSelectQuestionView(
+                MultiSelectQuestionView(
                     headline: "What would you like to accomplish?",
                     progress: progress,
-                    selection: $answers.accomplishmentGoal,
+                    selection: $answers.accomplishmentGoals,
                     onBack: goBack,
                     onContinue: advance
                 )
             case .onTrack:
-                OnTrackStepView(progress: progress, onBack: goBack, onContinue: advance)
+                OnTrackStepView(
+                    progress: progress,
+                    weightDeltaKg: weightDelta,
+                    pace: answers.goalPace ?? .recommended,
+                    onBack: goBack,
+                    onContinue: advance
+                )
             case .celebration:
                 CelebrationStepView(onContinue: finish)
             }
@@ -168,12 +174,22 @@ struct OnboardingSurveyView: View {
     }
 
     private func finish() {
+        // Stashed locally (not just sent to the server) so PlanSummaryStepView,
+        // several screens later in PostSetupFlowView, can show the same real
+        // timeline without a round-trip fetch -- same one-off UserDefaults
+        // pattern AppState itself uses for onboarding-scoped values.
+        UserDefaults.standard.set(
+            GoalPace.estimatedMonths(deltaKg: weightDelta, pace: answers.goalPace ?? .recommended),
+            forKey: Self.estimatedGoalMonthsKey
+        )
         Task {
             guard let userId = SupabaseClient.shared.currentUserID else { return }
             try? await SupabaseClient.shared.saveOnboardingSurvey(id: userId, answers: answers)
         }
         appState.screen = .connectDevice
     }
+
+    static let estimatedGoalMonthsKey = "com.soma.app.estimatedGoalMonths"
 
     private static var defaultDateOfBirth: Date {
         Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()

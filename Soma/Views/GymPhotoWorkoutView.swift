@@ -472,6 +472,13 @@ struct GymPhotoWorkoutView: View {
                 resultPlan = nil
             }
             step = .result
+        } catch SupabaseError.serviceUnavailable {
+            // Distinct from the generic case below -- the wording pass's
+            // own OpenAI call failed (rate limit, exhausted credits, bad
+            // key), not something a retry can fix. See
+            // classifyGenerationError.
+            errorMessage = SupabaseError.serviceUnavailable.errorDescription
+            step = .confirmingEquipment
         } catch {
             errorMessage = "Couldn't build a workout right now. Try again."
             step = .confirmingEquipment
