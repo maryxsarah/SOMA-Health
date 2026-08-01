@@ -5,12 +5,18 @@
 // suggestions for future similar workouts, using Claude Haiku. Body:
 // { feedback: string, workoutTitle: string, bodyPart: string }.
 //
-// Uncached and not rate-limited like generate-workout-plan -- feedback is
-// occasional and the prompt/response here are small, so the cost profile
-// doesn't need the same "once a day" cap.
+// Uncached and not scaled by subscription tier like generate-workout-plan --
+// feedback is occasional and the prompt/response here are small, so the
+// cost profile doesn't need that same tiered "once a day" cap. Still gets a
+// generous flat daily ceiling (see FLAT_DAILY_LIMIT below) purely as
+// defense-in-depth against a single authenticated account scripting
+// repeated calls -- not a product-facing quota.
 
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
-import { requireUser } from "../_shared/clients.ts";
+import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
+import { checkFlatDailyLimit, logGeneration } from "../_shared/generationLimits.ts";
+
+const FLAT_DAILY_LIMIT = 20;
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -30,7 +36,7 @@ Deno.serve(async (req: Request) => {
   if (preflight) return preflight;
 
   try {
-    await requireUser(req);
+    const userId = await requireUser(req);
     const body = await req.json().catch(() => ({}));
     const feedback: string | undefined = body.feedback;
     const workoutTitle: string | undefined = body.workoutTitle;
@@ -40,11 +46,19 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "missing 'feedback', 'workoutTitle', or 'bodyPart'" }, 400);
     }
 
+    const supabase = serviceRoleClient();
+    const date = new Date().toISOString().slice(0, 10);
+    const allowed = await checkFlatDailyLimit(supabase, userId, date, "addon_suggestion", FLAT_DAILY_LIMIT);
+    if (!allowed) {
+      return jsonResponse({ error: "Too many requests today. Please try again tomorrow." }, 429);
+    }
+
     const prompt = `A fitness app user just finished "${workoutTitle}" (target: ${bodyPart}) and left this feedback: "${feedback}"
 
 Based on this feedback, suggest exactly 3 concrete, specific add-ons the app could include in future similar workouts -- each one a short phrase (under 10 words) naming a specific exercise, warm-up item, or adjustment, not vague advice. If the feedback already names something specific (e.g. a particular warm-up), include a version of it plus 2 closely related, fitting variations -- don't suggest something unrelated to what they said.`;
 
     const suggestions = await callClaude(prompt);
+    await logGeneration(supabase, userId, date, "addon_suggestion");
     return jsonResponse({ suggestions });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -36,9 +36,33 @@ export async function logGeneration(
   supabase: SupabaseClient,
   userId: string,
   date: string,
-  source: "suggestion" | "gym_photo",
+  source: "suggestion" | "gym_photo" | "addon_suggestion",
 ): Promise<void> {
   await supabase.from("ai_generation_log").insert({ user_id: userId, date, source });
+}
+
+/// A flat (non-tiered) daily cap, for endpoints that don't need
+/// generate-workout-plan's subscription-tier-scaled limit -- defense-in-
+/// depth against a single authenticated account scripting repeated calls,
+/// not a product-facing quota. Same ai_generation_log table, a different
+/// `source` value per endpoint so caps don't interfere with each other.
+export async function checkFlatDailyLimit(
+  supabase: SupabaseClient,
+  userId: string,
+  date: string,
+  source: string,
+  limit: number,
+): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("ai_generation_log")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("date", date)
+    .eq("source", source);
+  if (error) {
+    throw new Error(`could not read ai_generation_log: ${error.message}`);
+  }
+  return (count ?? 0) < limit;
 }
 
 export const GENERATION_LIMIT_MESSAGE =
