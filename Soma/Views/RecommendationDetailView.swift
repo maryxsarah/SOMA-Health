@@ -197,7 +197,7 @@ struct RecommendationDetailView: View {
                             .padding(.top, 8)
                         }
                     } else if isLoadingAIPlan {
-                        GenerationProgressView(message: "Building your plan…", estimatedSeconds: 8)
+                        GenerationProgressView(estimatedSeconds: 8)
                             .padding(.top, 4)
                     } else {
                         if let aiPlanError {

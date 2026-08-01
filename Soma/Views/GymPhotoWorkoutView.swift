@@ -59,11 +59,19 @@ struct GymPhotoWorkoutView: View {
                             case .cameraBlocked:
                                 cameraBlockedContent
                             case .analyzing:
-                                loadingContent(text: "Looking at your photo…")
+                                loadingContent(stages: [
+                                    "Looking at your photo…",
+                                    "Identifying equipment…",
+                                    "Checking what's usable…",
+                                ])
                             case .confirmingEquipment:
                                 confirmingEquipmentContent
                             case .generating:
-                                loadingContent(text: "Building your workout…")
+                                loadingContent(stages: [
+                                    "Matching a workout to your setup…",
+                                    "Selecting exercises…",
+                                    "Writing your instructions…",
+                                ])
                             case .result:
                                 EmptyView()
                             }
@@ -213,8 +221,8 @@ struct GymPhotoWorkoutView: View {
             : ["Open the Settings app", "Scroll down and tap Soma", "Turn on Camera"]
     }
 
-    private func loadingContent(text: String) -> some View {
-        GenerationProgressView(message: text, estimatedSeconds: 7)
+    private func loadingContent(stages: [String]) -> some View {
+        GenerationProgressView(stages: stages, estimatedSeconds: 7)
             .padding(.horizontal, 32)
             .padding(.top, 60)
     }
