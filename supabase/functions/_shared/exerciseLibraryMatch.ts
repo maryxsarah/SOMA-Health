@@ -70,6 +70,33 @@ const MAIN_CANDIDATE_LIMIT = 70;
 const STRETCH_CANDIDATE_LIMIT = 20;
 const FALLBACK_LIMIT = 70;
 
+/// Library `equipment` values the user's profile tags actually support.
+/// "body only" is ALWAYS included (everyone has their own bodyweight), and
+/// an empty/unmapped tag list resolves to just that -- the prompt already
+/// tells the model such a user is "no equipment (bodyweight only)", so
+/// handing it an unfiltered catalog contradicted the prompt and produced
+/// EZ-bar picks for floor-only users.
+export function resolveLibraryEquipment(equipment: string[]): string[] {
+  const mapped = equipment.flatMap((tag) => EQUIPMENT_TAG_TO_LIBRARY_EQUIPMENT[tag] ?? []);
+  return Array.from(new Set(["body only", ...mapped]));
+}
+
+/// Library `level` values the user's experience actually supports --
+/// keeps expert-only movements (rolling flyes, muscle-ups) out of the
+/// vocabulary entirely for users who can't safely perform them, instead
+/// of trusting the prompt's experience paragraph to steer the pick.
+/// Unknown/absent experience defaults to moderate, same as buildPrompt.
+export function resolveLibraryLevels(experienceLevel: string | null): string[] {
+  switch (experienceLevel) {
+    case "newbie":
+      return ["beginner"];
+    case "advanced":
+      return ["beginner", "intermediate", "expert"];
+    default:
+      return ["beginner", "intermediate"];
+  }
+}
+
 /// Returns a bounded, relevant list of real exercise names -- always
 /// non-empty (falls back progressively broader rather than ever handing
 /// back an empty enum, which would make generation impossible). Includes
@@ -81,43 +108,61 @@ export async function fetchCandidateExerciseNames(
   bodyPart: string,
   equipment: string[],
   excludedKeywords: string[],
+  experienceLevel: string | null = null,
 ): Promise<string[]> {
   const muscles = BODY_PART_TO_MUSCLES[bodyPart] ?? [];
-  const equipmentValues = Array.from(
-    new Set(equipment.flatMap((tag) => EQUIPMENT_TAG_TO_LIBRARY_EQUIPMENT[tag] ?? [])),
-  );
+  const equipmentValues = resolveLibraryEquipment(equipment);
+  const levelValues = resolveLibraryLevels(experienceLevel);
 
   let mainNames: string[] = [];
   if (bodyPart !== "cardio" && bodyPart !== "recovery") {
-    let query = supabase.from("exercise_library").select("name").limit(MAIN_CANDIDATE_LIMIT);
+    let query = supabase
+      .from("exercise_library")
+      .select("name")
+      .in("equipment", equipmentValues)
+      .in("level", levelValues)
+      .limit(MAIN_CANDIDATE_LIMIT);
     if (muscles.length > 0) query = query.overlaps("primary_muscles", muscles);
-    if (equipmentValues.length > 0) query = query.in("equipment", equipmentValues);
     const { data } = await query;
     // deno-lint-ignore no-explicit-any
     mainNames = (data ?? []).map((r: any) => r.name);
 
-    // Progressively broaden rather than ever returning an empty candidate
-    // list for an unusual body-part/equipment combination.
-    if (mainNames.length === 0 && muscles.length > 0) {
-      const { data: byMuscleOnly } = await supabase
+    // Progressively broaden, but never past the equipment or level
+    // filters: an exercise the user has no equipment for -- or can't
+    // safely perform -- is wrong no matter how well its muscles match
+    // (the "Bodyweight Flyes"-on-EZ-bars bug).
+    if (mainNames.length === 0) {
+      const { data: byEquipmentOnly } = await supabase
         .from("exercise_library")
         .select("name")
-        .overlaps("primary_muscles", muscles)
-        .limit(MAIN_CANDIDATE_LIMIT);
+        .eq("category", "strength")
+        .in("equipment", equipmentValues)
+        .in("level", levelValues)
+        .limit(FALLBACK_LIMIT);
       // deno-lint-ignore no-explicit-any
-      mainNames = (byMuscleOnly ?? []).map((r: any) => r.name);
+      mainNames = (byEquipmentOnly ?? []).map((r: any) => r.name);
     }
     if (mainNames.length === 0) {
+      // Last resort so the enum is never empty -- beginner bodyweight
+      // work is the one thing every user can safely be handed.
       const { data: broadFallback } = await supabase
         .from("exercise_library")
         .select("name")
         .eq("category", "strength")
+        .eq("equipment", "body only")
+        .eq("level", "beginner")
         .limit(FALLBACK_LIMIT);
       // deno-lint-ignore no-explicit-any
       mainNames = (broadFallback ?? []).map((r: any) => r.name);
     }
   } else if (bodyPart === "cardio") {
-    const { data } = await supabase.from("exercise_library").select("name").eq("category", "cardio").limit(FALLBACK_LIMIT);
+    const { data } = await supabase
+      .from("exercise_library")
+      .select("name")
+      .eq("category", "cardio")
+      .in("equipment", equipmentValues)
+      .in("level", levelValues)
+      .limit(FALLBACK_LIMIT);
     // deno-lint-ignore no-explicit-any
     mainNames = (data ?? []).map((r: any) => r.name);
   }
@@ -126,6 +171,8 @@ export async function fetchCandidateExerciseNames(
     .from("exercise_library")
     .select("name")
     .eq("category", "stretching")
+    .in("equipment", equipmentValues)
+    .in("level", levelValues)
     .limit(STRETCH_CANDIDATE_LIMIT);
   // deno-lint-ignore no-explicit-any
   const stretchNames: string[] = (stretchData ?? []).map((r: any) => r.name);

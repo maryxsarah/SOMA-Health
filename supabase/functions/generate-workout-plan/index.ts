@@ -385,6 +385,7 @@ Deno.serve(async (req: Request) => {
       resolvedBodyPart,
       (userRow as UserRow | null)?.equipment ?? [],
       [...finisherExcludedKeywords, ...pregnancyExcludedKeywords],
+      (userRow as UserRow | null)?.experience_level ?? null,
     );
     const workoutSchema = buildWorkoutSchema(candidateExerciseNames);
 
@@ -392,13 +393,21 @@ Deno.serve(async (req: Request) => {
     let actualDurationMinutes = computeTotalDuration(plan);
 
     // One bounded retry when a target was given and the total misses by
-    // more than the ~2 min tolerance -- never a silent claim that a
-    // mismatched total matches the label. If the retry doesn't land closer,
-    // the response still carries the true (mismatched) total rather than
-    // pretending precision the model didn't produce.
+    // more than the tolerance -- never a silent claim that a mismatched
+    // total matches the label. If the retry doesn't land closer, the
+    // response still carries the true (mismatched) total rather than
+    // pretending precision the model didn't produce. Tolerance is
+    // proportional (min 5 min): the old flat ±2 on a single-valued 50-min
+    // target forced a second serial LLM call on almost every fresh
+    // generation, which is what pushed first attempts past the client's
+    // request timeout while retries were served instantly from cache.
+    const durationTolerance = targetDurationRange
+      ? Math.max(5, Math.round((targetDurationRange.min + targetDurationRange.max) / 2 * 0.15))
+      : 0;
     if (
       targetDurationRange &&
-      (actualDurationMinutes < targetDurationRange.min - 2 || actualDurationMinutes > targetDurationRange.max + 2)
+      (actualDurationMinutes < targetDurationRange.min - durationTolerance ||
+        actualDurationMinutes > targetDurationRange.max + durationTolerance)
     ) {
       const gapPrompt = `${prompt}\n\nYour previous attempt totaled ~${actualDurationMinutes} min but the target is ${targetDurationRange.min}-${targetDurationRange.max} min -- ${actualDurationMinutes < targetDurationRange.min ? "add 1-2 more working sets or an extra exercise to close the gap" : "trim a set or exercise to fit the target"}, don't just pad or shrink rest periods.`;
       const retryPlan = await callClaude(gapPrompt, workoutSchema);
@@ -634,12 +643,16 @@ function buildPrompt(
   // decideFinisher() before this prompt was built (category eligibility,
   // readiness, injury contraindications, and yesterday's logged split).
   // The LLM only elaborates the chosen concept into concrete exercises.
+  // The catalog's example movements name gear freely (barbells, rowing) --
+  // this constraint re-anchors the elaboration to what the user owns.
+  const finisherEquipmentConstraint =
+    ` The finisher's movements must use ONLY the user's available equipment listed above -- if they have none, every finisher movement must be strictly bodyweight-only (no bars, no implements), even if the concept's examples mention gear. Keep every finisher movement's difficulty appropriate to the user's training experience described above -- for a newbie that means simple, low-skill movements only.`;
   const finisherInstruction = !finisherDecision.include
     ? `Do NOT include a finisher block today. On a "${category}" day, every block should stay gentle -- no high-effort closer of any kind.`
     : finisherDecision.exceptional && finisherDecision.definition
-    ? `Include exactly one finisher as the LAST block, named "Block N - Optional Finisher" (is_finisher: true, every other block is_finisher: false). Your recovery data is exceptionally good today, so make it genuinely max-effort: ${finisherDecision.definition.durationMinutesRange[1]} min, ${finisherDecision.definition.rpeTarget.replace("RPE 8-9", "RPE 9-10").replace("RPE 8", "RPE 9-10")}, built around this concept -- ${finisherDecision.definition.description} Frame it to the user explicitly as "your recovery data is exceptional today, so this finisher pushes harder than usual."`
+    ? `Include exactly one finisher as the LAST block, named "Block N - Optional Finisher" (is_finisher: true, every other block is_finisher: false). Your recovery data is exceptionally good today, so make it genuinely max-effort: ${finisherDecision.definition.durationMinutesRange[1]} min, ${finisherDecision.definition.rpeTarget.replace("RPE 8-9", "RPE 9-10").replace("RPE 8", "RPE 9-10")}, built around this concept -- ${finisherDecision.definition.description} Frame it to the user explicitly as "your recovery data is exceptional today, so this finisher pushes harder than usual."${finisherEquipmentConstraint}`
     : finisherDecision.definition
-    ? `Include exactly one finisher as the LAST block, named "Block N - Optional Finisher" (is_finisher: true, every other block is_finisher: false), clearly optional and skippable without any penalty to the rest of the session -- state that plainly in its instructions. ${finisherDecision.definition.durationMinutesRange[0]}-${finisherDecision.definition.durationMinutesRange[1]} min, built around this concept -- ${finisherDecision.definition.description} Scale effort to a solid but not maximal ${finisherDecision.definition.rpeTarget}.`
+    ? `Include exactly one finisher as the LAST block, named "Block N - Optional Finisher" (is_finisher: true, every other block is_finisher: false), clearly optional and skippable without any penalty to the rest of the session -- state that plainly in its instructions. ${finisherDecision.definition.durationMinutesRange[0]}-${finisherDecision.definition.durationMinutesRange[1]} min, built around this concept -- ${finisherDecision.definition.description} Scale effort to a solid but not maximal ${finisherDecision.definition.rpeTarget}.${finisherEquipmentConstraint}`
     : `Do NOT include a finisher block today.`;
 
   const substitutionLine = wasSubstituted
