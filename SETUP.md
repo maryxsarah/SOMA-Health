@@ -143,6 +143,13 @@ xcconfig treats `//` as a comment, see the file's own comment),
 `SUPABASE_ANON_KEY`, `WHOOP_CLIENT_ID`, `OURA_CLIENT_ID`, `POSTHOG_API_KEY`
 (step 6c below), `POSTHOG_HOST` (bare host, same `//` reason).
 
+**Analytics only reports from Release builds** (TestFlight / App Store).
+Local Debug runs from Xcode initialize neither Firebase nor PostHog and
+send no events (`#if !DEBUG` in `AppDelegate` + `AnalyticsManager`) -- so
+dev sessions never pollute the dashboards. To verify analytics locally
+(e.g. Firebase DebugView), run the Release configuration: Edit Scheme →
+Run → Info → Build Configuration → Release.
+
 ## 6b. Google Analytics for Firebase (GA4)
 
 1. Place your downloaded `GoogleService-Info.plist` at

@@ -101,6 +101,32 @@ final class HealthKitManager {
         }
     }
 
+    /// Steps taken so far today -- feeds RecommendationDetailView's step
+    /// tracker pill (position vs today's target), never the decision engine.
+    func fetchTodaysSteps() async -> Double? {
+        guard Self.isAvailable, let stepType = HKObjectType.quantityType(forIdentifier: .stepCount) else {
+            return nil
+        }
+        let now = Date()
+        let startOfDay = Calendar.current.startOfDay(for: now)
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: stepType,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, _ in
+                guard let sum = statistics?.sumQuantity() else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: sum.doubleValue(for: .count()))
+            }
+            store.execute(query)
+        }
+    }
+
     /// Today's workout sessions actually recorded in Apple Health -- feeds
     /// Home's workout timeline alongside the server-fetched Oura/Whoop
     /// sessions (HealthKit can only be read on-device, never from a

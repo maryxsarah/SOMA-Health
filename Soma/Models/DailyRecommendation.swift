@@ -26,6 +26,17 @@ enum RecommendationCategory: String, Codable {
         }
     }
 
+    /// Numeric form of `stepTarget` (its range's upper bound) -- drives the
+    /// step tracker pill's progress math. Keep the two in sync.
+    var stepTargetCount: Int {
+        switch self {
+        case .pushHard: 10000
+        case .moderate: 9000
+        case .light: 6000
+        case .rest: 3000
+        }
+    }
+
     /// Fixed, specific suggestions per category -- concrete activity +
     /// duration, no AI generation, same pattern as the existing 4 message
     /// templates. Each carries equipment/impact/body-part tags so the
@@ -248,6 +259,24 @@ enum RecommendationReason: String, Codable {
         case .healthkitLow: "Your HRV was well below your recent baseline, or sleep was short -- your body needs to ease up today."
         case .insufficientData: "Not enough health data yet to build a personalized read -- Soma is defaulting to a cautious moderate session while your baseline builds."
         case .unknown: "Today's recommendation is based on the data currently available."
+        }
+    }
+
+    /// explanationTemplate with the real metric value substituted in --
+    /// the ONLY way templates should reach the screen, since rendering
+    /// them raw shows a literal "%@" to the user.
+    func explanation(snapshots: [DailySnapshotRow]) -> String {
+        func formatted(_ value: Double?) -> String {
+            guard let value else { return "—" }
+            return String(Int(value.rounded()))
+        }
+        switch self {
+        case .whoopHigh, .whoopMedium, .whoopLow:
+            return String(format: explanationTemplate, formatted(snapshots.first(where: { $0.source == "whoop" })?.recoveryScore))
+        case .ouraHigh, .ouraMediumHigh, .ouraMedium, .ouraLow:
+            return String(format: explanationTemplate, formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore))
+        case .healthkitHigh, .healthkitMedium, .healthkitLow, .insufficientData, .unknown:
+            return explanationTemplate
         }
     }
 

@@ -5,7 +5,6 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject private var appState: AppState
 
-    @State private var orbState: OrbState = .idle
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showDetail = false
@@ -29,55 +28,48 @@ struct HomeView: View {
     /// source = gym_photo), not workout completion -- see
     /// fetchGymPhotoScanDates's own doc comment.
     @State private var scanStreak = 0
+    /// Raw scan dates -- drives the scan row's `locked` state (today's scan
+    /// already used), per guide 03's three-state rule.
+    @State private var scanDates: Set<String> = []
+    /// Profile's weekly session target -- the week card's progress bar and
+    /// streak pill must agree with Profile (guide 03, SELF-CHECK).
+    @State private var weeklyTarget: Int?
+    /// Today's snapshot rows -- feeds the readiness disclosure's inputs line.
+    @State private var todaysSnapshots: [DailySnapshotRow] = []
 
     var body: some View {
         ScrollView {
-            // Spacing/orb size are deliberately tighter than other screens
-            // that reuse OrbView (e.g. onboarding) -- Home has more content
-            // below the orb (recommendation card, CTA, today's-workout card)
-            // that needs to fit on a standard-height device without
-            // scrolling. ScrollView stays in place as a fallback for smaller
-            // devices and larger Dynamic Type sizes, not because scrolling
-            // here is expected in the common case.
-            VStack(spacing: 14) {
+            // Guide 03 order: nav pill → greeting → week card → readiness
+            // card → scan row. The orb is gone (22% of the screen carrying
+            // no information); raw metric tiles live in the dashboard.
+            VStack(spacing: 12) {
                 topRow
-                    .padding(.horizontal, 20)
 
-                CalendarStripView(
-                    recommendations: recentRecommendations,
-                    completedDates: completedDates,
-                    selectedDate: selectedDay,
-                    onSelectDay: { selectedDay = $0 }
-                )
-                .padding(.horizontal, 20)
+                greetingBlock
 
-                OrbView(state: orbState, size: 130)
-
-                scanSetupCard
-                    .padding(.horizontal, 20)
+                weekCard
 
                 Group {
                     if let recommendation = appState.currentRecommendation {
-                        recommendationCard(recommendation)
+                        readinessCard(recommendation)
                     } else {
                         needsDataCard
                     }
                 }
-                .padding(.horizontal, 20)
 
                 if let todaysWorkoutLog {
                     todaysWorkoutCard(todaysWorkoutLog)
-                        .padding(.horizontal, 20)
                 } else if let todaysAIPlan, todaysAIPlan.addedToPlan {
                     aiGeneratedWorkoutCard(todaysAIPlan)
-                        .padding(.horizontal, 20)
                 }
+
+                scanRow
 
                 if !timelineEntries.isEmpty {
                     timelineCard
-                        .padding(.horizontal, 20)
                 }
             }
+            .padding(.horizontal, 20)
             .frame(maxWidth: .infinity)
             .padding(.bottom, 40)
         }
@@ -247,68 +239,216 @@ struct HomeView: View {
         Set(CalendarStripView.lastDayStrings()).intersection(completedDates).count
     }
 
-    /// Restyled gym-photo CTA as a card (title + real scan streak) rather
-    /// than a plain filled button -- same underlying action and disable
-    /// logic as before (one AI plan committed per day).
-    private var scanSetupCard: some View {
-        Button {
-            requestDetailAccess {
-                AnalyticsManager.shared.featureUsed(name: "gym_photo_workout")
-                showGymPhotoFlow = true
-            }
-        } label: {
-            CardView {
-                HStack(spacing: 12) {
-                    Image(systemName: "camera.fill")
-                        .font(.title3)
-                        .foregroundStyle(Theme.pillFill)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Scan today's setup")
-                            .font(.body.bold())
-                        Text(scanStreak > 0 ? "\(scanStreak)-day scan streak" : "Take a photo of your gym or equipment")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.secondary)
-                }
-            }
+    // MARK: - Greeting (guide 03: "where am I")
+
+    private var greetingBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(Self.longDateString())
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink3)
+            Text(Self.timeOfDayGreeting())
+                .font(Theme.display)
         }
-        .buttonStyle(.plain)
-        .disabled(todaysWorkoutLog != nil || todaysAIPlan?.addedToPlan == true)
-        .opacity(todaysWorkoutLog != nil || todaysAIPlan?.addedToPlan == true ? 0.5 : 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func recommendationCard(_ recommendation: DailyRecommendation) -> some View {
-        Button {
-            requestDetailAccess { showDetail = true }
-        } label: {
-            CardView {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(recommendation.category.displayTitle)
-                            .font(Theme.display)
-                        // The only screen a day-1 user is guaranteed to see --
-                        // without this, a zero-signal "moderate" reads exactly
-                        // like a real one until they tap through to Detail.
-                        if recommendation.reason == .insufficientData {
-                            Text("Building your baseline")
-                                .font(.caption.bold())
-                                .foregroundStyle(.orange)
-                        }
-                        Text(recommendation.message)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
+    // MARK: - Week card (guide 03: strip + weekly progress + streak pill)
+
+    private var weekCard: some View {
+        CardView {
+            CalendarStripView(
+                recommendations: recentRecommendations,
+                completedDates: completedDates,
+                selectedDate: selectedDay,
+                onSelectDay: { selectedDay = $0 }
+            )
+
+            Divider().overlay(SomaTokens.hairline)
+
+            weeklyProgress
+        }
+    }
+
+    /// "4 of 5 sessions this week" + a target-count segment bar + "1 to go"
+    /// pill. Filled segments must equal filled hearts, and both must equal
+    /// Profile's weekly target -- so both derive from the same
+    /// completedDates set the strip renders (SELF-CHECK, guide 03).
+    private var weeklyProgress: some View {
+        let target = max(weeklyTarget ?? 5, 1)
+        let done = min(doneThisWeekCount, target)
+        let toGo = target - done
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("\(doneThisWeekCount) of \(target) sessions this week")
+                    .font(.system(size: 13.5, weight: .semibold))
+                Spacer()
+                if toGo > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "heart")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("\(toGo) to go")
+                            .font(.system(size: 11.5, weight: .semibold))
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 6)
+                    .foregroundStyle(SomaTokens.heart)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(SomaTokens.heartSoft))
+                }
+            }
+            HStack(spacing: 5) {
+                ForEach(0..<target, id: \.self) { index in
+                    Capsule()
+                        .fill(index < done ? SomaTokens.heart : SomaTokens.surface4)
+                        .frame(height: 6)
                 }
             }
         }
-        .buttonStyle(.plain)
+    }
+
+    // MARK: - Readiness card (guide 03: category + one line + disclosure + CTA)
+
+    private func readinessCard(_ recommendation: DailyRecommendation) -> some View {
+        CardView {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(recommendation.category.displayTitle)
+                        .font(.system(size: 32, design: .serif).italic())
+                    // The only screen a day-1 user is guaranteed to see --
+                    // without this, a zero-signal "moderate" reads exactly
+                    // like a real one until they tap through to Detail.
+                    if recommendation.reason == .insufficientData {
+                        Text("Building your baseline")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
+                    }
+                    Text(recommendation.message)
+                        .font(.system(size: 14))
+                        .foregroundStyle(SomaTokens.ink2)
+                        .lineLimit(2)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 8) {
+                    Text("TODAY")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundStyle(SomaTokens.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(SomaTokens.accentSoft))
+                }
+            }
+
+            SomaDisclosure {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(recommendation.reason.explanation(snapshots: todaysSnapshots))
+                    if !readinessInputs.isEmpty {
+                        Text(readinessInputs.joined(separator: " · "))
+                            .font(.system(size: 12.5, weight: .semibold))
+                    }
+                }
+            }
+
+            Divider().overlay(SomaTokens.hairline)
+
+            SomaButton(title: "Start workout", size: .lg, variant: .primary) {
+                requestDetailAccess { showDetail = true }
+            }
+        }
+    }
+
+    /// The real inputs behind today's read -- only what a source actually
+    /// reported, never fabricated (guide 09's Home disclosure row).
+    private var readinessInputs: [String] {
+        var parts: [String] = []
+        if let sleep = todaysSnapshots.compactMap(\.sleepHours).first {
+            parts.append("Sleep \(String(format: "%.1f", sleep)) h")
+        }
+        if let hrv = todaysSnapshots.compactMap(\.hrvMs).first {
+            parts.append("HRV \(Int(hrv.rounded())) ms")
+        }
+        if let rhr = todaysSnapshots.compactMap(\.restingHr).first {
+            parts.append("Resting HR \(Int(rhr.rounded())) bpm")
+        }
+        return parts
+    }
+
+    // MARK: - Scan row (guide 03: three states, never greyed-out-and-inert)
+
+    private enum ScanState { case available, locked, hidden }
+
+    private var scanState: ScanState {
+        // A committed or completed workout removes the row entirely.
+        if todaysWorkoutLog != nil || todaysAIPlan?.addedToPlan == true { return .hidden }
+        if scanDates.contains(Self.todayDateString()) { return .locked }
+        return .available
+    }
+
+    @ViewBuilder
+    private var scanRow: some View {
+        switch scanState {
+        case .hidden:
+            EmptyView()
+        case .available:
+            Button {
+                requestDetailAccess {
+                    AnalyticsManager.shared.featureUsed(name: "gym_photo_workout")
+                    showGymPhotoFlow = true
+                }
+            } label: {
+                scanRowBody(
+                    plate: SomaTokens.accentSoft, icon: "camera.fill", iconColor: SomaTokens.accent,
+                    title: "Somewhere else today?",
+                    subtitle: scanStreak > 1
+                        ? "Scan the gym — we rebuild the plan · \(scanStreak)-day streak"
+                        : "Scan the gym — we rebuild the plan"
+                ) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+            }
+            .buttonStyle(.plain)
+        case .locked:
+            // The locked copy says what happened before it asks for money.
+            Button {
+                Superwall.shared.register(placement: "view_premium")
+            } label: {
+                scanRowBody(
+                    plate: SomaTokens.warnSoft, icon: "lock.fill", iconColor: SomaTokens.warn,
+                    title: "Today's scan is used",
+                    subtitle: "Upgrade for unlimited scans and workouts"
+                ) {
+                    Text("PRO")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(SomaTokens.accentDeep))
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func scanRowBody(plate: Color, icon: String, iconColor: Color, title: String, subtitle: String, @ViewBuilder trailing: () -> some View) -> some View {
+        CardView {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 36, height: 36)
+                    .background(RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous).fill(plate))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(subtitle)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(SomaTokens.ink3)
+                }
+                Spacer()
+                trailing()
+            }
+        }
     }
 
     private func todaysWorkoutCard(_ log: WorkoutLogEntry) -> some View {
@@ -456,8 +596,31 @@ struct HomeView: View {
     /// `completedDates` (see `doneThisWeekCount`), the same data the
     /// calendar strip itself renders.
     private func loadWeeklyProgressAndStreak() async {
-        let scanDates = (try? await SupabaseClient.shared.fetchGymPhotoScanDates()) ?? []
+        async let scanDatesFetch: Set<String> = (try? await SupabaseClient.shared.fetchGymPhotoScanDates()) ?? []
+        async let profileFetch: UserProfile? = {
+            guard let userId = SupabaseClient.shared.currentUserID else { return nil }
+            return try? await SupabaseClient.shared.fetchProfile(id: userId)
+        }()
+        async let snapshotsFetch: [DailySnapshotRow] = (try? await SupabaseClient.shared.fetchTodaysSnapshots(date: Self.todayDateString())) ?? []
+
+        scanDates = await scanDatesFetch
         scanStreak = Self.streak(from: scanDates)
+        weeklyTarget = await profileFetch?.weeklySessionTarget
+        todaysSnapshots = await snapshotsFetch
+    }
+
+    private static func longDateString() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, d MMMM"
+        return formatter.string(from: Date())
+    }
+
+    private static func timeOfDayGreeting() -> String {
+        switch Calendar.current.component(.hour, from: Date()) {
+        case 5..<12: "Good morning"
+        case 12..<18: "Good afternoon"
+        default: "Good evening"
+        }
     }
 
     /// Consecutive days up to and including today present in `dates`.
@@ -525,18 +688,10 @@ struct HomeView: View {
             )
             appState.currentRecommendation = recommendation
             NotificationManager.shared.markSentToday()
-            triggerNewMessagePulse()
         } catch {
             // Covers "expired wearable token" / "zero connected devices" --
             // show a clear message instead of crashing.
             errorMessage = "Couldn't fetch today's data. Reconnect a device or try again."
-        }
-    }
-
-    private func triggerNewMessagePulse() {
-        orbState = .newMessage
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            orbState = .idle
         }
     }
 

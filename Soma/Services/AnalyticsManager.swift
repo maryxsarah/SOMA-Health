@@ -104,7 +104,11 @@ final class AnalyticsManager {
     private static let hasSubmittedFirstPromptKey = "com.soma.analytics.hasSubmittedFirstPrompt"
 
     private func log(_ event: Event, parameters: [String: Any]? = nil) {
+        // Debug builds never report analytics (SDKs aren't even configured
+        // there, see AppDelegate) -- skip so the console stays quiet too.
+        #if !DEBUG
         Analytics.logEvent(event.rawValue, parameters: parameters)
         PostHogSDK.shared.capture(event.rawValue, properties: parameters)
+        #endif
     }
 }

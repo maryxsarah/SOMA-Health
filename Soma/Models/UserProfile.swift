@@ -132,6 +132,10 @@ struct UserProfile: Codable, Equatable {
     /// not through the general profile save() flow, hence the defaults.
     var goalBodyPhotoPath: String? = nil
     var currentBodyPhotoPath: String? = nil
+    /// Read-only here (collected at onboarding; updateProfile never writes
+    /// them) -- feeds the dashboard's Body section.
+    var weightKg: Double? = nil
+    var desiredWeightKg: Double? = nil
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
@@ -150,6 +154,8 @@ struct UserProfile: Codable, Equatable {
         case weeklySessionTarget = "weekly_session_target"
         case goalBodyPhotoPath = "goal_body_photo_path"
         case currentBodyPhotoPath = "current_body_photo_path"
+        case weightKg = "weight_kg"
+        case desiredWeightKg = "desired_weight_kg"
     }
 
     static let empty = UserProfile(

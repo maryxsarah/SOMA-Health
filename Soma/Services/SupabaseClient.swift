@@ -258,7 +258,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,weight_kg,desired_weight_kg&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -500,7 +500,13 @@ final class SupabaseClient {
     /// the pointer column.
     func deleteBodyPhoto(kind: BodyPhotoKind, path: String) async throws {
         guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
-        let request = try await authorizedRequest(path: "storage/v1/object/body-photos/\(path)", method: "DELETE")
+        // Built manually: authorizedRequest declares Content-Type json with
+        // no body, which storage-api rejects outright (400) on DELETE.
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1/object/body-photos/\(path)")!)
+        request.httpMethod = "DELETE"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
 
@@ -516,9 +522,26 @@ final class SupabaseClient {
         let column = kind == .goal ? "goal_body_photo_path" : "current_body_photo_path"
         var clearRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         clearRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
-        clearRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, column: NSNull()])
+        // Emphasis tags were derived from the deleted photo -- a plan must
+        // never keep steering toward a photo the user removed.
+        clearRequest.httpBody = try JSONSerialization.data(withJSONObject: [
+            "id": userId, column: NSNull(), "body_photo_emphasis_tags": NSNull(),
+        ])
         let (d2, r2) = try await urlSession.data(for: clearRequest)
         try Self.assertSuccess(r2, data: d2)
+    }
+
+    /// Re-points the "latest" pointer column at an older history entry --
+    /// used after deleting the pinned photo to promote the previous upload
+    /// instead of leaving the slot empty while history still exists.
+    func pinBodyPhoto(kind: BodyPhotoKind, path: String) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let column = kind == .goal ? "goal_body_photo_path" : "current_body_photo_path"
+        var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, column: path])
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
     }
 
     // MARK: - daily_recommendation
@@ -908,7 +931,7 @@ final class SupabaseClient {
     /// checking a workout (e.g. "sore shoulder today") -- folded into the
     /// generation prompt for this call only, not persisted.
     func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, notes: String? = nil, targetDurationMinutes: ClosedRange<Int>? = nil) async throws -> AIWorkoutPlan {
-        var request = try await authorizedRequest(path: "functions/v1/generate-workout-plan", method: "POST")
+        var request = try await authorizedRequest(path: "functions/v1/generate-workout-plan", method: "POST", timeout: 180)
         var body: [String: Any] = [
             "date": date,
             "selection": ["title": selectedTitle, "bodyPart": selectedBodyPart],
@@ -948,7 +971,7 @@ final class SupabaseClient {
     /// resized/compressed (~1024px longest edge, JPEG quality ~0.6) by the
     /// caller before this is invoked.
     func analyzeGymPhoto(imageData: Data) async throws -> GymPhotoEquipmentResult {
-        var request = try await authorizedRequest(path: "functions/v1/analyze-gym-photo", method: "POST")
+        var request = try await authorizedRequest(path: "functions/v1/analyze-gym-photo", method: "POST", timeout: 120)
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "imageBase64": imageData.base64EncodedString(),
         ])
@@ -964,7 +987,7 @@ final class SupabaseClient {
     /// today's already-computed category and readiness data; that
     /// safety-relevant decision is never trusted from the client.
     func generateGymWorkout(date: String, confirmedEquipment: [String]) async throws -> GymWorkoutOutcome {
-        var request = try await authorizedRequest(path: "functions/v1/generate-gym-workout", method: "POST")
+        var request = try await authorizedRequest(path: "functions/v1/generate-gym-workout", method: "POST", timeout: 180)
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "date": date,
             "confirmedEquipment": confirmedEquipment,
@@ -1121,13 +1144,19 @@ final class SupabaseClient {
 
     // MARK: - Request helpers
 
-    private func authorizedRequest(path: String, method: String) async throws -> URLRequest {
+    /// `timeout` above the 60s URLSession default is for LLM-generation
+    /// endpoints only: a fresh generation (cold start + schema compilation
+    /// + up to two sequential model calls) can legitimately outlive 60s,
+    /// and cutting it off client-side while the server finishes and caches
+    /// is exactly the "fails first, works on retry" bug.
+    private func authorizedRequest(path: String, method: String, timeout: TimeInterval? = nil) async throws -> URLRequest {
         let token = try await validAccessToken()
         var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/\(path)")!)
         request.httpMethod = method
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let timeout { request.timeoutInterval = timeout }
         return request
     }
 
