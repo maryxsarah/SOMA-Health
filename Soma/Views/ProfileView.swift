@@ -182,15 +182,21 @@ struct ProfileView: View {
     private var nudges: [Nudge] {
         var items: [Nudge] = []
         if !appState.connectedProviders.contains(.appleHealth) {
-            items.append(Nudge(id: "health", text: "Add Apple Health"))
+            items.append(Nudge(id: "health", text: "add Apple Health"))
         }
-        if injuryTags.isEmpty {
-            items.append(Nudge(id: "injury", text: "confirm your injury"))
-        }
+        // No injury nudge: an empty injury list is a complete, valid
+        // answer ("None noted"), not an unfinished profile item.
         if weeklySessionTarget == nil {
             items.append(Nudge(id: "target", text: "set a weekly target"))
         }
         return items
+    }
+
+    /// Uppercases only the first letter -- .capitalized would title-case
+    /// every word ("Add Apple Health And Confirm...").
+    private func sentenceCased(_ text: String) -> String {
+        guard let first = text.first else { return text }
+        return first.uppercased() + text.dropFirst()
     }
 
     private var completionNotice: some View {
@@ -201,7 +207,7 @@ struct ProfileView: View {
                 Text("\(nudges.count) to finish")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(SomaTokens.warn)
-                Text("\(nudges.map(\.text).joined(separator: " and ").capitalized(with: nil)) to sharpen suggestions.")
+                Text("\(sentenceCased(nudges.map(\.text).joined(separator: " and "))) to sharpen suggestions.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink2)
             }
@@ -596,6 +602,13 @@ struct ProfileView: View {
             Text("Optional -- helps personalize your plan toward your goal.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            // errorMessage otherwise only renders on the Account tab --
+            // a failed remove/upload here would look like a silent no-op.
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
             HStack(spacing: 16) {
                 bodyPhotoSlot(
                     title: "Goal body",
@@ -872,14 +885,27 @@ struct ProfileView: View {
         errorMessage = nil
         do {
             try await SupabaseClient.shared.deleteBodyPhoto(kind: kind, path: path)
+            // Promote the newest remaining upload so repeated Remove taps
+            // walk back through the whole history instead of stranding it.
+            let history = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: kind)) ?? []
+            let next = history.first
+            if let next {
+                try? await SupabaseClient.shared.pinBodyPhoto(kind: kind, path: next.storagePath)
+            }
+            let nextImage: UIImage? = if let next { await loadBodyPhoto(path: next.storagePath) } else { nil }
             if kind == .goal {
-                goalBodyPhotoImage = nil
-                goalBodyPhotoPath = nil
-                goalPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .goal)) ?? []
+                goalBodyPhotoImage = nextImage
+                goalBodyPhotoPath = next?.storagePath
+                goalPhotoHistory = history
             } else {
-                currentBodyPhotoImage = nil
-                currentBodyPhotoPath = nil
-                currentPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .current)) ?? []
+                currentBodyPhotoImage = nextImage
+                currentBodyPhotoPath = next?.storagePath
+                currentPhotoHistory = history
+            }
+            // The old analysis followed the deleted photo out; refresh it
+            // silently if a full pair still exists.
+            if goalBodyPhotoPath != nil, currentBodyPhotoPath != nil {
+                Task { try? await SupabaseClient.shared.analyzeBodyPhotos() }
             }
         } catch {
             errorMessage = "Couldn't remove that photo. Try again."

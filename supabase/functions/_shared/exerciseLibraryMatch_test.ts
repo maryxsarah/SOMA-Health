@@ -1,0 +1,165 @@
+// Run: deno test supabase/functions/
+//
+// Pins the equipment filtering of the candidate-name enum. The failure
+// mode this guards: a bodyweight-only user was handed an unfiltered
+// catalog (empty equipment used to mean "no filter"), so the model picked
+// "Bodyweight Flyes" -- an exercise whose name says bodyweight but whose
+// library equipment is 'e-z curl bar'.
+
+import { assert, assertEquals, assertFalse } from "jsr:@std/assert";
+import { fetchCandidateExerciseNames, resolveLibraryEquipment, resolveLibraryLevels } from "./exerciseLibraryMatch.ts";
+
+Deno.test("empty equipment resolves to body only, never no-filter", () => {
+  assertEquals(resolveLibraryEquipment([]), ["body only"]);
+});
+
+Deno.test("bodyweight_only resolves to body only without duplicates", () => {
+  assertEquals(resolveLibraryEquipment(["bodyweight_only"]), ["body only"]);
+});
+
+Deno.test("unmapped tags (bike, pool, other) fall back to body only", () => {
+  assertEquals(resolveLibraryEquipment(["bike", "pool", "other"]), ["body only"]);
+});
+
+Deno.test("gym unlocks its library values on top of body only", () => {
+  const values = resolveLibraryEquipment(["gym"]);
+  assert(values.includes("body only"));
+  assert(values.includes("barbell"));
+  assert(values.includes("e-z curl bar"));
+});
+
+Deno.test("newbie experience resolves to beginner-level movements only", () => {
+  assertEquals(resolveLibraryLevels("newbie"), ["beginner"]);
+});
+
+Deno.test("unknown or absent experience defaults to moderate (no expert)", () => {
+  assertEquals(resolveLibraryLevels(null), ["beginner", "intermediate"]);
+  assertEquals(resolveLibraryLevels("something_new"), ["beginner", "intermediate"]);
+});
+
+Deno.test("advanced experience unlocks expert movements", () => {
+  assert(resolveLibraryLevels("advanced").includes("expert"));
+});
+
+// --- fetchCandidateExerciseNames against a filtering mock client ---
+
+interface Row {
+  name: string;
+  category: string;
+  equipment: string;
+  primary_muscles: string[];
+  level: string;
+}
+
+/// Chainable thenable mimicking the small slice of postgrest-js the
+/// function uses -- filters actually apply, so these tests exercise real
+/// query semantics rather than just recording calls.
+class MockQuery {
+  #rows: Row[];
+  #limit = Infinity;
+  constructor(rows: Row[]) {
+    this.#rows = [...rows];
+  }
+  select(_cols: string) {
+    return this;
+  }
+  limit(n: number) {
+    this.#limit = n;
+    return this;
+  }
+  eq(col: keyof Row, value: unknown) {
+    this.#rows = this.#rows.filter((r) => r[col] === value);
+    return this;
+  }
+  in(col: keyof Row, values: unknown[]) {
+    this.#rows = this.#rows.filter((r) => values.includes(r[col]));
+    return this;
+  }
+  overlaps(col: keyof Row, values: string[]) {
+    this.#rows = this.#rows.filter((r) => (r[col] as string[]).some((v) => values.includes(v)));
+    return this;
+  }
+  then(resolve: (v: { data: Row[] }) => void) {
+    resolve({ data: this.#rows.slice(0, this.#limit) });
+  }
+}
+
+function mockSupabase(rows: Row[]) {
+  return { from: (_table: string) => new MockQuery(rows) };
+}
+
+const LIBRARY: Row[] = [
+  { name: "Bodyweight Flyes", category: "strength", equipment: "e-z curl bar", primary_muscles: ["chest"], level: "intermediate" },
+  { name: "Pushups", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "beginner" },
+  { name: "Barbell Bench Press", category: "strength", equipment: "barbell", primary_muscles: ["chest"], level: "beginner" },
+  { name: "One-Arm Push-Up", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "expert" },
+  { name: "Bodyweight Squat", category: "strength", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner" },
+  { name: "Behind Head Chest Stretch", category: "stretching", equipment: "body only", primary_muscles: ["chest"], level: "beginner" },
+  { name: "Exercise Ball Stretch", category: "stretching", equipment: "exercise ball", primary_muscles: ["chest"], level: "beginner" },
+  { name: "Running, Treadmill", category: "cardio", equipment: "machine", primary_muscles: ["quadriceps"], level: "beginner" },
+  { name: "Jumping Jacks", category: "cardio", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner" },
+];
+
+Deno.test("REGRESSION: floor-only user never sees the EZ-bar 'Bodyweight Flyes'", async () => {
+  for (const equipment of [[], ["bodyweight_only"]]) {
+    const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "upper_body", equipment, []);
+    assertFalse(names.includes("Bodyweight Flyes"), `leaked for equipment=${JSON.stringify(equipment)}`);
+    assertFalse(names.includes("Barbell Bench Press"));
+    assert(names.includes("Pushups"));
+  }
+});
+
+Deno.test("gym user keeps the full equipment-matched catalog", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "upper_body", ["gym"], []);
+  assert(names.includes("Bodyweight Flyes"));
+  assert(names.includes("Barbell Bench Press"));
+  assert(names.includes("Pushups"));
+});
+
+Deno.test("stretch candidates are equipment-filtered too", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "upper_body", [], []);
+  assert(names.includes("Behind Head Chest Stretch"));
+  assertFalse(names.includes("Exercise Ball Stretch"));
+});
+
+Deno.test("muscle-mismatch fallback broadens muscles but never equipment", async () => {
+  // No body-only entry matches core muscles, so the first query is empty;
+  // the fallback must stay inside the user's equipment.
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "core", [], []);
+  assert(names.includes("Pushups"));
+  assert(names.includes("Bodyweight Squat"));
+  assertFalse(names.includes("Bodyweight Flyes"));
+  assertFalse(names.includes("Barbell Bench Press"));
+});
+
+Deno.test("cardio candidates are equipment-filtered", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "cardio", [], []);
+  assert(names.includes("Jumping Jacks"));
+  assertFalse(names.includes("Running, Treadmill"));
+});
+
+Deno.test("injury keyword exclusions still apply after equipment filtering", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "upper_body", [], ["pushup"]);
+  assertFalse(names.includes("Pushups"));
+  assert(names.includes("Behind Head Chest Stretch"));
+});
+
+Deno.test("REGRESSION: a newbie never sees intermediate/expert movements", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "upper_body", ["gym"], [], "newbie");
+  assertFalse(names.includes("Bodyweight Flyes"), "intermediate leaked to a newbie");
+  assertFalse(names.includes("One-Arm Push-Up"), "expert leaked to a newbie");
+  assert(names.includes("Pushups"));
+});
+
+Deno.test("moderate (and unknown) experience excludes expert movements", async () => {
+  for (const experience of ["moderate", null]) {
+    const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "upper_body", ["gym"], [], experience);
+    assert(names.includes("Bodyweight Flyes"), "intermediate should be allowed at moderate");
+    assertFalse(names.includes("One-Arm Push-Up"), `expert leaked for experience=${experience}`);
+  }
+});
+
+Deno.test("advanced experience gets the full difficulty range", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "upper_body", ["gym"], [], "advanced");
+  assert(names.includes("One-Arm Push-Up"));
+});

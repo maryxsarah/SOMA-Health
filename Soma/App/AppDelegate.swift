@@ -9,16 +9,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        // Must run before any other Firebase API is touched -- reads
-        // GoogleService-Info.plist from the main bundle. See SETUP.md for
-        // where that file needs to be placed in the Xcode project.
-        FirebaseApp.configure()
-
-        // Must run before any AnalyticsManager call reaches PostHog --
-        // reads POSTHOG_API_KEY/POSTHOG_HOST from Config (xcconfig), same
-        // pattern as every other per-environment credential in this app.
-        let postHogConfig = PostHogConfig(apiKey: Config.posthogAPIKey, host: Config.posthogHost.absoluteString)
-        PostHogSDK.shared.setup(postHogConfig)
+        // Analytics runs ONLY in Release builds (TestFlight/App Store) --
+        // local Debug runs must not pollute GA4/PostHog with dev data.
+        // Within Release, both SDKs are still guarded on their config
+        // being present (gitignored plist / xcconfig key), so a keyless
+        // checkout launches fine instead of crashing at configure.
+        #if !DEBUG
+        if Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
+            FirebaseApp.configure()
+        }
+        if !Config.posthogAPIKey.isEmpty {
+            let postHogConfig = PostHogConfig(apiKey: Config.posthogAPIKey, host: Config.posthogHost.absoluteString)
+            PostHogSDK.shared.setup(postHogConfig)
+        }
+        #endif
 
         AnalyticsManager.shared.appOpened()
 
@@ -26,7 +30,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // the single reader of Transaction.currentEntitlements (needed for
         // the Supabase subscription_tier sync generation limits depend on)
         // and pushes the result into Superwall.shared.subscriptionStatus --
-        // see SubscriptionManager.refreshEntitlement().
+        // see SubscriptionManager.refreshEntitlement(). Deliberately NOT
+        // gated on the key being present: `Superwall.shared` asserts in
+        // Debug when unconfigured, so skipping configure would crash every
+        // keyless dev build at the first register() call. An empty key just
+        // logs errors and lets register() fall through to its feature block.
         Superwall.configure(apiKey: Config.superwallAPIKey, purchaseController: SomaPurchaseController.shared)
         Superwall.shared.delegate = SuperwallEventForwarder.shared
         // A returning signed-in user (persisted session from the keychain,

@@ -19,14 +19,17 @@ struct DayDetailView: View {
     @State private var log: WorkoutLogEntry?
     @State private var plannedPlan: TodaysAIPlan?
     @State private var wearableSummary: WearableSessionSummary?
+    @State private var snapshots: [DailySnapshotRow] = []
     @State private var isLoading = true
 
     @State private var showActionSheet = false
     @State private var showCompletedSheet = false
     @State private var showRescheduleInfo = false
+    @State private var isCompleting = false
+    @State private var completeError: String?
 
     private enum DayState {
-        case done, todo, skipped
+        case done, todo, skipped, upcoming
     }
 
     var body: some View {
@@ -51,7 +54,7 @@ struct DayDetailView: View {
         }
         .somaBackground()
         .task { await load() }
-        .sheet(isPresented: $showActionSheet) {
+        .sheet(isPresented: $showActionSheet, onDismiss: { Task { await load() } }) {
             if let recommendation {
                 RecommendationDetailView(recommendation: recommendation)
             }
@@ -75,7 +78,8 @@ struct DayDetailView: View {
     private var state: DayState {
         if log != nil { return .done }
         if isToday { return .todo }
-        return .skipped
+        // A future planned day isn't "Missed" -- only past days can be.
+        return date > Self.todayString ? .upcoming : .skipped
     }
 
     private var isToday: Bool { date == Self.todayString }
@@ -112,6 +116,7 @@ struct DayDetailView: View {
         let info: (label: String, fg: Color, bg: Color, systemImage: String) = switch state {
         case .done: ("Completed", SomaTokens.heart, SomaTokens.heartSoft, "heart.fill")
         case .todo: ("Planned for today", SomaTokens.accent, SomaTokens.accentSoft, "heart")
+        case .upcoming: ("Planned", SomaTokens.accent, SomaTokens.accentSoft, "heart")
         case .skipped: ("Missed", SomaTokens.ink3, SomaTokens.surface3, "heart")
         }
         return HStack(spacing: 4) {
@@ -163,7 +168,7 @@ struct DayDetailView: View {
                     metaLine
                     footerChip
                 }
-            case .todo:
+            case .todo, .upcoming:
                 if let plannedPlan {
                     Text(plannedPlan.selectedTitle)
                         .font(.system(size: 15, weight: .bold))
@@ -202,7 +207,7 @@ struct DayDetailView: View {
     private var stateColor: Color {
         switch state {
         case .done: SomaTokens.heart
-        case .todo: SomaTokens.accent
+        case .todo, .upcoming: SomaTokens.accent
         case .skipped: SomaTokens.ink3
         }
     }
@@ -233,9 +238,9 @@ struct DayDetailView: View {
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink3)
             }
-        case .todo:
+        case .todo, .upcoming:
             if let recommendation {
-                Text(recommendation.reason.explanationTemplate)
+                Text(recommendation.reason.explanation(snapshots: snapshots))
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink3)
             }
@@ -255,7 +260,7 @@ struct DayDetailView: View {
                 SomaChip(title: feelRating.displayName, isSelected: true) {}
                     .allowsHitTesting(false)
             }
-        case .todo:
+        case .todo, .upcoming:
             if let gear = requiredGear {
                 SomaChip(title: gear, isSelected: false) {}
                     .allowsHitTesting(false)
@@ -290,11 +295,24 @@ struct DayDetailView: View {
         switch state {
         case .todo:
             VStack(spacing: 9) {
-                SomaButton(title: "Start workout", size: .lg, variant: .primary, isEnabled: recommendation != nil) {
-                    showActionSheet = true
+                if let completeError {
+                    Text(completeError)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.red)
                 }
-                SomaButton(title: "Swap workout", size: .md, variant: .secondary, isEnabled: recommendation != nil) {
-                    showActionSheet = true
+                if plannedPlan != nil {
+                    // A plan already exists for today -- the primary action
+                    // is finishing it, not re-opening the generator.
+                    SomaButton(title: "Complete workout", size: .lg, variant: .primary, isEnabled: !isCompleting) {
+                        Task { await completePlannedWorkout() }
+                    }
+                    SomaButton(title: "View or swap workout", size: .md, variant: .secondary, isEnabled: recommendation != nil) {
+                        showActionSheet = true
+                    }
+                } else {
+                    SomaButton(title: "Start workout", size: .lg, variant: .primary, isEnabled: recommendation != nil) {
+                        showActionSheet = true
+                    }
                 }
             }
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 22)
@@ -320,6 +338,33 @@ struct DayDetailView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 22)
+        case .upcoming:
+            EmptyView()
+        }
+    }
+
+    /// Logs the already-planned workout as done, right from this screen --
+    /// the same workout_log write RecommendationDetailView's "Mark Workout
+    /// Complete" does, without making the user re-enter the generator.
+    private func completePlannedWorkout() async {
+        guard let plannedPlan else { return }
+        isCompleting = true
+        completeError = nil
+        defer { isCompleting = false }
+        let bodyPart = plannedPlan.plan.substitutedBodyPart
+            ?? recommendation?.category.workoutSuggestions.first(where: { $0.title == plannedPlan.selectedTitle })?.bodyPart.rawValue
+            ?? BodyPartFocus.fullBody.rawValue
+        do {
+            try await SupabaseClient.shared.logWorkout(
+                date: date,
+                title: plannedPlan.selectedTitle,
+                bodyPart: bodyPart,
+                category: plannedPlan.category,
+                planSnapshot: plannedPlan.plan
+            )
+            await load()
+        } catch {
+            completeError = "Couldn't log this workout. Try again."
         }
     }
 
@@ -346,10 +391,12 @@ struct DayDetailView: View {
         async let recommendationFetch: DailyRecommendation? = try? SupabaseClient.shared.fetchTodaysRecommendation(date: date)
         async let logsFetch: [WorkoutLogEntry] = (try? await SupabaseClient.shared.fetchWorkoutLogs(date: date)) ?? []
         async let plannedFetch: TodaysAIPlan? = try? await SupabaseClient.shared.fetchTodaysAIPlan(date: date)
+        async let snapshotsFetch: [DailySnapshotRow] = (try? await SupabaseClient.shared.fetchTodaysSnapshots(date: date)) ?? []
 
         recommendation = await recommendationFetch
         log = await logsFetch.first
         plannedPlan = await plannedFetch
+        snapshots = await snapshotsFetch
 
         if let log {
             wearableSummary = await WearableSessionSummary.fetch(for: log)
