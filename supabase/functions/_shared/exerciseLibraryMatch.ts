@@ -59,9 +59,16 @@ const BODY_PART_TO_MUSCLES: Record<string, string[]> = {
   ],
 };
 
-const MAIN_CANDIDATE_LIMIT = 150;
-const STRETCH_CANDIDATE_LIMIT = 60;
-const FALLBACK_LIMIT = 100;
+// Anthropic's structured-output schema compiler rejects the generated
+// workout schema ("Schema is too complex for compilation") once the
+// deduped candidate-name enum climbs into the ~130+ range, even with the
+// exercise schema deduplicated via $defs/$ref (see buildWorkoutSchema in
+// generate-workout-plan/index.ts). Empirically confirmed working at 115,
+// failing at 130 -- these limits keep the merged (main + stretch, pre-
+// dedup) total at 90, comfortably under that ceiling.
+const MAIN_CANDIDATE_LIMIT = 70;
+const STRETCH_CANDIDATE_LIMIT = 20;
+const FALLBACK_LIMIT = 70;
 
 /// Allowed library `equipment` values ("body only" always included; empty tags = bodyweight-only).
 /// Null = no narrowing: unmapped tags (bike/pool/other) have no library equivalent to filter by.

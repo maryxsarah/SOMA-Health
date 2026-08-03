@@ -103,7 +103,7 @@ struct RecommendationDetailView: View {
 
                 pickCard
 
-                if !alternativeSuggestions.isEmpty {
+                if !visibleSuggestions.isEmpty {
                     alternativesCard
                 }
 
@@ -239,8 +239,26 @@ struct RecommendationDetailView: View {
             Text(explanationText)
             Text("Today's step target: \(recommendation.category.stepTarget)\(averageSteps.map { String(format: " — you've averaged ~%.0f/day over the last week.", $0) } ?? ".")")
                 .font(.system(size: 12.5))
-            if recommendation.sleepCapApplied {
+            if let requested = recommendation.userRequestedCategory {
+                        // Not styled as a warning (unlike the caps below) --
+                        // this wasn't a safety downgrade, it's what the user
+                        // themselves asked for.
+                        Text("You asked for a \(requested == .rest ? "rest" : "active recovery") day today.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if recommendation.sleepCapApplied {
                         Text("Note: today's intensity was capped because of short sleep, even though recovery looked strong.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if recommendation.hrvCapApplied {
+                        Text("Note: today's intensity was capped because your HRV is noticeably below your usual baseline, even though recovery looked strong.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if recommendation.stressCapApplied {
+                        Text("Note: today's intensity was capped because of a high-stress day, even though recovery looked strong.")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -384,9 +402,12 @@ struct RecommendationDetailView: View {
         filteredWorkoutSuggestions.first { $0.title == selectedTitle }
     }
 
-    /// ≤5 rows, everything that fits today except the pick itself.
-    private var alternativeSuggestions: [WorkoutSuggestion] {
-        Array(filteredWorkoutSuggestions.filter { $0.title != selectedTitle }.prefix(5))
+    /// ≤5 rows, everything that fits today -- including the current pick,
+    /// shown with a selected state rather than removed. Tapping an option
+    /// used to filter it out of this list once picked, which read as "my
+    /// choice disappeared"; the pick stays visible and checked instead.
+    private var visibleSuggestions: [WorkoutSuggestion] {
+        Array(filteredWorkoutSuggestions.prefix(5))
     }
 
     private var pickCard: some View {
@@ -477,17 +498,18 @@ struct RecommendationDetailView: View {
     private var alternativesCard: some View {
         CardView {
             HStack {
-                Text("Other options that fit today")
+                Text("Workouts that fit today")
                     .font(.body.bold())
                 Spacer()
-                Text("\(alternativeSuggestions.count)")
+                Text("\(visibleSuggestions.count)")
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(SomaTokens.ink4)
             }
-            ForEach(Array(alternativeSuggestions.enumerated()), id: \.element.id) { index, suggestion in
+            ForEach(Array(visibleSuggestions.enumerated()), id: \.element.id) { index, suggestion in
                 if index > 0 {
                     Divider().overlay(SomaTokens.surface4)
                 }
+                let isSelected = suggestion.title == selectedTitle
                 Button {
                     selectSuggestion(suggestion)
                 } label: {
@@ -501,15 +523,23 @@ struct RecommendationDetailView: View {
                                 .foregroundStyle(SomaTokens.ink4)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(SomaTokens.ink4)
+                        if isSelected {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(SomaTokens.accent)
+                        } else {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(SomaTokens.ink4)
+                        }
                     }
                     .contentShape(Rectangle())
                     .padding(.vertical, 6)
                 }
                 .buttonStyle(.plain)
-                .disabled(isCompletedToday)
+                // Already the pick -- tapping again would be a no-op; only
+                // non-selected rows are actionable, same as "no checkboxes."
+                .disabled(isCompletedToday || isSelected)
             }
         }
     }
@@ -932,8 +962,11 @@ private struct SeededGenerator: RandomNumberGenerator {
             injuryProtocolModerateCapApplied: false,
             pregnancyCapApplied: false,
             volumeCapApplied: false,
+            hrvCapApplied: false,
+            stressCapApplied: false,
             preCapCategory: nil,
-            dataConfidence: .low
+            dataConfidence: .low,
+            userRequestedCategory: nil
         )
     )
     .environmentObject(AppState())

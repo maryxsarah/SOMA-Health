@@ -77,6 +77,19 @@ Deno.serve(async (req: Request) => {
 
     const supabase = serviceRoleClient();
 
+    // A prior "request a rest/active-recovery day" call for this date, if
+    // any -- read up front so it survives this run's upsert (explicitly
+    // written back below) and wins outright over every computed cap, since
+    // it's the user's own direct request, not a health signal to be
+    // weighed against others. Set via set-recommendation-override.
+    const { data: existingRec } = await supabase
+      .from("daily_recommendation")
+      .select("user_requested_category")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .maybeSingle();
+    const userRequestedCategory = (existingRec?.user_requested_category as Category | null) ?? null;
+
     const { data: tokens } = await supabase
       .from("wearable_tokens")
       .select("id, provider, access_token, refresh_token, expires_at")
@@ -171,15 +184,20 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Sleep hours for the safety cap / rest-vs-light split: prefer
-    // whichever connected source actually reported it today.
+    // Sleep hours for the rest-vs-light split, plus HRV/stress for the caps
+    // below -- prefer whichever connected source actually reported each
+    // today, same merge shape as sleep already used.
     const { data: todaysRows } = await supabase
       .from("daily_snapshot")
-      .select("source, sleep_hours")
+      .select("source, sleep_hours, hrv_ms, stress_score")
       .eq("user_id", userId)
       .eq("date", date);
 
     const sleepHours = pickSleepHours(todaysRows ?? [], healthkit);
+    const todaysHrv = pickTodaysMetric(todaysRows ?? [], "hrv_ms", healthkit?.hrvMs);
+    // Oura-only signal (see fetchOuraStress) -- no Whoop/HealthKit source
+    // reports one today, so this naturally resolves to null for them.
+    const todaysStress = pickTodaysMetric(todaysRows ?? [], "stress_score", undefined);
 
     // Injury-based intensity cap: any noted injury caps the category at
     // moderate max for the day, same safety-first pattern as the sleep cap.
@@ -288,7 +306,7 @@ Deno.serve(async (req: Request) => {
     // label instead of "healthkit_medium" -- category/message stay the same
     // cautious "moderate", only the presented reason differs.
     const reason = insufficientData ? "insufficient_data" : `${source}_${band}`;
-    const { category: bandCategory, sleepCapApplied, injuryCapApplied, loadCapApplied, pregnancyCapApplied } =
+    const { category: bandCategory, injuryCapApplied, loadCapApplied, pregnancyCapApplied } =
       mapBandToCategory(
         band,
         sleepHours,
@@ -297,6 +315,40 @@ Deno.serve(async (req: Request) => {
         recentHighStrain,
         hasPregnancy,
       );
+
+    // Sleep cap: same post-category mechanism as consecutive-days/injury-
+    // protocol/volume below, rather than the old pre-category, high-band-
+    // only, <5.5h-only check (which could never fire on a "moderate" day).
+    // A short-sleep night is a real risk factor on its own, independent of
+    // what the wearable's own recovery/readiness score says today. SOMA has
+    // no ingested sleep-QUALITY score from any provider (Oura's own 0-100
+    // Sleep Score is a separate endpoint SOMA doesn't call) -- this can
+    // only ever react to raw duration, not how restful/fragmented that
+    // sleep actually was. DRAFTED, NOT EXPERT-REVIEWED threshold.
+    const SHORT_SLEEP_HOURS = 6.5;
+    const sleepCapApplied = sleepHours !== null && sleepHours < SHORT_SLEEP_HOURS &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
+
+    // HRV cap: hrv_ms is stored in daily_snapshot per source but was never
+    // read back for capping before today. HRV is highly individual, so
+    // this compares against the user's OWN trailing baseline (same median-
+    // of-trailing-window shape as fetchMetricBaseline, generalized to any
+    // connected source rather than healthkit-only) rather than a fixed
+    // absolute number. DRAFTED, NOT EXPERT-REVIEWED threshold.
+    const HRV_DROP_RATIO = 0.85;
+    const hrvBaselineForCap = await fetchGeneralMetricBaseline(supabase, userId, date, "hrv_ms");
+    const hrvCapApplied = hrvBaselineForCap !== null && todaysHrv !== null &&
+      todaysHrv < hrvBaselineForCap * HRV_DROP_RATIO &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
+
+    // Stress cap: stress_score (Oura-only -- minutes spent in a high-stress
+    // state today, see fetchOuraStress) is stored but was never read back
+    // for capping before today. Already a same-units-every-day absolute
+    // number (minutes), unlike HRV, so a flat threshold is used instead of
+    // a personal baseline. DRAFTED, NOT EXPERT-REVIEWED threshold.
+    const HIGH_STRESS_MINUTES = 180;
+    const stressCapApplied = todaysStress !== null && todaysStress >= HIGH_STRESS_MINUTES &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
 
     // Consecutive-training-days cap: unlike the three caps above (which act
     // on the recovery band before the category is chosen), this acts on the
@@ -347,13 +399,18 @@ Deno.serve(async (req: Request) => {
     // moderate and one severe injury simultaneously -- severe wins.
     const injuryProtocolModerateCapApplied = !hasSevereInjuryProtocol &&
       hasModerateInjuryProtocol && bandCategory === "push_hard";
-    const category: Category = consecutiveDaysRestEscalated
+    const computedCategory: Category = consecutiveDaysRestEscalated
       ? "rest"
-      : (consecutiveDaysCapApplied || injuryProtocolCapApplied || volumeCapApplied)
+      : (consecutiveDaysCapApplied || injuryProtocolCapApplied || volumeCapApplied ||
+          sleepCapApplied || hrvCapApplied || stressCapApplied)
       ? "light"
       : injuryProtocolModerateCapApplied
       ? "moderate"
       : bandCategory;
+    // The user's own rest/active-recovery request wins outright over every
+    // computed cap above -- see the comment where userRequestedCategory is
+    // read, near the top of this handler.
+    const category: Category = userRequestedCategory ?? computedCategory;
     const message = MESSAGES[category];
 
     await supabase
@@ -373,6 +430,8 @@ Deno.serve(async (req: Request) => {
           consecutive_days_cap_applied: consecutiveDaysCapApplied,
           injury_protocol_cap_applied: injuryProtocolCapApplied,
           injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+          hrv_cap_applied: hrvCapApplied,
+          stress_cap_applied: stressCapApplied,
           // The uncapped category, so a later client re-fetch (after any
           // cap has been applied) still has access to what the
           // recommendation would have been -- the override affordance in
@@ -380,6 +439,10 @@ Deno.serve(async (req: Request) => {
           // workout anyway" without re-deriving the recovery band client-side.
           pre_cap_category: bandCategory,
           data_confidence: dataConfidence,
+          // Written back explicitly (not just left alone) so this upsert
+          // never silently clears an active rest-day request just because
+          // this particular call site didn't set one.
+          user_requested_category: userRequestedCategory,
         },
         { onConflict: "user_id,date" },
       );
@@ -400,8 +463,11 @@ Deno.serve(async (req: Request) => {
       consecutive_days_cap_applied: consecutiveDaysCapApplied,
       injury_protocol_cap_applied: injuryProtocolCapApplied,
       injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+      hrv_cap_applied: hrvCapApplied,
+      stress_cap_applied: stressCapApplied,
       pre_cap_category: bandCategory,
       data_confidence: dataConfidence,
+      user_requested_category: userRequestedCategory,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -434,25 +500,16 @@ function mapBandToCategory(
   hasPregnancy: boolean,
 ): {
   category: Category;
-  sleepCapApplied: boolean;
   injuryCapApplied: boolean;
   loadCapApplied: boolean;
   pregnancyCapApplied: boolean;
 } {
   let effectiveBand = band;
-  let sleepCapApplied = false;
   let injuryCapApplied = false;
   let loadCapApplied = false;
   let pregnancyCapApplied = false;
 
-  // Sleep safety cap: never push_hard on severe sleep deprivation.
-  if (effectiveBand === "high" && sleepHours !== null && sleepHours < 5.5) {
-    effectiveBand = "medium";
-    sleepCapApplied = true;
-  }
-
-  // Injury safety cap: never push_hard with an active injury noted,
-  // same pattern as the sleep cap. Independent of it -- both can apply.
+  // Injury safety cap: never push_hard with an active injury noted.
   if (effectiveBand === "high" && hasInjury) {
     effectiveBand = "medium";
     injuryCapApplied = true;
@@ -461,7 +518,7 @@ function mapBandToCategory(
   // Recent training load cap: never push_hard the day right after a
   // strenuous Whoop workout or an Oura "hard"-intensity session, even if
   // this morning's recovery/readiness looks strong -- avoids stacking two
-  // max-effort days back to back. Independent of the other two caps.
+  // max-effort days back to back. Independent of the other cap.
   if (effectiveBand === "high" && recentHighStrain) {
     effectiveBand = "medium";
     loadCapApplied = true;
@@ -477,16 +534,16 @@ function mapBandToCategory(
   }
 
   if (effectiveBand === "high") {
-    return { category: "push_hard", sleepCapApplied, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
+    return { category: "push_hard", injuryCapApplied, loadCapApplied, pregnancyCapApplied };
   }
   if (effectiveBand === "medium_high" || effectiveBand === "medium") {
-    return { category: "moderate", sleepCapApplied, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
+    return { category: "moderate", injuryCapApplied, loadCapApplied, pregnancyCapApplied };
   }
 
   // effectiveBand === "low": split into light vs rest.
   const severelyShortSleep = sleepHours !== null && sleepHours < 5.5;
   const category = severelyShortSleep || clearlyPoorRecovery ? "rest" : "light";
-  return { category, sleepCapApplied, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
+  return { category, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
 }
 
 /// Consecutive prior days with a logged TRAINING workout (moderate or
@@ -569,6 +626,23 @@ function pickSleepHours(
   );
 }
 
+/// Same merge shape as pickSleepHours, generalized to any daily_snapshot
+/// numeric column -- used for today's HRV/stress cap inputs.
+function pickTodaysMetric(
+  rows: { source: string; hrv_ms?: number | null; stress_score?: number | null }[],
+  column: "hrv_ms" | "stress_score",
+  healthkitValue: number | null | undefined,
+): number | null {
+  const bySource = (source: string) => rows.find((r) => r.source === source)?.[column] ?? null;
+  return (
+    bySource("whoop") ??
+    bySource("oura") ??
+    bySource("healthkit") ??
+    healthkitValue ??
+    null
+  );
+}
+
 /// Minimum distinct days of history before a baseline means anything.
 /// Previously a single prior day was enough, which made the "baseline" just
 /// that day -- so today's value was compared against itself and the ratio was
@@ -604,6 +678,50 @@ async function fetchMetricBaseline(
     .select(column)
     .eq("user_id", userId)
     .eq("source", "healthkit")
+    .gte("date", startStr)
+    .lte("date", endStr)
+    .not(column, "is", null);
+
+  if (!data || data.length < minDays) return null;
+
+  const values = (data as Record<string, number>[])
+    .map((r) => r[column])
+    .filter((v): v is number => typeof v === "number")
+    .sort((a, b) => a - b);
+  if (values.length < minDays) return null;
+
+  const mid = Math.floor(values.length / 2);
+  return values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
+}
+
+/// Same median-of-trailing-window shape as fetchMetricBaseline, generalized
+/// across whatever connected source reported the metric each day --
+/// fetchMetricBaseline is locked to source="healthkit", written for the
+/// healthkit-only assessment path specifically, but Whoop/Oura users have
+/// hrv_ms in daily_snapshot too and HRV is highly individual, so the HRV
+/// cap needs the user's OWN trailing baseline regardless of which wearable
+/// they use. Note: if a user has more than one source reporting hrv_ms on
+/// the same day, each source's row contributes its own point to the
+/// median rather than being merged into one per-day value first -- a minor
+/// imprecision, acceptable for a single connected wearable in practice.
+async function fetchGeneralMetricBaseline(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  userId: string,
+  date: string,
+  column: "hrv_ms",
+  minDays: number = MIN_BASELINE_DAYS,
+): Promise<number | null> {
+  const end = new Date(date);
+  const start = new Date(end);
+  start.setDate(start.getDate() - BASELINE_WINDOW_DAYS);
+  const startStr = start.toISOString().slice(0, 10);
+  const endStr = new Date(end.getTime() - 86400000).toISOString().slice(0, 10);
+
+  const { data } = await supabase
+    .from("daily_snapshot")
+    .select(column)
+    .eq("user_id", userId)
     .gte("date", startStr)
     .lte("date", endStr)
     .not(column, "is", null);

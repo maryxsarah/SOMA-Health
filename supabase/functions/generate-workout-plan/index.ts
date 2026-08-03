@@ -100,15 +100,27 @@ function buildBlockSchema(exerciseSchema: ReturnType<typeof buildExerciseSchema>
 }
 
 function buildWorkoutSchema(candidateNames: string[]) {
-  const exerciseSchema = buildExerciseSchema(candidateNames);
-  const blockSchema = buildBlockSchema(exerciseSchema);
+  // The exercise schema (dominated by the candidate-name enum) is defined
+  // once via $defs and referenced 3x via $ref, rather than embedded 3
+  // separate times -- Anthropic's structured-output schema compiler rejects
+  // an inlined-3x version of this schema at candidate counts as low as ~130
+  // with "Schema is too complex for compilation", even though the enum
+  // itself is well within any documented size limit. $ref alone roughly
+  // halves the compiled cost; MAIN/STRETCH_CANDIDATE_LIMIT in
+  // exerciseLibraryMatch.ts additionally caps candidates so the deduped
+  // list stays well under the empirically-found ~115-130 ceiling.
+  const exerciseRef = { "$ref": "#/$defs/exercise" };
+  const blockSchema = buildBlockSchema(exerciseRef as unknown as ReturnType<typeof buildExerciseSchema>);
   return {
+    "$defs": {
+      exercise: buildExerciseSchema(candidateNames),
+    },
     type: "object",
     properties: {
       focus: { type: "string" },
-      warm_up: { type: "array", items: exerciseSchema },
+      warm_up: { type: "array", items: exerciseRef },
       blocks: { type: "array", items: blockSchema },
-      cool_down: { type: "array", items: exerciseSchema },
+      cool_down: { type: "array", items: exerciseRef },
     },
     required: ["focus", "warm_up", "blocks", "cool_down"],
     additionalProperties: false,

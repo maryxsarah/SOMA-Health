@@ -334,12 +334,19 @@ struct DailyRecommendation: Codable, Equatable {
     let injuryProtocolModerateCapApplied: Bool
     let pregnancyCapApplied: Bool
     let volumeCapApplied: Bool
+    let hrvCapApplied: Bool
+    let stressCapApplied: Bool
     /// The uncapped recovery-band category, when the server has it on
     /// record -- lets RecommendationDetailView offer "a standard workout
     /// anyway" without re-deriving the recovery band client-side. Nil for
     /// rows written before this column existed.
     let preCapCategory: RecommendationCategory?
     let dataConfidence: DataConfidence?
+    /// Set only via the "request a rest/active-recovery day" affordance --
+    /// distinct from every cap above (those are computed from health data;
+    /// this is the user's own direct request, which wins outright over all
+    /// of them server-side). Nil means no override is active today.
+    let userRequestedCategory: RecommendationCategory?
 
     enum CodingKeys: String, CodingKey {
         case date, category, message, reason
@@ -352,7 +359,10 @@ struct DailyRecommendation: Codable, Equatable {
         case injuryProtocolModerateCapApplied = "injury_protocol_moderate_cap_applied"
         case pregnancyCapApplied = "pregnancy_cap_applied"
         case volumeCapApplied = "volume_cap_applied"
+        case hrvCapApplied = "hrv_cap_applied"
+        case stressCapApplied = "stress_cap_applied"
         case preCapCategory = "pre_cap_category"
+        case userRequestedCategory = "user_requested_category"
     }
 }
 
@@ -379,7 +389,10 @@ extension DailyRecommendation {
         injuryProtocolModerateCapApplied = try container.decodeIfPresent(Bool.self, forKey: .injuryProtocolModerateCapApplied) ?? false
         pregnancyCapApplied = try container.decodeIfPresent(Bool.self, forKey: .pregnancyCapApplied) ?? false
         volumeCapApplied = try container.decodeIfPresent(Bool.self, forKey: .volumeCapApplied) ?? false
+        hrvCapApplied = try container.decodeIfPresent(Bool.self, forKey: .hrvCapApplied) ?? false
+        stressCapApplied = try container.decodeIfPresent(Bool.self, forKey: .stressCapApplied) ?? false
         preCapCategory = try container.decodeIfPresent(RecommendationCategory.self, forKey: .preCapCategory)
         dataConfidence = try container.decodeIfPresent(DataConfidence.self, forKey: .dataConfidence)
+        userRequestedCategory = try container.decodeIfPresent(RecommendationCategory.self, forKey: .userRequestedCategory)
     }
 }
