@@ -69,6 +69,23 @@ struct AIWorkoutBlock: Codable, Identifiable {
     }
 }
 
+/// Compact goal-block marker generate-workout-plan stores inside the plan
+/// jsonb (goalBlockMeta in its index.ts) -- non-nil only when this plan
+/// actually contains a goal block. All fields lenient; the shape is
+/// server-owned and may grow.
+struct AIGoalBlockMarker: Codable {
+    let kind: String?
+    let text: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try? c.decodeIfPresent(String.self, forKey: .kind)
+        text = try? c.decodeIfPresent(String.self, forKey: .text)
+    }
+
+    enum CodingKeys: String, CodingKey { case kind, text }
+}
+
 /// Mirrors the generate-workout-plan response -- cached server-side per
 /// (user, date, selected workout), so repeat fetches for the same
 /// selection don't re-call Claude. Always structured as warm-up, one or
@@ -103,6 +120,9 @@ struct AIWorkoutPlan: Codable {
     /// "suggestion" for plans cached before this field existed, since that
     /// was the only flow that existed then.
     let source: String
+    /// Non-nil only when the plan actually includes a goal block -- gates
+    /// the GOAL BLOCK eyebrow (an active goal alone doesn't imply one today).
+    let goalBlock: AIGoalBlockMarker?
 
     enum CodingKeys: String, CodingKey {
         case date, category, focus, blocks, source
@@ -112,6 +132,7 @@ struct AIWorkoutPlan: Codable {
         case substitutedBodyPart = "substituted_body_part"
         case templateBodyPart = "bodyPart"
         case exceptionalFinisher = "exceptional_finisher"
+        case goalBlock = "goal_block"
     }
 
     init(from decoder: Decoder) throws {
@@ -137,6 +158,8 @@ struct AIWorkoutPlan: Codable {
         templateBodyPart = try container.decodeIfPresent(String.self, forKey: .templateBodyPart)
         exceptionalFinisher = try container.decodeIfPresent(Bool.self, forKey: .exceptionalFinisher) ?? false
         source = try container.decodeIfPresent(String.self, forKey: .source) ?? "suggestion"
+        // Lenient: absent, null, or an unexpected shape all mean "no marker".
+        goalBlock = try? container.decodeIfPresent(AIGoalBlockMarker.self, forKey: .goalBlock)
     }
 }
 

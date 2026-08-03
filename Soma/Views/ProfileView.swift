@@ -43,6 +43,12 @@ struct ProfileView: View {
     @State private var pregnancyWeek: Int?
     @State private var weeklySessionTarget: Int?
     @State private var sessionsDoneThisWeek = 0
+    // Region (country ISO code + free-text city) -- powers the future
+    // nearby gyms/partners suggestions; saved via the normal profile flow.
+    @State private var countryCode: String?
+    @State private var cityText = ""
+    // Beta opt-in -- reflects the user's own beta_optins row.
+    @State private var betaOptIn = false
 
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -57,6 +63,14 @@ struct ProfileView: View {
 
     @State private var showSignOutConfirmation = false
     @State private var showTrainingHistory = false
+    // Sport goals -- entry renders only when the RLS-gated catalog is
+    // non-empty or a goal already exists (server kill switch looks natural).
+    @State private var showSportGoals = false
+    @State private var sportCatalogAvailable = false
+    @State private var activeSportGoal: UserGoal?
+    @State private var sportGoalCatalog: SportCatalog?
+    @State private var completedSportGoals = 0
+    @State private var hasPausedSportGoal = false
     @State private var showHealthDashboard = false
     @State private var completedWorkoutStreak = 0
 
@@ -102,6 +116,11 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showTrainingHistory) {
             TrainingHistoryView()
+        }
+        .sheet(isPresented: $showSportGoals, onDismiss: {
+            Task { await loadSportGoalState() }
+        }) {
+            SportGoalFlowView()
         }
         .sheet(isPresented: $showHealthDashboard) {
             HealthDashboardView()
@@ -189,6 +208,11 @@ struct ProfileView: View {
         if weeklySessionTarget == nil {
             items.append(Nudge(id: "target", text: "set a weekly target"))
         }
+        // Only nudged while the catalog is actually open and no goal is set
+        // -- an empty catalog means the feature is off, not unfinished.
+        if Config.enableSportGoals, sportCatalogAvailable, activeSportGoal == nil {
+            items.append(Nudge(id: "goal", text: "pick a goal"))
+        }
         return items
     }
 
@@ -248,7 +272,33 @@ struct ProfileView: View {
                 consequence: "Personal tracking goal only -- doesn't change suggestions",
                 value: weeklySessionTarget.map { "\($0)/wk · \(sessionsDoneThisWeek) done" } ?? "Not set"
             ) { activeSheet = .weeklyTarget }
+
+            if showSportGoalRow {
+                summaryRow(
+                    title: "My goal",
+                    consequence: "Adds goal work to your daily plan",
+                    value: sportGoalRowValue
+                ) {
+                    AnalyticsManager.shared.featureUsed(name: "sport_goal_flow")
+                    showSportGoals = true
+                }
+            }
         }
+    }
+
+    /// Kill switch: the row exists only when the server-gated catalog has
+    /// content, or the user already has goal data to reach.
+    private var showSportGoalRow: Bool {
+        Config.enableSportGoals && (sportCatalogAvailable || activeSportGoal != nil || completedSportGoals > 0 || hasPausedSportGoal)
+    }
+
+    private var sportGoalRowValue: String {
+        let doneSuffix = completedSportGoals > 0 ? " · \(completedSportGoals) done" : ""
+        if let activeSportGoal {
+            return activeSportGoal.displayName(in: sportGoalCatalog) + doneSuffix
+        }
+        if completedSportGoals > 0 { return "\(completedSportGoals) done" }
+        return "Not set"
     }
 
     // MARK: - Health & Safety tab
@@ -301,6 +351,15 @@ struct ProfileView: View {
                 value: contactEmailText.isEmpty ? "Not set" : contactEmailText
             ) { activeSheet = .contactEmail }
 
+            summaryRow(
+                title: "Region",
+                consequence: "Powers nearby gym & coach suggestions",
+                value: UserProfile.regionDisplay(country: countryCode, city: cityText) ?? "Not set"
+            ) { activeSheet = .region }
+
+            groupEyebrow("EARLY ACCESS")
+            betaOptInRow
+
             groupEyebrow("CONNECTED DEVICES")
             ForEach(Provider.allCases) { provider in
                 deviceRow(provider)
@@ -333,6 +392,46 @@ struct ProfileView: View {
                 showSignOutConfirmation = true
             }
             .padding(.top, 6)
+        }
+    }
+
+    /// Toggle row styled like a setting row. The write happens in the
+    /// binding's setter, so programmatic loads never trigger a write.
+    private var betaOptInRow: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Sport goals (beta)")
+                    .font(.system(size: 14.5, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink)
+                Text("Beta features appear automatically while this is on.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(SomaTokens.ink3)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { betaOptIn },
+                set: { newValue in
+                    betaOptIn = newValue
+                    Task { await updateBetaOptIn(newValue) }
+                }
+            ))
+            .labelsHidden()
+            .tint(SomaTokens.accent)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
+    }
+
+    private func updateBetaOptIn(_ enabled: Bool) async {
+        do {
+            try await SupabaseClient.shared.setBetaOptIn(enabled)
+            errorMessage = nil
+            // Refetch the catalog so the newly opened beta features appear
+            // without an app restart (they're catalog-driven, not gated here).
+            if enabled { await loadSportGoalState() }
+        } catch {
+            betaOptIn = !enabled
+            errorMessage = "Couldn't update beta access. Try again."
         }
     }
 
@@ -426,6 +525,7 @@ struct ProfileView: View {
                     case .pregnancy: pregnancyEditor
                     case .bodyPhotos: bodyPhotosEditor
                     case .contactEmail: contactEmailEditor
+                    case .region: regionEditor
                     }
                 }
                 .padding(20)
@@ -648,6 +748,31 @@ struct ProfileView: View {
             .textFieldStyle(.roundedBorder)
     }
 
+    /// ISO region codes sorted by their localized display name -- never a
+    /// hand-maintained country list.
+    private static let countryOptions: [(code: String, name: String)] = Locale.Region.isoRegions
+        .map(\.identifier)
+        .filter { $0.count == 2 && $0.allSatisfy(\.isLetter) }
+        .compactMap { code in Locale.current.localizedString(forRegionCode: code).map { (code, $0) } }
+        .sorted { $0.1.localizedCaseInsensitiveCompare($1.1) == .orderedAscending }
+
+    private var regionEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Used for future nearby gym and coach partner suggestions.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("Country", selection: $countryCode) {
+                Text("Not set").tag(String?.none)
+                ForEach(Self.countryOptions, id: \.code) { option in
+                    Text(option.name).tag(String?.some(option.code))
+                }
+            }
+            .pickerStyle(.menu)
+            TextField("City", text: $cityText)
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+
     /// Three distinct states worth telling apart: paying, on a referral
     /// bonus (free, but ending), or neither.
     private var subscriptionStatusText: String {
@@ -718,6 +843,9 @@ struct ProfileView: View {
         pregnancy = profile.pregnancy
         pregnancyWeek = profile.pregnancyWeek
         weeklySessionTarget = profile.weeklySessionTarget
+        countryCode = profile.country
+        cityText = profile.city ?? ""
+        betaOptIn = (try? await SupabaseClient.shared.fetchBetaOptIn()) ?? false
 
         goalBodyPhotoPath = profile.goalBodyPhotoPath
         currentBodyPhotoPath = profile.currentBodyPhotoPath
@@ -735,8 +863,31 @@ struct ProfileView: View {
         completedWorkoutStreak = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates())
             .map(Self.streak(from:)) ?? 0
         sessionsDoneThisWeek = await Self.workoutsThisWeek()
+        await loadSportGoalState()
 
         setSuperwallUserAttributes(profile: profile)
+    }
+
+    /// Best-effort (`try?` throughout): a failed fetch degrades to hidden
+    /// entry points, indistinguishable from the server kill switch.
+    private func loadSportGoalState() async {
+        guard Config.enableSportGoals else { return }
+        // All three in parallel -- none depends on another's result.
+        async let catalogFetch: SportCatalog? = try? await SupabaseClient.shared.fetchSportCatalog()
+        async let activeGoalFetch: UserGoal? = try? await SupabaseClient.shared.fetchActiveGoal()
+        async let historyFetch: [UserGoal] = (try? await SupabaseClient.shared.fetchGoalHistory()) ?? []
+        let catalog = await catalogFetch
+        sportGoalCatalog = catalog
+        sportCatalogAvailable = catalog.map { !$0.isEmpty } ?? false
+        activeSportGoal = await activeGoalFetch
+        let history = await historyFetch
+        completedSportGoals = history.filter { $0.status == .completed }.count
+        hasPausedSportGoal = history.contains { $0.status == .paused }
+        // Mirrors achievements into Superwall attributes for targeting,
+        // same real-data-only rule as setSuperwallUserAttributes.
+        if completedSportGoals > 0 {
+            Superwall.shared.setUserAttributes(["sport_goal_completions": completedSportGoals])
+        }
     }
 
     /// Real, already-collected profile fields only -- for paywall audience
@@ -936,7 +1087,9 @@ struct ProfileView: View {
             experienceLevel: experienceLevel,
             pregnancy: pregnancy,
             pregnancyWeek: pregnancy == true ? pregnancyWeek : nil,
-            weeklySessionTarget: weeklySessionTarget
+            weeklySessionTarget: weeklySessionTarget,
+            country: countryCode,
+            city: cityText.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cityText.trimmingCharacters(in: .whitespaces)
         )
 
         let currentInjuryTags = Array(injuryTags)
@@ -975,7 +1128,7 @@ private enum ProfileSection: String, CaseIterable, Identifiable {
 }
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, bodyPhotos, contactEmail
+    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, bodyPhotos, contactEmail, region
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -987,6 +1140,7 @@ private enum ProfileSheet: String, Identifiable {
         case .pregnancy: "Pregnancy"
         case .bodyPhotos: "Body photos"
         case .contactEmail: "Contact email"
+        case .region: "Region"
         }
     }
 }

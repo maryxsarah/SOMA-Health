@@ -38,6 +38,11 @@ struct HomeView: View {
     @State private var weeklyTarget: Int?
     /// Today's snapshot rows -- feeds the readiness disclosure's inputs line.
     @State private var todaysSnapshots: [DailySnapshotRow] = []
+    /// Active sport goal + its catalog -- the readiness card's goal line
+    /// renders only when a real active goal exists (kill-switch rule).
+    @State private var activeSportGoal: UserGoal?
+    @State private var sportGoalCatalog: SportCatalog?
+    @State private var showSportGoalScreen = false
 
     var body: some View {
         ScrollView {
@@ -112,6 +117,11 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showHealthDashboard) {
             HealthDashboardView()
+        }
+        .sheet(isPresented: $showSportGoalScreen, onDismiss: {
+            Task { await loadSportGoal() }
+        }) {
+            SportGoalFlowView()
         }
         .sheet(isPresented: $showGymPhotoFlow, onDismiss: {
             Task {
@@ -355,6 +365,10 @@ struct HomeView: View {
                 }
             }
 
+            if let activeSportGoal {
+                goalRow(activeSportGoal)
+            }
+
             Divider().overlay(SomaTokens.hairline)
 
             if todaysWorkoutLog != nil {
@@ -369,6 +383,40 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    /// A quiet one-line goal status + chevron -- deliberately not a button
+    /// style that could compete with the card's single CTA.
+    private func goalRow(_ goal: UserGoal) -> some View {
+        Button {
+            showSportGoalScreen = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "target")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SomaTokens.accent)
+                Text(goalRowText(goal))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink2)
+                    .lineLimit(1)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink5)
+            }
+        }
+        .buttonStyle(SomaNavPillButtonStyle())
+    }
+
+    private func goalRowText(_ goal: UserGoal) -> String {
+        let name = goal.displayName(in: sportGoalCatalog)
+        if goal.kind == .custom, let weeks = goal.durationWeeks, let week = goal.currentWeek {
+            return "\(name) · week \(min(week, weeks)) of \(weeks)"
+        }
+        if let weekLine = goal.weekLine {
+            return "\(name) · \(weekLine)"
+        }
+        return name
     }
 
     /// The real inputs behind today's read -- only what a source actually
@@ -651,6 +699,22 @@ struct HomeView: View {
         weeklyTarget = await profileFetch?.weeklySessionTarget
         todaysSnapshots = await snapshotsFetch
         todaysGenerationCount = await generationCountFetch
+        await loadSportGoal()
+    }
+
+    /// Best-effort: no goal (or a failed fetch) simply means no goal row --
+    /// the same natural "off" state the server kill switch produces.
+    private func loadSportGoal() async {
+        guard Config.enableSportGoals else { return }
+        let needCatalog = sportGoalCatalog == nil
+        // In parallel -- the goal read no longer gates the catalog read.
+        async let goalFetch: UserGoal? = try? await SupabaseClient.shared.fetchActiveGoal()
+        async let catalogFetch: SportCatalog? = needCatalog
+            ? (try? await SupabaseClient.shared.fetchSportCatalog()) : nil
+        activeSportGoal = await goalFetch
+        if activeSportGoal != nil, needCatalog {
+            sportGoalCatalog = await catalogFetch
+        }
     }
 
     private static func longDateString() -> String {

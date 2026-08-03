@@ -40,6 +40,7 @@ import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
+import { computeEtaShift, conceptFromRow, decideGoalWork, decideSafetyPause, deriveEtaInputs, derivePhase, type GoalBlockHistoryEntry, type GoalWorkBlock, type GoalWorkConcept } from "./goalWork.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -143,7 +144,7 @@ interface UserRow {
   diet_type: string | null;
   goal_pace: string | null;
   blockers: string[] | null;
-  accomplishment_goal: string | null;
+  accomplishment_goals: string[] | null;
   desired_weight_kg: number | null;
 }
 
@@ -226,6 +227,18 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ date, safety_flag: true, message: safety.message });
     }
 
+    // Active sport goal (Sport Goal Programs) -- fetched before the cache
+    // read because its state hash joins cache identity below.
+    const goalRow = await fetchActiveGoal(supabase, userId);
+    // Runs BEFORE the signature/cache read so a pregnancy or severe injury
+    // reported today strips the goal block today, not tomorrow.
+    await applySafetyPause(supabase, goalRow, userId);
+    // Phase follows elapsed time (foundation -> build -> peak) instead of
+    // pinning to creation-time 'foundation'; the signature below then
+    // carries the new phase and regenerates today's plan naturally.
+    await maybeAdvancePhase(supabase, goalRow, date);
+    const goalSignature = goalSignatureOf(goalRow);
+
     // One generation per user per (day, selection): serve the cached plan
     // on repeat calls for the SAME selection instead of hitting the
     // Anthropic API again. A different selection than what's cached means
@@ -237,20 +250,12 @@ Deno.serve(async (req: Request) => {
       .eq("user_id", userId)
       .eq("date", date)
       .maybeSingle();
-    if (cached && cached.selected_title === selection.title) {
-      return jsonResponse({ date, category: cached.category, source: cached.source, ...cached.plan });
-    }
-
-    // A different selection than what's cached, but the day is already
-    // logged -- refuse rather than silently swapping the plan behind an
-    // already-completed workout. A log matching this selection's title
-    // falls through normally (the cache-read above already served it).
+    // Today's logs, read before the cache decision: a plan whose workout
+    // is already logged must never be regenerated out from under the log.
     // NOT maybeSingle: multiple logs per day are supported (no
     // unique(user_id, date) on workout_log), and maybeSingle errors on 2+
     // rows -- with the error unread, `data` came back null and the lock
-    // silently disengaged on exactly the days it was written for. The
-    // refusal fires when ANY of today's logs differs from this selection;
-    // a day whose every log matches the selection falls through normally.
+    // silently disengaged on exactly the days it was written for.
     const { data: existingLogs, error: logReadError } = await supabase
       .from("workout_log")
       .select("title")
@@ -259,6 +264,30 @@ Deno.serve(async (req: Request) => {
     if (logReadError) {
       throw new Error(`could not check today's workout log: ${logReadError.message}`);
     }
+    // Goal state belongs in the cache key (BUG-37 lesson): a goal edit --
+    // phase advance, pause, schedule change -- must regenerate, or the
+    // cache replays a plan the new state exists to change. A null cached
+    // signature is served as-is: a goal started AFTER today's plan existed
+    // does NOT invalidate it, by design ("starts with tomorrow's plan").
+    // A signature MISMATCH still serves the cache once the cached workout
+    // is logged: the record of what the user actually did outranks any
+    // goal-state change that arrived after the fact.
+    const cachedGoalSignature =
+      ((cached?.plan as { goal_signature?: string | null } | undefined)?.goal_signature) ?? null;
+    const cachedSelectionLogged = (existingLogs ?? []).some((log) => log.title === selection.title);
+    if (
+      cached && cached.selected_title === selection.title &&
+      (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged)
+    ) {
+      return jsonResponse({ date, category: cached.category, source: cached.source, ...cached.plan });
+    }
+
+    // A different selection than what's cached, but the day is already
+    // logged -- refuse rather than silently swapping the plan behind an
+    // already-completed workout. A log matching this selection's title
+    // falls through normally (the cache-read above already served it).
+    // The refusal fires when ANY of today's logs differs from this
+    // selection; a day whose every log matches falls through normally.
     if ((existingLogs ?? []).some((log) => log.title !== selection.title)) {
       return jsonResponse({
         date,
@@ -291,11 +320,16 @@ Deno.serve(async (req: Request) => {
     }
     const category = recommendation.category as string;
 
-    const { data: userRow } = await supabase
+    const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goal, desired_weight_kg")
+      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg")
       .eq("id", userId)
       .maybeSingle();
+    // Fail loud (BUG-70): an unread error here left userRow null, silently
+    // dropping ALL personalization -- injuries and pregnancy included.
+    if (userReadError) {
+      throw new Error(`could not read user personalization: ${userReadError.message}`);
+    }
 
     const { data: snapshots } = await supabase
       .from("daily_snapshot")
@@ -348,29 +382,77 @@ Deno.serve(async (req: Request) => {
       addDays(date, -1),
     );
 
-    const prompt = buildPrompt(
-      category,
-      resolvedSelection,
-      substituted,
-      finisherDecision,
-      userRow as UserRow | null,
-      (snapshots ?? []) as SnapshotRow[],
-      (recentLogs ?? []) as WorkoutLogRow[],
-      notes,
-    );
-
     // Same closed-vocabulary keyword exclusions used to keep the finisher
     // decision safe also keep the candidate exercise-name list safe --
     // pregnancy adds its own trimester-scaled exclusions on top.
     const pregnancyExcludedKeywords = (userRow as UserRow | null)?.pregnancy
       ? describePregnancyGuidance((userRow as UserRow | null)?.pregnancy_week ?? null).excludedKeywords
       : [];
+    const goalExcludedKeywords = [...finisherExcludedKeywords, ...pregnancyExcludedKeywords];
+
+    // Deterministic goal-block decision (mirrors decideFinisher): whether
+    // goal work appears today, which concept, and its dose -- the LLM only
+    // words it. Custom (coach's task) blocks stay verbatim, injected below.
+    let goalDecision: GoalWorkBlock | null = null;
+    let goalExerciseIds: string[] = [];
+    if (goalRow) {
+      // Independent fetches, so they run in parallel; the safety pause
+      // above already settled the goal state they all read against.
+      const fromCatalog = goalRow.kind === "preset" && goalRow.goal_id ? goalRow.goal_id : null;
+      const [sportVisible, concepts, recentGoalBlocks, exerciseIds] = await Promise.all([
+        isGoalSportVisible(supabase, goalRow, userId),
+        fromCatalog ? fetchGoalConcepts(supabase, fromCatalog) : Promise.resolve([]),
+        fetchRecentGoalBlocks(supabase, userId, date),
+        fromCatalog ? fetchGoalExerciseIds(supabase, fromCatalog) : Promise.resolve([]),
+      ]);
+      goalExerciseIds = exerciseIds;
+      goalDecision = decideGoalWork({
+        category,
+        date,
+        goal: {
+          id: goalRow.id,
+          kind: goalRow.kind === "custom" ? "custom" : "preset",
+          targetKind: (goalRow.target_kind ?? "metric") as "metric" | "milestone" | "qualitative" | "commitment",
+          phase: goalRow.phase ?? null,
+          paused: goalRow.status === "paused",
+          sportVisible,
+          // deno-lint-ignore no-explicit-any
+          scheduleRule: (goalRow.schedule_rule ?? null) as any,
+          scheduleDays: goalRow.schedule_days ?? null,
+          courtDays: goalRow.court_days ?? null,
+          workoutText: goalRow.workout_text ?? null,
+          coachName: goalRow.coach_name ?? null,
+        },
+        concepts,
+        excludedKeywords: goalExcludedKeywords,
+        recentGoalBlocks,
+      });
+      const profilePerWeek = Number.parseInt((userRow as UserRow | null)?.workouts_per_week ?? "", 10);
+      await maybeUpdateEtaSlip(supabase, goalRow, userId, date, Number.isFinite(profilePerWeek) ? profilePerWeek : null);
+    }
+
+    const prompt = buildPrompt(
+      category,
+      resolvedSelection,
+      substituted,
+      finisherDecision,
+      goalDecision,
+      userRow as UserRow | null,
+      (snapshots ?? []) as SnapshotRow[],
+      (recentLogs ?? []) as WorkoutLogRow[],
+      notes,
+    );
+
+    // Goal-mapped exercise ids join the closed vocabulary inside, under
+    // the SAME equipment/level filters and BEFORE the exclusion drop --
+    // a goal never smuggles in gear the user lacks or an unsafe name.
     const candidateExerciseNames = await fetchCandidateExerciseNames(
       supabase,
       resolvedBodyPart,
       (userRow as UserRow | null)?.equipment ?? [],
-      [...finisherExcludedKeywords, ...pregnancyExcludedKeywords],
+      goalExcludedKeywords,
       (userRow as UserRow | null)?.experience_level ?? null,
+      goalDecision?.kind === "preset" ? goalExerciseIds : [],
     );
     const workoutSchema = buildWorkoutSchema(candidateExerciseNames);
 
@@ -404,10 +486,22 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Custom goal: the coach's session is prepended server-side, VERBATIM
+    // (workout_text travels untouched in instructions) -- the model never
+    // sees it, so it can never rewrite it.
+    if (goalDecision?.kind === "custom") {
+      plan = { ...plan, blocks: [buildCoachBlock(goalDecision), ...plan.blocks] };
+      actualDurationMinutes = computeTotalDuration(plan);
+    }
+
     const planWithDuration = {
       ...plan,
       actual_duration_minutes: actualDurationMinutes,
       substituted_body_part: substituted ? resolvedBodyPart : null,
+      // Cache identity (see the cache read above) + tomorrow's goal-block
+      // history (hangs-never-consecutive-days rule in goalWork.ts).
+      goal_signature: goalSignature,
+      goal_block: goalBlockMeta(goalDecision),
       // Drives the "Optional finisher -- you're well recovered today"
       // badge client-side (AIWorkoutPlanSections.swift) -- only ever true
       // alongside a block whose is_finisher is also true.
@@ -551,6 +645,7 @@ function buildPrompt(
   selection: Selection,
   wasSubstituted: boolean,
   finisherDecision: FinisherDecision,
+  goalDecision: GoalWorkBlock | null,
   userRow: UserRow | null,
   snapshots: SnapshotRow[],
   recentLogs: WorkoutLogRow[],
@@ -607,8 +702,8 @@ function buildPrompt(
   const blockersLine = userRow?.blockers?.length
     ? `What's gotten in their way before: ${userRow.blockers.map(blockerLabel).join(", ")} -- bias toward simplicity and consistency in how the session is framed if relevant (e.g. shorter/clearer instructions for "busy schedule" or "overwhelmed").`
     : "";
-  const accomplishmentLine = userRow?.accomplishment_goal
-    ? `In their own words, what they want to accomplish: "${userRow.accomplishment_goal}".`
+  const accomplishmentLine = userRow?.accomplishment_goals?.length
+    ? `In their own words, what they want to accomplish: ${userRow.accomplishment_goals.map((g) => `"${g}"`).join(", ")}.`
     : "";
 
   const healthLines = describeHealthData(snapshots);
@@ -639,6 +734,19 @@ function buildPrompt(
     : finisherDecision.definition
     ? `Include exactly one finisher as the LAST block, named "Block N - Optional Finisher" (is_finisher: true, every other block is_finisher: false), clearly optional and skippable without any penalty to the rest of the session -- state that plainly in its instructions. ${finisherDecision.definition.durationMinutesRange[0]}-${finisherDecision.definition.durationMinutesRange[1]} min, built around this concept -- ${finisherDecision.definition.description} Scale effort to a solid but not maximal ${finisherDecision.definition.rpeTarget}.${finisherEquipmentConstraint}`
     : `Do NOT include a finisher block today.`;
+
+  // Whether goal work appears, which concept, and its dose were already
+  // decided deterministically (decideGoalWork) -- the model only words it.
+  const goalDose = goalDecision !== null && goalDecision.kind === "preset"
+    ? `${goalDecision.concept.durationMinutesRange[0]}-${goalDecision.concept.durationMinutesRange[1]} min${goalDecision.concept.rpeTarget ? ` at ${goalDecision.concept.rpeTarget}` : ""}${goalDecision.concept.doseNotes ? `. Hard dose caps (never exceed): ${goalDecision.concept.doseNotes}` : ""}`
+    : "";
+  const goalInstruction = goalDecision === null
+    ? ""
+    : goalDecision.kind === "custom"
+    ? `\nThe user also has a coach-assigned session scheduled today. It is inserted into the plan separately, exactly as their coach wrote it -- do NOT restate, rewrite, or duplicate the coach's content anywhere in your blocks. Build the day's blocks as complementary work that leaves the user capacity for that coach session (roughly 15 min of it).`
+    : goalDecision.optional
+    ? `\nThe user's active sport goal adds an OPTIONAL rest-day mobility dose. Include it as the FIRST block, named "Goal Block (optional) - ${goalDecision.concept.focus}", ${goalDose}, built around this concept -- ${goalDecision.concept.description} State plainly in its instructions that it is optional and skippable today.`
+    : `\nThe user's active sport goal opens today's session. Include the goal work as the FIRST block (before every other non-warm-up block -- goal quality demands freshness), named "Goal Block - ${goalDecision.concept.focus}", ${goalDose}, built around this concept -- ${goalDecision.concept.description} Then continue with the day's normal blocks; the day's volume caps and intensity rules above still govern the whole session.`;
 
   const substitutionLine = wasSubstituted
     ? `This target was already redirected server-side to a safe body part given the user's noted injury (their original selection conflicted with it) -- build the plan around "${selection.bodyPart}" as given, do not try to reintroduce the original focus area.`
@@ -674,7 +782,7 @@ ${
   }
 Return the full session as:
 - warm_up: 2-3 items that specifically prepare the body for THIS workout and adjust to today's health data above (e.g. lighter/shorter if recovery or sleep was poor) -- concrete named items like "5 min incline treadmill walk", "2x10 arm circles", "shoulder rolls", not a generic "warm up" placeholder.
-- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). ${finisherInstruction}
+- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). ${finisherInstruction}${goalInstruction}
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
 For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, and instructions (2-3 sentences, plain and easy to follow, describing exact form/technique). Also give a one-line "focus" summarizing today's session.`;
@@ -748,4 +856,357 @@ function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00.000Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+// --- Sport Goal Programs plumbing (see goalWork.ts for the decision) ---
+
+interface UserGoalRow {
+  id: string;
+  goal_id: string | null;
+  kind: string;
+  target_kind: string | null;
+  status: string;
+  phase: string | null;
+  schedule_rule: string | null;
+  schedule_days: number[] | null;
+  court_days: number[] | null;
+  workout_text: string | null;
+  coach_name: string | null;
+  eta_start: string | null;
+  eta_end: string | null;
+  frequency_per_week: number | null;
+  eta_slip_days: number | null;
+  created_at: string | null;
+  pause_reason: string | null;
+  safety_ack: { warned?: { keyword?: string }[] } | null;
+}
+
+/// Non-fatal on error: the daily plan must keep generating exactly as it
+/// does without the feature (goal tables may trail this deploy).
+// deno-lint-ignore no-explicit-any
+async function fetchActiveGoal(supabase: any, userId: string): Promise<UserGoalRow | null> {
+  const { data, error } = await supabase
+    .from("user_goal")
+    .select("id, goal_id, kind, target_kind, status, phase, schedule_rule, schedule_days, court_days, workout_text, coach_name, eta_start, eta_end, frequency_per_week, eta_slip_days, created_at, pause_reason, safety_ack")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) {
+    console.error(`could not read user_goal (generating goal-free): ${error.message}`);
+    return null;
+  }
+  return (data as UserGoalRow | null) ?? null;
+}
+
+/// Spec decision 8: a pregnancy or severe injury that hard-conflicts with
+/// the active goal auto-pauses it (pause_reason='safety') instead of
+/// serving hollowed-out filler. Mutates goalRow in place on pause so the
+/// cache signature and decideGoalWork see the paused state this request.
+/// Non-fatal on error: worst case the goal stays active one more day and
+/// content filtering still governs every exercise.
+// deno-lint-ignore no-explicit-any
+async function applySafetyPause(supabase: any, goalRow: UserGoalRow | null, userId: string): Promise<void> {
+  if (!goalRow || goalRow.status !== "active") return;
+  try {
+    const { data: safetyRow, error } = await supabase
+      .from("users")
+      .select("pregnancy, pregnancy_week, injury_tags, injury_severity")
+      .eq("id", userId)
+      .maybeSingle();
+    if (error) {
+      console.error(`safety-pause user read failed: ${error.message}`);
+      return;
+    }
+    const pregnant = safetyRow?.pregnancy === true;
+    const severity = (safetyRow?.injury_severity ?? {}) as Record<string, InjurySeverityLevel>;
+    const hasSevereInjury = Object.values(severity).includes("severe" as InjurySeverityLevel);
+    if (!pregnant && !hasSevereInjury) return;
+
+    let pregnancySafe: boolean | null = null;
+    if (pregnant && goalRow.kind === "preset" && goalRow.goal_id) {
+      const { data: catalogRow } = await supabase
+        .from("sport_goals")
+        .select("pregnancy_safe")
+        .eq("id", goalRow.goal_id)
+        .maybeSingle();
+      pregnancySafe = typeof catalogRow?.pregnancy_safe === "boolean" ? catalogRow.pregnancy_safe : null;
+    }
+    const concepts = hasSevereInjury && goalRow.kind === "preset" && goalRow.goal_id
+      ? await fetchGoalConcepts(supabase, goalRow.goal_id)
+      : [];
+    const injuryKeywords = hasSevereInjury
+      ? describeContraindications(
+        (safetyRow?.injury_tags as string[] | null) ?? [],
+        severity,
+      ).excludedKeywords
+      : [];
+    const decision = decideSafetyPause({
+      goalKind: goalRow.kind === "custom" ? "custom" : "preset",
+      pregnancySafe,
+      pregnant,
+      hasSevereInjury,
+      ackedKeywords: (goalRow.safety_ack?.warned ?? [])
+        .map((w) => w.keyword)
+        .filter((k): k is string => typeof k === "string"),
+      workoutText: goalRow.workout_text,
+      pregnancyKeywords: pregnant
+        ? describePregnancyGuidance((safetyRow?.pregnancy_week as number | null) ?? null).excludedKeywords
+        : [],
+      injuryKeywords,
+      concepts,
+    });
+    if (!decision) return;
+
+    const { error: pauseError } = await supabase
+      .from("user_goal")
+      .update({ status: "paused", pause_reason: "safety" })
+      .eq("id", goalRow.id)
+      .eq("status", "active");
+    if (pauseError) {
+      console.error(`safety-pause write failed: ${pauseError.message}`);
+      return;
+    }
+    goalRow.status = "paused";
+    goalRow.pause_reason = "safety";
+    console.log(`goal ${goalRow.id} safety-paused (${decision.reason})`);
+  } catch (e) {
+    console.error(`safety-pause failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/// Advances an active preset goal's phase from elapsed time within its
+/// horizon (created_at -> eta_end), persisting and mutating goalRow in
+/// place so the cache signature carries it. Non-fatal on any error.
+// deno-lint-ignore no-explicit-any
+async function maybeAdvancePhase(supabase: any, goalRow: UserGoalRow | null, date: string): Promise<void> {
+  if (!goalRow || goalRow.kind !== "preset" || goalRow.status !== "active") return;
+  const blockStart = goalRow.created_at?.slice(0, 10) ?? null;
+  if (!blockStart || !goalRow.eta_end) return;
+  try {
+    const elapsedWeeks = Math.floor(daysBetween(blockStart, date) / 7);
+    const horizonWeeksHigh = Math.max(1, Math.round(daysBetween(blockStart, goalRow.eta_end) / 7));
+    const phase = derivePhase(elapsedWeeks, horizonWeeksHigh);
+    if (phase === goalRow.phase) return;
+    const { error } = await supabase.from("user_goal").update({ phase }).eq("id", goalRow.id);
+    if (error) console.error(`phase advance write failed: ${error.message}`);
+    // Today's decision/signature use the true phase even if the write
+    // failed -- the next request simply retries the persist.
+    goalRow.phase = phase;
+  } catch (e) {
+    console.error(`phase advance failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+function daysBetween(fromDate: string, toDate: string): number {
+  const from = new Date(`${fromDate}T00:00:00.000Z`).getTime();
+  const to = new Date(`${toDate}T00:00:00.000Z`).getTime();
+  return Math.max(0, Math.floor((to - from) / 86400000));
+}
+
+/// Recomputes the visible ETA slip for an active preset goal and persists it
+/// when it changed. Non-fatal on any error: the slip is display data.
+// deno-lint-ignore no-explicit-any
+async function maybeUpdateEtaSlip(
+  supabase: any,
+  goalRow: UserGoalRow,
+  userId: string,
+  date: string,
+  profileSessionsPerWeek: number | null,
+): Promise<void> {
+  // eta_start is the re-test window; the block itself starts at creation.
+  const blockStart = goalRow.created_at?.slice(0, 10) ?? null;
+  if (goalRow.kind !== "preset" || goalRow.status !== "active" || !blockStart || !goalRow.eta_start) return;
+  try {
+    const [planRows, logRows, lowDays] = await Promise.all([
+      supabase
+        .from("ai_workout_plan")
+        .select("date, plan")
+        .eq("user_id", userId)
+        .gte("date", blockStart)
+        .lte("date", date),
+      supabase
+        .from("workout_log")
+        .select("date")
+        .eq("user_id", userId)
+        .gte("date", blockStart)
+        .lte("date", date),
+      supabase
+        .from("daily_recommendation")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .in("category", ["rest", "light"])
+        .gte("date", blockStart)
+        .lte("date", date),
+    ]);
+    if (planRows.error || logRows.error || lowDays.error) {
+      console.error(`eta slip reads failed: ${planRows.error?.message ?? logRows.error?.message ?? lowDays.error?.message}`);
+      return;
+    }
+    // A goal session = a day whose plan actually carried a goal block
+    // (plan.goal_block, written by goalBlockMeta) AND a logged workout.
+    const goalBlockDates = ((planRows.data ?? []) as { date: string; plan: { goal_block?: unknown } | null }[])
+      .filter((r) => r.plan?.goal_block != null)
+      .map((r) => r.date);
+    const plannedPerWeek = goalRow.frequency_per_week ?? profileSessionsPerWeek ?? 3;
+    const { completedSessions, lowReadinessDays } = deriveEtaInputs({
+      plannedPerWeek,
+      elapsedDays: daysBetween(blockStart, date),
+      goalBlockDates,
+      logDates: ((logRows.data ?? []) as { date: string }[]).map((r) => r.date),
+      restLightCount: lowDays.count ?? 0,
+    });
+    const shift = computeEtaShift({
+      goalKind: "preset",
+      windowStart: blockStart,
+      date,
+      plannedSessionsPerWeek: plannedPerWeek,
+      completedSessions,
+      lowReadinessDays,
+    });
+    const nextDays = shift?.shiftDays ?? null;
+    if (nextDays === (goalRow.eta_slip_days ?? null)) return;
+    const { error } = await supabase
+      .from("user_goal")
+      .update({ eta_slip_days: nextDays, eta_slip_reason: shift?.reason ?? null })
+      .eq("id", goalRow.id);
+    if (error) console.error(`eta slip write failed: ${error.message}`);
+  } catch (e) {
+    console.error(`eta slip recompute failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/// Cache-identity hash of the goal state (id, phase, paused, schedule) --
+/// the BUG-37 lesson applied here. Null when no goal is active.
+function goalSignatureOf(goalRow: UserGoalRow | null): string | null {
+  if (!goalRow) return null;
+  return [
+    goalRow.id,
+    goalRow.phase ?? "",
+    goalRow.status === "paused" ? "paused" : "active",
+    goalRow.schedule_rule ?? "",
+    (goalRow.schedule_days ?? []).join(","),
+    (goalRow.court_days ?? []).join(","),
+  ].join("|");
+}
+
+/// Per-sport server gate (spec, gating 3): live for everyone, internal for
+/// testers, beta for opt-ins (and testers) -- the same rule as the
+/// sport_status_visible() RLS helper. Fails closed on any unknown state.
+// deno-lint-ignore no-explicit-any
+async function isGoalSportVisible(supabase: any, goalRow: UserGoalRow, userId: string): Promise<boolean> {
+  if (goalRow.kind === "custom" || !goalRow.goal_id) return true;
+  const { data, error } = await supabase
+    .from("sport_goals")
+    .select("id, sports(status)")
+    .eq("id", goalRow.goal_id)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error(`could not read sport_goals for gating: ${error.message}`);
+    return false;
+  }
+  // deno-lint-ignore no-explicit-any
+  const status = ((data as any).sports?.status as string | undefined) ?? null;
+  if (status === "live") return true;
+  if (status !== "internal" && status !== "beta") return false;
+  // Roster table, not a users column -- users can edit their own users row
+  // and could self-grant (see the internal_testers migration comment).
+  const { data: tester, error: testerError } = await supabase
+    .from("internal_testers")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (testerError) {
+    console.error(`could not read internal_testers for gating: ${testerError.message}`);
+    return false;
+  }
+  if (tester !== null) return true;
+  if (status !== "beta") return false;
+  // Beta is a self-service opt-in (beta_optins is user-writable by design).
+  const { data: optin, error: optinError } = await supabase
+    .from("beta_optins")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (optinError) {
+    console.error(`could not read beta_optins for gating: ${optinError.message}`);
+    return false;
+  }
+  return optin !== null;
+}
+
+// deno-lint-ignore no-explicit-any
+async function fetchGoalConcepts(supabase: any, goalId: string): Promise<GoalWorkConcept[]> {
+  const { data, error } = await supabase.from("goal_work_concept").select("*").eq("goal_id", goalId);
+  if (error) {
+    console.error(`could not read goal_work_concept: ${error.message}`);
+    return [];
+  }
+  // deno-lint-ignore no-explicit-any
+  return ((data ?? []) as any[]).map(conceptFromRow).filter((c): c is GoalWorkConcept => c !== null);
+}
+
+/// Library ids of the goal's mapped exercises -- resolved to names inside
+/// fetchCandidateExerciseNames under its own equipment/level filters, so a
+/// goal mapping can never bypass what the user owns or can safely do.
+// deno-lint-ignore no-explicit-any
+async function fetchGoalExerciseIds(supabase: any, goalId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("goal_exercise")
+    .select("exercise_id")
+    .eq("goal_id", goalId);
+  if (error) {
+    console.error(`could not read goal_exercise: ${error.message}`);
+    return [];
+  }
+  // deno-lint-ignore no-explicit-any
+  return ((data ?? []) as any[])
+    .map((r) => r.exercise_id)
+    .filter((n): n is string => typeof n === "string");
+}
+
+/// Yesterday's goal-block metadata from the cached plan -- feeds the
+/// hangs-never-consecutive-days and every_other_day rules.
+// deno-lint-ignore no-explicit-any
+async function fetchRecentGoalBlocks(supabase: any, userId: string, date: string): Promise<GoalBlockHistoryEntry[]> {
+  const yesterday = addDays(date, -1);
+  const { data, error } = await supabase
+    .from("ai_workout_plan")
+    .select("plan")
+    .eq("user_id", userId)
+    .eq("date", yesterday)
+    .maybeSingle();
+  if (error || !data) return [];
+  const meta = (data.plan as { goal_block?: { text?: string } } | null)?.goal_block;
+  return meta?.text ? [{ date: yesterday, text: meta.text }] : [];
+}
+
+/// The coach's session as a plan block. workout_text lands in instructions
+/// byte-identical -- built server-side so the model can never touch it.
+function buildCoachBlock(decision: Extract<GoalWorkBlock, { kind: "custom" }>): GeneratedBlock {
+  return {
+    name: decision.builtWith ? `Coach Block — built with ${decision.builtWith}` : "Coach Block",
+    rounds: 1,
+    rest_between_rounds: "as written by your coach",
+    exercises: [{
+      name: decision.builtWith ? `Built with ${decision.builtWith}` : "Your coach's assignment",
+      sets: 1,
+      reps: "as written",
+      weight_guidance: "as written by your coach",
+      intensity: "as written by your coach",
+      // Nominal goal-block midpoint (spec: 10-20 min) -- the coach's text
+      // carries no parseable duration in v1.
+      duration_minutes: 15,
+      instructions: decision.workoutText,
+    }],
+    is_finisher: false,
+  };
+}
+
+/// Compact goal-block record stored inside the cached plan -- read back by
+/// fetchRecentGoalBlocks tomorrow and by the client for badging.
+function goalBlockMeta(decision: GoalWorkBlock | null): Record<string, unknown> | null {
+  if (decision === null) return null;
+  return decision.kind === "preset"
+    ? { kind: "preset", focus: decision.concept.focus, optional: decision.optional, text: `${decision.concept.focus}: ${decision.concept.description}` }
+    : { kind: "custom", built_with: decision.builtWith, text: "coach block" };
 }

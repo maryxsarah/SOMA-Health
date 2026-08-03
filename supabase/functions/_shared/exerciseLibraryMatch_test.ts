@@ -46,6 +46,7 @@ Deno.test("advanced experience unlocks expert movements", () => {
 // --- fetchCandidateExerciseNames against a filtering mock client ---
 
 interface Row {
+  id: string;
   name: string;
   category: string;
   equipment: string | null;
@@ -100,17 +101,19 @@ function mockSupabase(rows: Row[]) {
 }
 
 const LIBRARY: Row[] = [
-  { name: "Bodyweight Flyes", category: "strength", equipment: "e-z curl bar", primary_muscles: ["chest"], level: "intermediate" },
-  { name: "Pushups", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "beginner" },
-  { name: "Barbell Bench Press", category: "strength", equipment: "barbell", primary_muscles: ["chest"], level: "beginner" },
-  { name: "One-Arm Push-Up", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "expert" },
-  { name: "Bodyweight Squat", category: "strength", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner" },
-  { name: "Behind Head Chest Stretch", category: "stretching", equipment: "body only", primary_muscles: ["chest"], level: "beginner" },
-  { name: "Exercise Ball Stretch", category: "stretching", equipment: "exercise ball", primary_muscles: ["chest"], level: "beginner" },
-  { name: "Running, Treadmill", category: "cardio", equipment: "machine", primary_muscles: ["quadriceps"], level: "beginner" },
-  { name: "Jumping Jacks", category: "cardio", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner" },
-  { name: "Trail Running/Walking", category: "cardio", equipment: null, primary_muscles: ["quadriceps"], level: "beginner" },
-  { name: "Arm Circles", category: "strength", equipment: null, primary_muscles: ["shoulders"], level: "beginner" },
+  { id: "bodyweight-flyes", name: "Bodyweight Flyes", category: "strength", equipment: "e-z curl bar", primary_muscles: ["chest"], level: "intermediate" },
+  { id: "pushups", name: "Pushups", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "beginner" },
+  { id: "barbell-bench-press", name: "Barbell Bench Press", category: "strength", equipment: "barbell", primary_muscles: ["chest"], level: "beginner" },
+  { id: "one-arm-push-up", name: "One-Arm Push-Up", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "expert" },
+  { id: "bodyweight-squat", name: "Bodyweight Squat", category: "strength", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner" },
+  { id: "behind-head-chest-stretch", name: "Behind Head Chest Stretch", category: "stretching", equipment: "body only", primary_muscles: ["chest"], level: "beginner" },
+  { id: "exercise-ball-stretch", name: "Exercise Ball Stretch", category: "stretching", equipment: "exercise ball", primary_muscles: ["chest"], level: "beginner" },
+  { id: "running-treadmill", name: "Running, Treadmill", category: "cardio", equipment: "machine", primary_muscles: ["quadriceps"], level: "beginner" },
+  { id: "jumping-jacks", name: "Jumping Jacks", category: "cardio", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner" },
+  { id: "trail-running-walking", name: "Trail Running/Walking", category: "cardio", equipment: null, primary_muscles: ["quadriceps"], level: "beginner" },
+  { id: "arm-circles", name: "Arm Circles", category: "strength", equipment: null, primary_muscles: ["shoulders"], level: "beginner" },
+  { id: "depth-jump-leap", name: "Depth Jump Leap", category: "plyometrics", equipment: "body only", primary_muscles: ["quadriceps"], level: "intermediate" },
+  { id: "barbell-back-squat", name: "Barbell Back Squat", category: "strength", equipment: "barbell", primary_muscles: ["quadriceps"], level: "intermediate" },
 ];
 
 Deno.test("REGRESSION: floor-only user never sees the EZ-bar 'Bodyweight Flyes'", async () => {
@@ -216,4 +219,47 @@ Deno.test("moderate (and unknown) experience excludes expert movements", async (
 Deno.test("advanced experience gets the full difficulty range", async () => {
   const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "upper_body", ["gym"], [], "advanced");
   assert(names.includes("One-Arm Push-Up"));
+});
+
+Deno.test("goal exercises are unioned in by id but safety exclusions still govern them", async () => {
+  // A goal-mapped id outside today's body-part filter joins the enum...
+  const unioned = await fetchCandidateExerciseNames(
+    mockSupabase(LIBRARY), "upper_body", [], [], null, ["depth-jump-leap"],
+  );
+  assert(unioned.includes("Depth Jump Leap"));
+  assert(unioned.includes("Pushups"));
+  // ...but never past the exclusion filter -- unioning happens BEFORE it.
+  const excluded = await fetchCandidateExerciseNames(
+    mockSupabase(LIBRARY), "upper_body", [], ["jump"], null, ["depth-jump-leap"],
+  );
+  assertFalse(excluded.includes("Depth Jump Leap"), "goal exercise bypassed the safety filter");
+  assert(excluded.includes("Pushups"));
+});
+
+Deno.test("REGRESSION: a goal exercise needing equipment the user lacks stays out of the vocabulary", async () => {
+  // Barbell squat is goal-mapped, but the user trains bodyweight-only --
+  // the goal union obeys the same equipment filter as the main query.
+  const names = await fetchCandidateExerciseNames(
+    mockSupabase(LIBRARY), "upper_body", ["bodyweight_only"], [], null, ["barbell-back-squat", "depth-jump-leap"],
+  );
+  assertFalse(names.includes("Barbell Back Squat"), "goal exercise bypassed the equipment filter");
+  assert(names.includes("Depth Jump Leap"), "equipment-matched goal exercise should join");
+  // A gym user's equipment covers the barbell -- now it joins.
+  const gym = await fetchCandidateExerciseNames(
+    mockSupabase(LIBRARY), "upper_body", ["gym"], [], null, ["barbell-back-squat"],
+  );
+  assert(gym.includes("Barbell Back Squat"));
+});
+
+Deno.test("REGRESSION: goal exercises above the user's level stay out of the vocabulary", async () => {
+  // Intermediate goal movements never reach a newbie...
+  const newbie = await fetchCandidateExerciseNames(
+    mockSupabase(LIBRARY), "upper_body", [], [], "newbie", ["depth-jump-leap"],
+  );
+  assertFalse(newbie.includes("Depth Jump Leap"), "goal exercise bypassed the level filter");
+  // ...but are fine at moderate, same as the main query's level rule.
+  const moderate = await fetchCandidateExerciseNames(
+    mockSupabase(LIBRARY), "upper_body", [], [], "moderate", ["depth-jump-leap"],
+  );
+  assert(moderate.includes("Depth Jump Leap"));
 });

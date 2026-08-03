@@ -50,3 +50,6 @@ verify_jwt = true
 
 [functions.generate-gym-workout]
 verify_jwt = true
+
+[functions.create-goal]
+verify_jwt = true
