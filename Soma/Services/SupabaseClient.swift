@@ -759,6 +759,18 @@ final class SupabaseClient {
         return Set(rows.map(\.date))
     }
 
+    /// Total AI generations logged for `date` across ALL sources -- mirrors
+    /// the server's tiered quota check (generationLimits.ts counts every row).
+    func fetchTodaysGenerationCount(date: String) async throws -> Int {
+        let path = "rest/v1/ai_generation_log?date=eq.\(date)&select=id"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct Row: Decodable { let id: String }
+        return try JSONDecoder().decode([Row].self, from: data).count
+    }
+
     /// Looks up one exercise_library row for the "what does this look like"
     /// detail view. Prefers exact id (generate-gym-workout's hand-verified
     /// library_id); falls back to exact name (generate-workout-plan's

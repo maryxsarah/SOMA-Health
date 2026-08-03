@@ -89,23 +89,36 @@ enum HealthMetricFamily: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Typed band behind `qualitativeLabel` -- switch on this, never on the
+    /// display string, so rewording a label can't silently change logic.
+    enum QualitativeBand: String {
+        case high = "High"
+        case mediumHigh = "Medium-High"
+        case medium = "Medium"
+        case low = "Low"
+    }
+
     /// A quick qualitative read, ONLY for Recovery/Readiness -- mirrors the
     /// exact thresholds generate-recommendation/index.ts's bandFromWhoop/
     /// bandFromOura already use to decide the day's category, so this
     /// label is never a fabricated new scale, just those same thresholds
     /// surfaced for display. Every other family has no established
     /// "good/bad" threshold in this app, so shows the raw number only.
-    static func qualitativeLabel(recoveryOrReadiness value: Double, isWhoopRecovery: Bool) -> String {
+    static func qualitativeBand(recoveryOrReadiness value: Double, isWhoopRecovery: Bool) -> QualitativeBand {
         if isWhoopRecovery {
-            if value >= 67 { return "High" }
-            if value >= 34 { return "Medium" }
-            return "Low"
+            if value >= 67 { return .high }
+            if value >= 34 { return .medium }
+            return .low
         } else {
-            if value >= 85 { return "High" }
-            if value >= 70 { return "Medium-High" }
-            if value >= 60 { return "Medium" }
-            return "Low"
+            if value >= 85 { return .high }
+            if value >= 70 { return .mediumHigh }
+            if value >= 60 { return .medium }
+            return .low
         }
+    }
+
+    static func qualitativeLabel(recoveryOrReadiness value: Double, isWhoopRecovery: Bool) -> String {
+        qualitativeBand(recoveryOrReadiness: value, isWhoopRecovery: isWhoopRecovery).rawValue
     }
 
     enum TrendDirection {

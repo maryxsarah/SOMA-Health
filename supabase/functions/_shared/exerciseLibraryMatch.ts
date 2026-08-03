@@ -63,15 +63,18 @@ const MAIN_CANDIDATE_LIMIT = 150;
 const STRETCH_CANDIDATE_LIMIT = 60;
 const FALLBACK_LIMIT = 100;
 
-/// Library `equipment` values the user's profile tags actually support.
-/// "body only" is ALWAYS included (everyone has their own bodyweight), and
-/// an empty/unmapped tag list resolves to just that -- the prompt already
-/// tells the model such a user is "no equipment (bodyweight only)", so
-/// handing it an unfiltered catalog contradicted the prompt and produced
-/// EZ-bar picks for floor-only users.
-export function resolveLibraryEquipment(equipment: string[]): string[] {
+/// Allowed library `equipment` values ("body only" always included; empty tags = bodyweight-only).
+/// Null = no narrowing: unmapped tags (bike/pool/other) have no library equivalent to filter by.
+export function resolveLibraryEquipment(equipment: string[]): string[] | null {
+  if (equipment.some((tag) => tag !== "" && !(tag in EQUIPMENT_TAG_TO_LIBRARY_EQUIPMENT))) return null;
   const mapped = equipment.flatMap((tag) => EQUIPMENT_TAG_TO_LIBRARY_EQUIPMENT[tag] ?? []);
   return Array.from(new Set(["body only", ...mapped]));
+}
+
+/// PostgREST OR clause for the equipment filter: allowed values PLUS
+/// NULL-equipment rows, which a plain `.in()` can never match.
+function equipmentOrClause(values: string[]): string {
+  return `equipment.is.null,equipment.in.(${values.map((v) => `"${v}"`).join(",")})`;
 }
 
 /// Library `level` values the user's experience actually supports --
@@ -90,9 +93,10 @@ export function resolveLibraryLevels(experienceLevel: string | null): string[] {
   }
 }
 
-/// Returns a bounded, relevant list of real exercise names -- always
-/// non-empty (falls back progressively broader rather than ever handing
-/// back an empty enum, which would make generation impossible). Includes
+/// Returns a bounded, relevant list of real exercise names -- falls back
+/// progressively broader rather than handing back an empty enum, EXCEPT
+/// when safety exclusions empty even the broadest set: then it throws
+/// (fail closed) instead of reinstating contraindicated names. Includes
 /// stretching-category exercises unconditionally, since every plan needs
 /// warm-up/cool-down candidates regardless of the main body-part focus.
 export async function fetchCandidateExerciseNames(
@@ -107,14 +111,21 @@ export async function fetchCandidateExerciseNames(
   const equipmentValues = resolveLibraryEquipment(equipment);
   const levelValues = resolveLibraryLevels(experienceLevel);
 
+  // Includes NULL-equipment rows: a row with no equipment value is a
+  // no-gear movement, exactly what every filter here must keep pickable.
+  // deno-lint-ignore no-explicit-any
+  const withEquipmentFilter = (query: any) =>
+    equipmentValues ? query.or(equipmentOrClause(equipmentValues)) : query;
+
   let mainNames: string[] = [];
   if (bodyPart !== "cardio" && bodyPart !== "recovery") {
-    let query = supabase
-      .from("exercise_library")
-      .select("name")
-      .in("equipment", equipmentValues)
-      .in("level", levelValues)
-      .limit(MAIN_CANDIDATE_LIMIT);
+    let query = withEquipmentFilter(
+      supabase
+        .from("exercise_library")
+        .select("name")
+        .in("level", levelValues)
+        .limit(MAIN_CANDIDATE_LIMIT),
+    );
     if (muscles.length > 0) query = query.overlaps("primary_muscles", muscles);
     const { data } = await query;
     // deno-lint-ignore no-explicit-any
@@ -125,13 +136,14 @@ export async function fetchCandidateExerciseNames(
     // safely perform -- is wrong no matter how well its muscles match
     // (the "Bodyweight Flyes"-on-EZ-bars bug).
     if (mainNames.length === 0) {
-      const { data: byEquipmentOnly } = await supabase
-        .from("exercise_library")
-        .select("name")
-        .eq("category", "strength")
-        .in("equipment", equipmentValues)
-        .in("level", levelValues)
-        .limit(FALLBACK_LIMIT);
+      const { data: byEquipmentOnly } = await withEquipmentFilter(
+        supabase
+          .from("exercise_library")
+          .select("name")
+          .eq("category", "strength")
+          .in("level", levelValues)
+          .limit(FALLBACK_LIMIT),
+      );
       // deno-lint-ignore no-explicit-any
       mainNames = (byEquipmentOnly ?? []).map((r: any) => r.name);
     }
@@ -149,35 +161,71 @@ export async function fetchCandidateExerciseNames(
       mainNames = (broadFallback ?? []).map((r: any) => r.name);
     }
   } else if (bodyPart === "cardio") {
-    const { data } = await supabase
-      .from("exercise_library")
-      .select("name")
-      .eq("category", "cardio")
-      .in("equipment", equipmentValues)
-      .in("level", levelValues)
-      .limit(FALLBACK_LIMIT);
+    const { data } = await withEquipmentFilter(
+      supabase
+        .from("exercise_library")
+        .select("name")
+        .eq("category", "cardio")
+        .in("level", levelValues)
+        .limit(FALLBACK_LIMIT),
+    );
     // deno-lint-ignore no-explicit-any
     mainNames = (data ?? []).map((r: any) => r.name);
+
+    // Cardio equipment is a weak signal (running needs no gym): broaden
+    // rather than hand a cardio day a stretch-only vocabulary.
+    if (mainNames.length === 0) {
+      const { data: anyEquipment } = await supabase
+        .from("exercise_library")
+        .select("name")
+        .eq("category", "cardio")
+        .in("level", levelValues)
+        .limit(FALLBACK_LIMIT);
+      // deno-lint-ignore no-explicit-any
+      mainNames = (anyEquipment ?? []).map((r: any) => r.name);
+    }
+    if (mainNames.length === 0) {
+      const { data: anyCardio } = await supabase
+        .from("exercise_library")
+        .select("name")
+        .eq("category", "cardio")
+        .limit(FALLBACK_LIMIT);
+      // deno-lint-ignore no-explicit-any
+      mainNames = (anyCardio ?? []).map((r: any) => r.name);
+    }
   }
 
-  const { data: stretchData } = await supabase
-    .from("exercise_library")
-    .select("name")
-    .eq("category", "stretching")
-    .in("equipment", equipmentValues)
-    .in("level", levelValues)
-    .limit(STRETCH_CANDIDATE_LIMIT);
+  const { data: stretchData } = await withEquipmentFilter(
+    supabase
+      .from("exercise_library")
+      .select("name")
+      .eq("category", "stretching")
+      .in("level", levelValues)
+      .limit(STRETCH_CANDIDATE_LIMIT),
+  );
   // deno-lint-ignore no-explicit-any
   const stretchNames: string[] = (stretchData ?? []).map((r: any) => r.name);
 
   const merged = new Set([...mainNames, ...stretchNames]);
   const lowerExcluded = excludedKeywords.map((k) => k.toLowerCase());
-  const filtered = Array.from(merged).filter((name) => {
-    const lower = name.toLowerCase();
-    return !lowerExcluded.some((kw) => lower.includes(kw));
-  });
+  const dropExcluded = (names: string[]) =>
+    names.filter((name) => !lowerExcluded.some((kw) => name.toLowerCase().includes(kw)));
+  const filtered = dropExcluded(Array.from(merged));
+  if (filtered.length > 0) return filtered;
 
-  // Excluding injury-unsafe names could, in principle, empty the list --
-  // fall back to the unfiltered merge rather than a broken empty enum.
-  return filtered.length > 0 ? filtered : Array.from(merged);
+  // Safety exclusions emptied the list. Broaden to beginner bodyweight work
+  // and re-filter -- NEVER hand back the contraindicated names themselves.
+  const { data: safeFallback } = await supabase
+    .from("exercise_library")
+    .select("name")
+    .eq("equipment", "body only")
+    .eq("level", "beginner")
+    .limit(FALLBACK_LIMIT);
+  // deno-lint-ignore no-explicit-any
+  const safeNames = dropExcluded((safeFallback ?? []).map((r: any) => r.name));
+  if (safeNames.length > 0) return safeNames;
+
+  // Fail closed (caller 500s and generates nothing) rather than suggest
+  // movements the safety layer explicitly excluded.
+  throw new Error("no library exercises remain after safety exclusions");
 }

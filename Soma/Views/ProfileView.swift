@@ -888,9 +888,16 @@ struct ProfileView: View {
             // Promote the newest remaining upload so repeated Remove taps
             // walk back through the whole history instead of stranding it.
             let history = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: kind)) ?? []
-            let next = history.first
-            if let next {
-                try? await SupabaseClient.shared.pinBodyPhoto(kind: kind, path: next.storagePath)
+            var next = history.first
+            if let candidate = next {
+                do {
+                    try await SupabaseClient.shared.pinBodyPhoto(kind: kind, path: candidate.storagePath)
+                } catch {
+                    // Pin failed, so the server pointer is still empty -- showing
+                    // the promoted photo anyway would recreate BUG-45's stranded state.
+                    next = nil
+                    errorMessage = "Photo removed, but the previous one couldn't be restored. Try again."
+                }
             }
             let nextImage: UIImage? = if let next { await loadBodyPhoto(path: next.storagePath) } else { nil }
             if kind == .goal {
