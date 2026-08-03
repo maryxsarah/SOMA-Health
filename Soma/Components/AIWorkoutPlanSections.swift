@@ -6,6 +6,9 @@ import SwiftUI
 /// AIWorkoutPlan/AIWorkoutBlock/AIExercise shape without bespoke UI.
 struct AIWorkoutPlanView: View {
     let plan: AIWorkoutPlan
+    /// e.g. "VERTICAL JUMP · GOAL BLOCK" -- rendered over the first block
+    /// when the caller has an active sport goal. Nil everywhere else.
+    var goalEyebrow: String? = nil
 
     @State private var selectedExercise: AIExercise?
 
@@ -20,7 +23,16 @@ struct AIWorkoutPlanView: View {
                     .foregroundStyle(.secondary)
             }
             aiPhaseSection(title: "Warm-up", exercises: plan.warmUp)
-            ForEach(plan.blocks) { block in
+            ForEach(Array(plan.blocks.enumerated()), id: \.element.id) { index, block in
+                // Only when this plan really carries a goal block -- an
+                // active goal alone must not badge a goal-free day.
+                if index == 0, let goalEyebrow, plan.goalBlock != nil {
+                    Text(goalEyebrow)
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(SomaTokens.accent)
+                        .padding(.top, 10)
+                }
                 aiBlockSection(block)
             }
             aiPhaseSection(title: "Cool-down", exercises: plan.coolDown)

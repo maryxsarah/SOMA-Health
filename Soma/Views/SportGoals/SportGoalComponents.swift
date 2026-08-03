@@ -1,0 +1,149 @@
+import SwiftUI
+
+/// The three named training phases -- fixed product vocabulary, rendered
+/// as a thin strip (design §6a note 6).
+enum GoalPhase: String, CaseIterable {
+    case foundation, build, peak
+
+    var displayName: String { rawValue.capitalized }
+}
+
+/// Thin inline phase strip: Foundation → Build → Peak, current one filled.
+struct GoalPhaseStrip: View {
+    /// Nil highlights nothing (pre-start preview).
+    var current: GoalPhase?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(GoalPhase.allCases, id: \.self) { phase in
+                let isCurrent = phase == current
+                VStack(spacing: 4) {
+                    Capsule()
+                        .fill(isCurrent ? SomaTokens.accent : SomaTokens.surface4)
+                        .frame(height: 4)
+                    Text(phase.displayName)
+                        .font(.system(size: 10.5, weight: isCurrent ? .bold : .medium))
+                        .foregroundStyle(isCurrent ? SomaTokens.accent : SomaTokens.ink4)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+}
+
+extension UserGoal {
+    /// Server-set phase wins; otherwise derived from elapsed fraction of
+    /// the horizon -- deterministic, never guessed past the data.
+    var currentPhase: GoalPhase? {
+        if let phase, let known = GoalPhase(rawValue: phase) { return known }
+        guard let startDate else { return nil }
+        let endDate = etaStart.flatMap(SportGoalFormat.parseDay)
+            ?? recheckDate.flatMap(SportGoalFormat.parseDay)
+        guard let endDate, endDate > startDate else { return nil }
+        let fraction = Date().timeIntervalSince(startDate) / endDate.timeIntervalSince(startDate)
+        if fraction < 1.0 / 3.0 { return .foundation }
+        if fraction < 2.0 / 3.0 { return .build }
+        return .peak
+    }
+}
+
+/// Small capsule badge for a goal's kind ("metric" / "milestone" / "in words").
+struct GoalKindBadge: View {
+    let kind: SportGoalKind
+
+    var body: some View {
+        if !kind.badgeText.isEmpty {
+            Text(kind.badgeText)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink3)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(SomaTokens.surface3))
+        }
+    }
+}
+
+/// Seven toggle circles, displayed Monday-first but EMITTING the server's
+/// weekday values (0=Sunday..6=Saturday, JS getUTCDay -- create-goal validates 0..6).
+struct WeekdayMiniPicker: View {
+    @Binding var selected: Set<Int>
+
+    /// Monday-first display order mapped to server weekday values.
+    static let dayValuesInDisplayOrder = [1, 2, 3, 4, 5, 6, 0]
+    private static let labels = ["M", "T", "W", "T", "F", "S", "S"]
+
+    /// "Mon"-style label for a server weekday value (0=Sunday..6=Saturday).
+    static func shortName(forValue value: Int) -> String {
+        let names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        guard names.indices.contains(value) else { return "?" }
+        return names[value]
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<7, id: \.self) { index in
+                let day = Self.dayValuesInDisplayOrder[index]
+                let isOn = selected.contains(day)
+                Button {
+                    if isOn { selected.remove(day) } else { selected.insert(day) }
+                } label: {
+                    Text(Self.labels[index])
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isOn ? SomaTokens.accent : SomaTokens.ink3)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(isOn ? SomaTokens.accentSoft : SomaTokens.surface))
+                        .overlay(Circle().strokeBorder(isOn ? SomaTokens.accent : SomaTokens.hairline, lineWidth: isOn ? 2 : 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+/// Calm inline safety-conflict warning (warnSoft, never red, never a
+/// block) with the explicit acknowledgment control.
+struct GoalConflictWarningView: View {
+    let conflicts: [GoalSafetyConflict]
+    let onAcknowledge: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(SomaTokens.warn)
+                Text("Worth a look before you start")
+                    .font(.system(size: 13.5, weight: .bold))
+                    .foregroundStyle(SomaTokens.warn)
+            }
+            ForEach(conflicts) { conflict in
+                Text(conflict.message)
+                    .font(.system(size: 13))
+                    .foregroundStyle(SomaTokens.ink2)
+            }
+            if conflicts.contains(where: \.isPregnancyRelated) {
+                Text("Please discuss this plan with your care provider before continuing.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(SomaTokens.ink2)
+            }
+            Button(action: onAcknowledge) {
+                Text("My coach knows my situation — continue")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(SomaTokens.warn)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+                    .background(
+                        RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous)
+                            .fill(SomaTokens.surface)
+                            .overlay(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).stroke(SomaTokens.warnLine, lineWidth: 1))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous)
+                .fill(SomaTokens.warnSoft)
+                .overlay(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).stroke(SomaTokens.warnLine, lineWidth: 1))
+        )
+    }
+}

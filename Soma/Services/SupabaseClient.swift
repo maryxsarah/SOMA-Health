@@ -258,7 +258,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,weight_kg,desired_weight_kg&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,weight_kg,desired_weight_kg,country,city&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -288,6 +288,8 @@ final class SupabaseClient {
         body["pregnancy"] = profile.pregnancy ?? NSNull()
         body["pregnancy_week"] = profile.pregnancy == true ? (profile.pregnancyWeek ?? NSNull()) : NSNull()
         body["weekly_session_target"] = profile.weeklySessionTarget ?? NSNull()
+        body["country"] = profile.country ?? NSNull()
+        body["city"] = profile.city ?? NSNull()
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
@@ -1142,6 +1144,38 @@ final class SupabaseClient {
         try Self.assertSuccess(response, data: data)
     }
 
+    // MARK: - Beta opt-in (self-service beta_optins table, RLS own-row)
+
+    /// Whether the caller has opted into beta features -- own-row select.
+    func fetchBetaOptIn() async throws -> Bool {
+        let path = "rest/v1/beta_optins?select=user_id&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Row: Decodable { let user_id: String }
+        return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
+    }
+
+    /// Inserts (opt in) or deletes (opt out) the caller's own row -- direct
+    /// RLS write, same trust model as logWorkout.
+    func setBetaOptIn(_ enabled: Bool) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        if enabled {
+            var request = try await authorizedRequest(path: "rest/v1/beta_optins", method: "POST")
+            // ignore-duplicates: re-enabling after a missed response must
+            // not 409 on the already-present pk row.
+            request.setValue("resolution=ignore-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["user_id": userId])
+            let (data, response) = try await urlSession.data(for: request)
+            try Self.assertSuccess(response, data: data)
+        } else {
+            var request = try await authorizedRequest(path: "rest/v1/beta_optins?user_id=eq.\(userId)", method: "DELETE")
+            request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+            let (data, response) = try await urlSession.data(for: request)
+            try Self.assertSuccess(response, data: data)
+        }
+    }
+
     // MARK: - user_feedback
 
     /// Direct insert via RLS (`user_feedback_insert_own`) -- user-entered
@@ -1171,6 +1205,147 @@ final class SupabaseClient {
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
+    }
+
+    // MARK: - Sport goals (feature-flagged, see Config.enableSportGoals)
+
+    /// RLS-gated catalog read -- `sports` visibility is filtered server-side
+    /// by status, so an empty result means the feature is off for this user.
+    func fetchSportCatalog() async throws -> SportCatalog {
+        let sportsRequest = try await authorizedRequest(path: "rest/v1/sports?select=*&order=name.asc", method: "GET")
+        let (sportsData, sportsResponse) = try await urlSession.data(for: sportsRequest)
+        try Self.assertSuccess(sportsResponse, data: sportsData)
+        let sports = try JSONDecoder().decode([Sport].self, from: sportsData)
+        guard !sports.isEmpty else { return SportCatalog() }
+
+        let goalsRequest = try await authorizedRequest(path: "rest/v1/sport_goals?select=*&order=name.asc", method: "GET")
+        let (goalsData, goalsResponse) = try await urlSession.data(for: goalsRequest)
+        try Self.assertSuccess(goalsResponse, data: goalsData)
+        // Goals are re-filtered to visible sports so a sport flipped dark
+        // can never leak its goals through a laxer sport_goals policy.
+        let visibleSportIds = Set(sports.map(\.id))
+        let goals = try JSONDecoder().decode([SportGoal].self, from: goalsData)
+            .filter { visibleSportIds.contains($0.sportId) }
+        return SportCatalog(sports: sports, goals: goals)
+    }
+
+    /// Calls the create-goal edge function -- it validates, runs the safety
+    /// keyword pass, and either creates the goal or returns conflicts for
+    /// the explicit-acknowledgment flow.
+    func createGoal(_ goalRequest: CreateGoalRequest) async throws -> CreateGoalOutcome {
+        var body: [String: Any] = [
+            "kind": goalRequest.kind.rawValue,
+            "targetKind": goalRequest.targetKind.rawValue,
+            "acknowledgeConflicts": goalRequest.acknowledgeConflicts,
+        ]
+        if let v = goalRequest.goalId { body["goalId"] = v }
+        if let v = goalRequest.baselineValue { body["baselineValue"] = v }
+        if let v = goalRequest.baselineStage { body["baselineStage"] = v }
+        if let v = goalRequest.targetText { body["targetText"] = v }
+        if let v = goalRequest.givenText { body["givenText"] = v }
+        if let v = goalRequest.workoutText { body["workoutText"] = v }
+        if let v = goalRequest.coachName { body["coachName"] = v }
+        if let v = goalRequest.durationWeeks { body["durationWeeks"] = v }
+        if let v = goalRequest.customMetricName { body["customMetricName"] = v }
+        if let v = goalRequest.customMetricUnit { body["customMetricUnit"] = v }
+        if let v = goalRequest.assignmentPhotoPath { body["assignmentPhotoPath"] = v }
+        if let v = goalRequest.frequencyPerWeek { body["frequencyPerWeek"] = v }
+        if let v = goalRequest.scheduleRule { body["scheduleRule"] = v.rawValue }
+        if let v = goalRequest.scheduleDays { body["scheduleDays"] = v }
+        if let v = goalRequest.courtDays { body["courtDays"] = v }
+
+        var request = try await authorizedRequest(path: "functions/v1/create-goal", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        // Conflicts come back as 200 + {conflicts} -- a normal outcome that
+        // needs the user's acknowledgment, not an error.
+        struct ConflictsResponse: Decodable { let conflicts: [GoalSafetyConflict] }
+        if let decoded = try? JSONDecoder().decode(ConflictsResponse.self, from: data), !decoded.conflicts.isEmpty {
+            return .conflicts(decoded.conflicts)
+        }
+        // create-goal answers { created: true, goal: <row> } -- use that row
+        // directly instead of re-fetching the active goal afterwards.
+        struct CreatedResponse: Decodable { let goal: UserGoal }
+        return .created(try JSONDecoder().decode(CreatedResponse.self, from: data).goal)
+    }
+
+    /// Plain read via RLS -- the one `status='active'` row, if any.
+    func fetchActiveGoal() async throws -> UserGoal? {
+        let path = "rest/v1/user_goal?status=eq.active&select=*&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([UserGoal].self, from: data).first
+    }
+
+    /// Everything that isn't active, newest first -- completed rows ARE the
+    /// achievements log; paused rows are resumable.
+    func fetchGoalHistory() async throws -> [UserGoal] {
+        let path = "rest/v1/user_goal?status=neq.active&select=*&order=created_at.desc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([UserGoal].self, from: data)
+    }
+
+    /// User-owned lifecycle transitions (pause/resume/abandon/complete) --
+    /// direct RLS PATCH, same trust level as workout_log edits.
+    func updateGoalStatus(id: String, status: UserGoalStatus, pauseReason: GoalPauseReason? = nil, resultValue: Double? = nil) async throws {
+        var body: [String: Any] = ["status": status.rawValue]
+        body["pause_reason"] = pauseReason?.rawValue ?? NSNull()
+        if status == .completed {
+            body["completed_at"] = Date().ISO8601Format()
+            if let resultValue { body["result_value"] = resultValue }
+        }
+        var request = try await authorizedRequest(path: "rest/v1/user_goal?id=eq.\(id)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// Chart history for one goal, oldest first.
+    func fetchGoalMeasurements(userGoalId: String) async throws -> [GoalMeasurement] {
+        let path = "rest/v1/goal_measurement_log?user_goal_id=eq.\(userGoalId)&select=*&order=measured_at.asc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([GoalMeasurement].self, from: data)
+    }
+
+    /// Direct RLS insert -- user-entered measurement, `logWorkout` pattern.
+    func insertMeasurement(userGoalId: String, kind: GoalMeasurementKind, value: Double) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/goal_measurement_log", method: "POST")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId,
+            "user_goal_id": userGoalId,
+            "kind": kind.rawValue,
+            "value": value,
+            "measured_at": Date().ISO8601Format(),
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// Coach-assignment photo into its private bucket (body-photos
+    /// archetype: user-scoped path, binary body). Returns the storage path.
+    func uploadAssignmentPhoto(imageData: Data) async throws -> String {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let path = "\(userId)/assignment-\(UUID().uuidString).jpg"
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1/object/coach-assignments/\(path)")!)
+        request.httpMethod = "POST"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.httpBody = imageData
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return path
     }
 
     // MARK: - Request helpers

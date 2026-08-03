@@ -127,6 +127,11 @@ struct UserProfile: Codable, Equatable {
     /// progress (workouts logged this week) on the Profile screen. Purely
     /// a personal-tracking display -- not read by any recommendation logic.
     var weeklySessionTarget: Int?
+    /// ISO region code (e.g. "US") -- with `city`, powers future nearby
+    /// gym/partner suggestions. Optional, display/settings-only today.
+    var country: String? = nil
+    /// Free-text city name, same purpose as `country`.
+    var city: String? = nil
     /// Storage paths (not the image itself), behind Config.enableBodyPhotoUpload
     /// -- managed only via SupabaseClient's uploadBodyPhoto/deleteBodyPhoto,
     /// not through the general profile save() flow, hence the defaults.
@@ -152,10 +157,20 @@ struct UserProfile: Codable, Equatable {
         case pregnancy
         case pregnancyWeek = "pregnancy_week"
         case weeklySessionTarget = "weekly_session_target"
+        case country
+        case city
         case goalBodyPhotoPath = "goal_body_photo_path"
         case currentBodyPhotoPath = "current_body_photo_path"
         case weightKg = "weight_kg"
         case desiredWeightKg = "desired_weight_kg"
+    }
+
+    /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.
+    static func regionDisplay(country: String?, city: String?) -> String? {
+        let parts = [city, country]
+            .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 
     static let empty = UserProfile(

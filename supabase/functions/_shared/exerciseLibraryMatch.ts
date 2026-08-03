@@ -113,6 +113,10 @@ export async function fetchCandidateExerciseNames(
   equipment: string[],
   excludedKeywords: string[],
   experienceLevel: string | null = null,
+  // Library ids to union in (a sport goal's goal_exercise mappings) --
+  // fetched under the SAME equipment/level filters, before the exclusion
+  // drop, so goal work never names gear or skills the user lacks.
+  goalExerciseIds: string[] = [],
 ): Promise<string[]> {
   const muscles = BODY_PART_TO_MUSCLES[bodyPart] ?? [];
   const equipmentValues = resolveLibraryEquipment(equipment);
@@ -213,7 +217,23 @@ export async function fetchCandidateExerciseNames(
   // deno-lint-ignore no-explicit-any
   const stretchNames: string[] = (stretchData ?? []).map((r: any) => r.name);
 
-  const merged = new Set([...mainNames, ...stretchNames]);
+  // Goal-mapped exercises join the pool only when they pass the same
+  // equipment and level filters as everything else -- no side door.
+  let goalNames: string[] = [];
+  if (goalExerciseIds.length > 0) {
+    const { data: goalData } = await withEquipmentFilter(
+      supabase
+        .from("exercise_library")
+        .select("name")
+        .in("id", goalExerciseIds)
+        .in("level", levelValues)
+        .limit(MAIN_CANDIDATE_LIMIT),
+    );
+    // deno-lint-ignore no-explicit-any
+    goalNames = (goalData ?? []).map((r: any) => r.name);
+  }
+
+  const merged = new Set([...mainNames, ...stretchNames, ...goalNames]);
   const lowerExcluded = excludedKeywords.map((k) => k.toLowerCase());
   const dropExcluded = (names: string[]) =>
     names.filter((name) => !lowerExcluded.some((kw) => name.toLowerCase().includes(kw)));

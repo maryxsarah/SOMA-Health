@@ -75,6 +75,10 @@ enum Config {
     /// screen) -- it's a silent input to workout-plan generation only.
     static let enableBodyPhotoVisionAnalysis = true
 
+    /// Sport goal programs -- compile-time safety net only. The operational
+    /// switch is server-side (`sports.status` via RLS): empty catalog = off.
+    static let enableSportGoals = true
+
     private static func string(for key: String) -> String {
         Bundle.main.object(forInfoDictionaryKey: key) as? String ?? ""
     }

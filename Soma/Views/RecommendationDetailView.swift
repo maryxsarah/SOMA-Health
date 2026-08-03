@@ -57,6 +57,11 @@ struct RecommendationDetailView: View {
     @State private var checkedInTagsToday: Set<String> = []
     @State private var injuryCheckinMessage: String?
 
+    // Active sport goal -- drives the "… · GOAL BLOCK" eyebrow over the
+    // plan's first block. Nil (no eyebrow) when no active goal exists.
+    @State private var activeSportGoal: UserGoal?
+    @State private var sportGoalCatalog: SportCatalog?
+
     /// Lets HomeView hand off an already-generated gym-photo plan so it
     /// shows up here immediately -- the "Take a Picture of Your Gym" entry
     /// point now lives on Home (not here), so this is the only way a
@@ -121,7 +126,7 @@ struct RecommendationDetailView: View {
                     }
 
                     if let aiPlan {
-                        AIWorkoutPlanView(plan: aiPlan)
+                        AIWorkoutPlanView(plan: aiPlan, goalEyebrow: goalBlockEyebrow)
 
                         if isCompletedToday {
                             Label("Workout completed today", systemImage: "crown.fill")
@@ -793,6 +798,14 @@ struct RecommendationDetailView: View {
         )) ?? []
     }
 
+    /// "VERTICAL JUMP · GOAL BLOCK" over the plan's first block -- gated on
+    /// the PLAN's own goal_block marker, not just an active goal existing.
+    private var goalBlockEyebrow: String? {
+        guard Config.enableSportGoals, aiPlan?.goalBlock != nil,
+              let activeSportGoal, activeSportGoal.status == .active else { return nil }
+        return "\(activeSportGoal.displayName(in: sportGoalCatalog).uppercased()) · GOAL BLOCK"
+    }
+
     private func loadContext() async {
         async let snapshotFetch: [DailySnapshotRow]? = try? SupabaseClient.shared.fetchTodaysSnapshots(date: recommendation.date)
         async let stepsFetch: Double? = HealthKitManager.isAvailable ? await HealthKitManager.shared.fetchRecentAverageSteps() : nil
@@ -805,6 +818,16 @@ struct RecommendationDetailView: View {
         )) ?? []
         async let injuryStatesFetch: [InjuryRecoveryState] = (try? await SupabaseClient.shared.fetchInjuryRecoveryStates()) ?? []
         async let injurySubstitutionsFetch: [String: String] = (try? await SupabaseClient.shared.fetchInjurySubstitutions()) ?? [:]
+        // Joined into the concurrent batch -- these two were serial before.
+        async let activeGoalFetch: UserGoal? = Config.enableSportGoals
+            ? (try? await SupabaseClient.shared.fetchActiveGoal()) : nil
+        async let catalogFetch: SportCatalog? = Config.enableSportGoals
+            ? (try? await SupabaseClient.shared.fetchSportCatalog()) : nil
+
+        activeSportGoal = await activeGoalFetch
+        if activeSportGoal != nil {
+            sportGoalCatalog = await catalogFetch
+        }
 
         snapshots = await snapshotFetch ?? []
         averageSteps = await stepsFetch
