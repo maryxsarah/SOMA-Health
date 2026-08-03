@@ -22,6 +22,9 @@ final class SubscriptionManager: ObservableObject {
     static let annualProductID = "com.skollnitzer.soma.premium.annual"
 
     @Published private(set) var isSubscribed = false
+    /// The tier last synced to Supabase ("free"/"monthly"/"annual") -- lets
+    /// UI quota gates mirror the server's tier-scaled generation limits.
+    @Published private(set) var tier = "free"
 
     private var transactionListener: Task<Void, Never>?
 
@@ -56,12 +59,13 @@ final class SubscriptionManager: ObservableObject {
                   transaction.productID == Self.monthlyProductID || transaction.productID == Self.annualProductID
             else { continue }
             isSubscribed = transaction.revocationDate == nil
-            let tier = isSubscribed ? (transaction.productID == Self.annualProductID ? "annual" : "monthly") : "free"
+            tier = isSubscribed ? (transaction.productID == Self.annualProductID ? "annual" : "monthly") : "free"
             updateSubscriptionTierRemote(tier)
             mirrorSubscriptionStatusToSuperwall()
             return
         }
         isSubscribed = false
+        tier = "free"
         updateSubscriptionTierRemote("free")
         mirrorSubscriptionStatusToSuperwall()
     }

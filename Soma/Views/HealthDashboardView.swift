@@ -133,11 +133,11 @@ struct HealthDashboardView: View {
     }
 
     private func overviewHeadline(score: Double, isWhoop: Bool) -> String {
-        let label = HealthMetricFamily.qualitativeLabel(recoveryOrReadiness: score, isWhoopRecovery: isWhoop)
-        switch label {
-        case "High": return "High — a good day to push"
-        case "Medium": return "Medium — moderate effort fits"
-        default: return "Low — favor recovery today"
+        switch HealthMetricFamily.qualitativeBand(recoveryOrReadiness: score, isWhoopRecovery: isWhoop) {
+        case .high: return "High — a good day to push"
+        case .mediumHigh: return "Medium-High — quality work fits today"
+        case .medium: return "Medium — moderate effort fits"
+        case .low: return "Low — favor recovery today"
         }
     }
 
@@ -430,8 +430,10 @@ struct HealthDashboardView: View {
 
     // MARK: - Data helpers
 
+    /// Strictly today's snapshots -- no fallback to older days, because every
+    /// caller labels the result as current ("TODAY'S READ", "LAST NIGHT").
     private func todaysValue(_ extract: (DailySnapshotRow) -> Double?) -> Double? {
-        todaysSnapshots.compactMap(extract).first ?? recentSnapshots.reversed().compactMap(extract).first
+        todaysSnapshots.compactMap(extract).first
     }
 
     private func todaysValueText(format: String, unit: String, _ extract: (DailySnapshotRow) -> Double?) -> String? {

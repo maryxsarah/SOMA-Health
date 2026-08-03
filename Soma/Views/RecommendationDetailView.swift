@@ -804,12 +804,11 @@ struct RecommendationDetailView: View {
                 aiPlan = existing.plan
                 selectedTitle = existing.selectedTitle
                 // bodyPart isn't a persisted column -- recover it from a
-                // substitution record if one exists, else from matching the
-                // title against the fixed suggestion list (works for the
-                // normal flow; a gym-photo title won't match, so fall back
-                // to full_body rather than leaving this nil, which would
-                // silently no-op "Mark Workout Complete").
+                // substitution record, the gym template's own bodyPart, or
+                // the fixed suggestion list; full_body only as a last resort
+                // (leaving it nil would silently no-op "Mark Workout Complete").
                 selectedBodyPart = existing.plan.substitutedBodyPart
+                    ?? existing.plan.templateBodyPart
                     ?? recommendation.category.workoutSuggestions.first(where: { $0.title == existing.selectedTitle })?.bodyPart.rawValue
                     ?? BodyPartFocus.fullBody.rawValue
                 addedToPlan = existing.addedToPlan
