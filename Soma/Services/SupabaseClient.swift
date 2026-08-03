@@ -1104,6 +1104,27 @@ final class SupabaseClient {
         try Self.assertSuccess(response, data: data)
     }
 
+    struct ConnectionStatus: Decodable {
+        struct Provider: Decodable {
+            let connected: Bool
+            let needsReconnect: Bool
+        }
+        let whoop: Provider
+        let oura: Provider
+    }
+
+    /// Server-verified Whoop/Oura connection health -- distinct from
+    /// AppState.connectedProviders, which is a local cache set once at
+    /// connect time and never re-verified. A refresh-token failure
+    /// server-side (revoked access, expired refresh token) has no other
+    /// way to reach the client; see fetch-connection-status.
+    func fetchConnectionStatus() async throws -> ConnectionStatus {
+        let request = try await authorizedRequest(path: "functions/v1/fetch-connection-status", method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode(ConnectionStatus.self, from: data)
+    }
+
     /// Backfills the last N days right after a wearable is connected, so
     /// the calendar strip and HRV baseline aren't stuck waiting day-by-day
     /// for history to accumulate -- reuses generate-recommendation itself

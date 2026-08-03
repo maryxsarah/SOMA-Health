@@ -932,7 +932,19 @@ async function ensureFreshWhoopToken(
       client_secret: clientSecret,
     }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    // The refresh token itself is dead (revoked, expired) -- this is the
+    // one signal the client has no other way to learn. Previously this
+    // just returned null and the row sat there unchanged forever, so the
+    // client's local "connected" cache never found out. Best-effort: a
+    // failure marking the row shouldn't also break this request.
+    await supabase
+      .from("wearable_tokens")
+      .update({ needs_reconnect: true })
+      .eq("id", token.id)
+      .then(null, () => {});
+    return null;
+  }
   const json = await res.json();
 
   const expiresAt = new Date(Date.now() + json.expires_in * 1000).toISOString();
@@ -942,6 +954,9 @@ async function ensureFreshWhoopToken(
       access_token: json.access_token,
       refresh_token: json.refresh_token ?? token.refresh_token,
       expires_at: expiresAt,
+      // A later successful refresh after a transient failure (network
+      // blip, provider outage) should clear any stale flag from before.
+      needs_reconnect: false,
     })
     .eq("id", token.id);
 
@@ -1107,7 +1122,15 @@ async function ensureFreshOuraToken(
       client_secret: clientSecret,
     }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    // Same signal as ensureFreshWhoopToken -- see its comment.
+    await supabase
+      .from("wearable_tokens")
+      .update({ needs_reconnect: true })
+      .eq("id", token.id)
+      .then(null, () => {});
+    return null;
+  }
   const json = await res.json();
 
   const expiresAt = new Date(Date.now() + json.expires_in * 1000).toISOString();
@@ -1117,6 +1140,7 @@ async function ensureFreshOuraToken(
       access_token: json.access_token,
       refresh_token: json.refresh_token ?? token.refresh_token,
       expires_at: expiresAt,
+      needs_reconnect: false,
     })
     .eq("id", token.id);
 

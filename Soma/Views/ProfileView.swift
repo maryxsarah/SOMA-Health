@@ -483,12 +483,18 @@ struct ProfileView: View {
     /// visually distinct from a setting row (guide 05's own distinction).
     private func deviceRow(_ provider: Provider) -> some View {
         let isConnected = appState.connectedProviders.contains(provider)
+        // Server-verified: the stored refresh token failed (revoked,
+        // expired) so the connection is dead even though the local cache
+        // still says "connected." Tappable in this state -- unlike a
+        // healthy connection, which is only ever disconnected by the
+        // provider's own app/website, not from here.
+        let needsReconnect = appState.providersNeedingReconnect.contains(provider)
         return Button {
-            if !isConnected { connectDevice(provider) }
+            if !isConnected || needsReconnect { connectDevice(provider) }
         } label: {
             HStack(spacing: 10) {
                 Circle()
-                    .fill(isConnected ? SomaTokens.successDot : SomaTokens.neutralDot)
+                    .fill(needsReconnect ? SomaTokens.warn : (isConnected ? SomaTokens.successDot : SomaTokens.neutralDot))
                     .frame(width: 8, height: 8)
                 Text(provider.displayName)
                     .font(.system(size: 14.5, weight: .semibold))
@@ -496,6 +502,10 @@ struct ProfileView: View {
                 Spacer()
                 if connecting.contains(provider) {
                     ProgressView()
+                } else if needsReconnect {
+                    Text("Reconnect")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.warn)
                 } else {
                     Text(isConnected ? "Connected" : "Connect")
                         .font(.system(size: 13, weight: .semibold))
@@ -506,7 +516,7 @@ struct ProfileView: View {
             .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
         }
         .buttonStyle(.plain)
-        .disabled(isConnected || connecting.contains(provider))
+        .disabled((isConnected && !needsReconnect) || connecting.contains(provider))
     }
 
     // MARK: - Detail sheets
@@ -864,8 +874,22 @@ struct ProfileView: View {
             .map(Self.streak(from:)) ?? 0
         sessionsDoneThisWeek = await Self.workoutsThisWeek()
         await loadSportGoalState()
+        await loadConnectionStatus()
 
         setSuperwallUserAttributes(profile: profile)
+    }
+
+    /// Best-effort, server-verified reconnect state -- distinct from
+    /// appState.connectedProviders, which never learns about a dead
+    /// refresh token on its own. A failed fetch just leaves the previous
+    /// (or empty) state, same "degrade to hidden" posture as the rest of
+    /// this load path.
+    private func loadConnectionStatus() async {
+        guard let status = try? await SupabaseClient.shared.fetchConnectionStatus() else { return }
+        var needingReconnect: Set<Provider> = []
+        if status.whoop.needsReconnect { needingReconnect.insert(.whoop) }
+        if status.oura.needsReconnect { needingReconnect.insert(.oura) }
+        appState.providersNeedingReconnect = needingReconnect
     }
 
     /// Best-effort (`try?` throughout): a failed fetch degrades to hidden
