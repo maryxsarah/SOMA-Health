@@ -1083,6 +1083,25 @@ final class SupabaseClient {
         return try JSONDecoder().decode(DailyRecommendation.self, from: data)
     }
 
+    /// Sets or clears the user's own "request a rest/active-recovery day"
+    /// override for `date` -- distinct from generate-recommendation's
+    /// health-data-driven caps, this wins outright over all of them
+    /// server-side. `category: nil` clears an existing request. Throws
+    /// (rather than silently no-op-ing) if no recommendation exists yet
+    /// for that date -- callers should ensure today's recommendation has
+    /// already loaded before offering this affordance.
+    func setRecommendationOverride(date: String, category: RecommendationCategory?) async throws {
+        // `category?.rawValue ?? NSNull()` reaches the server as JSON
+        // `null` when clearing -- a plain Swift `nil` inside `[String: Any]`
+        // would instead be silently dropped by JSONSerialization.
+        let body: [String: Any] = ["date": date, "category": category?.rawValue ?? NSNull()]
+        var request = try await authorizedRequest(path: "functions/v1/set-recommendation-override", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
     /// Backfills the last N days right after a wearable is connected, so
     /// the calendar strip and HRV baseline aren't stuck waiting day-by-day
     /// for history to accumulate -- reuses generate-recommendation itself

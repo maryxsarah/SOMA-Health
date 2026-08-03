@@ -234,8 +234,26 @@ struct RecommendationDetailView: View {
             Text(explanationText)
             Text("Today's step target: \(recommendation.category.stepTarget)\(averageSteps.map { String(format: " — you've averaged ~%.0f/day over the last week.", $0) } ?? ".")")
                 .font(.system(size: 12.5))
-            if recommendation.sleepCapApplied {
+            if let requested = recommendation.userRequestedCategory {
+                        // Not styled as a warning (unlike the caps below) --
+                        // this wasn't a safety downgrade, it's what the user
+                        // themselves asked for.
+                        Text("You asked for a \(requested == .rest ? "rest" : "active recovery") day today.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if recommendation.sleepCapApplied {
                         Text("Note: today's intensity was capped because of short sleep, even though recovery looked strong.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if recommendation.hrvCapApplied {
+                        Text("Note: today's intensity was capped because your HRV is noticeably below your usual baseline, even though recovery looked strong.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if recommendation.stressCapApplied {
+                        Text("Note: today's intensity was capped because of a high-stress day, even though recovery looked strong.")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -921,8 +939,11 @@ private struct SeededGenerator: RandomNumberGenerator {
             injuryProtocolModerateCapApplied: false,
             pregnancyCapApplied: false,
             volumeCapApplied: false,
+            hrvCapApplied: false,
+            stressCapApplied: false,
             preCapCategory: nil,
-            dataConfidence: .low
+            dataConfidence: .low,
+            userRequestedCategory: nil
         )
     )
     .environmentObject(AppState())

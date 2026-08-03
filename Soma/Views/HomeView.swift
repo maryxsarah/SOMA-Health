@@ -38,6 +38,10 @@ struct HomeView: View {
     @State private var weeklyTarget: Int?
     /// Today's snapshot rows -- feeds the readiness disclosure's inputs line.
     @State private var todaysSnapshots: [DailySnapshotRow] = []
+    /// "Not feeling it today?" confirmation dialog, and the in-flight state
+    /// for setting/clearing that request. See restDayRequestControl.
+    @State private var showRestDayOptions = false
+    @State private var isSettingRestDayRequest = false
 
     var body: some View {
         ScrollView {
@@ -368,6 +372,61 @@ struct HomeView: View {
                     requestDetailAccess { showDetail = true }
                 }
             }
+
+            restDayRequestControl(recommendation)
+        }
+    }
+
+    /// Lets the user directly ask for a rest/active-recovery day regardless
+    /// of what today's health-data-driven category says -- persisted
+    /// server-side (see setRecommendationOverride), so it survives an app
+    /// restart and generate-workout-plan/generate-gym-workout honor it too.
+    /// Hidden once today's workout is already logged, since there's
+    /// nothing left to override at that point.
+    @ViewBuilder
+    private func restDayRequestControl(_ recommendation: DailyRecommendation) -> some View {
+        if todaysWorkoutLog == nil {
+            if let requested = recommendation.userRequestedCategory {
+                Button {
+                    Task { await setRestDayRequest(nil) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("You requested a \(requested == .rest ? "rest" : "active recovery") day today — Undo")
+                    }
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink3)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSettingRestDayRequest)
+            } else {
+                Button {
+                    showRestDayOptions = true
+                } label: {
+                    Text("Not feeling it today?")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSettingRestDayRequest)
+                .confirmationDialog("Request a different day", isPresented: $showRestDayOptions, titleVisibility: .visible) {
+                    Button("Rest day") { Task { await setRestDayRequest(.rest) } }
+                    Button("Active recovery") { Task { await setRestDayRequest(.light) } }
+                    Button("Cancel", role: .cancel) {}
+                }
+            }
+        }
+    }
+
+    private func setRestDayRequest(_ category: RecommendationCategory?) async {
+        isSettingRestDayRequest = true
+        defer { isSettingRestDayRequest = false }
+        do {
+            try await SupabaseClient.shared.setRecommendationOverride(date: Self.todayDateString(), category: category)
+            await loadTodaysRecommendation()
+        } catch {
+            // Best-effort, same as the other Home refresh calls -- the
+            // affordance stays in its pre-tap state so the user can retry.
         }
     }
 

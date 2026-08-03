@@ -135,6 +135,28 @@ final class DailyRecommendationDecodingTests: XCTestCase {
         XCTAssertFalse(recommendation.injuryProtocolModerateCapApplied)
         XCTAssertFalse(recommendation.pregnancyCapApplied)
         XCTAssertFalse(recommendation.volumeCapApplied)
+        XCTAssertFalse(recommendation.hrvCapApplied)
+        XCTAssertFalse(recommendation.stressCapApplied)
+        XCTAssertNil(recommendation.userRequestedCategory)
+    }
+
+    func testDecodesAnActiveRestDayRequest() throws {
+        let recommendation = try decode("""
+        {
+          "date": "2026-08-03",
+          "category": "rest",
+          "message": "Today's a recovery day.",
+          "reason": "oura_medium_high",
+          "sleep_cap_applied": false,
+          "injury_cap_applied": false,
+          "load_cap_applied": false,
+          "hrv_cap_applied": false,
+          "stress_cap_applied": false,
+          "user_requested_category": "rest"
+        }
+        """)
+
+        XCTAssertEqual(recommendation.userRequestedCategory, .rest)
     }
 
     // MARK: - Caveat copy
