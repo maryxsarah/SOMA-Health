@@ -90,6 +90,9 @@ struct AIWorkoutPlan: Codable {
     /// _shared/injurySubstitution.ts. Absent-means-nil for plans cached
     /// before this field existed.
     let substitutedBodyPart: String?
+    /// The template's body part, only sent by generate-gym-workout (its
+    /// cached plan object carries `bodyPart`); nil for the suggestion flow.
+    let templateBodyPart: String?
     /// True only when today's finisher (see AIWorkoutBlock.isFinisher) is
     /// the full max-effort version, gated on exceptional readiness + no
     /// injury/split conflict -- drives the "Optional finisher -- you're
@@ -107,6 +110,7 @@ struct AIWorkoutPlan: Codable {
         case coolDown = "cool_down"
         case actualDurationMinutes = "actual_duration_minutes"
         case substitutedBodyPart = "substituted_body_part"
+        case templateBodyPart = "bodyPart"
         case exceptionalFinisher = "exceptional_finisher"
     }
 
@@ -130,6 +134,7 @@ struct AIWorkoutPlan: Codable {
         coolDown = try container.decode([AIExercise].self, forKey: .coolDown)
         actualDurationMinutes = try container.decodeIfPresent(Int.self, forKey: .actualDurationMinutes)
         substitutedBodyPart = try container.decodeIfPresent(String.self, forKey: .substitutedBodyPart)
+        templateBodyPart = try container.decodeIfPresent(String.self, forKey: .templateBodyPart)
         exceptionalFinisher = try container.decodeIfPresent(Bool.self, forKey: .exceptionalFinisher) ?? false
         source = try container.decodeIfPresent(String.self, forKey: .source) ?? "suggestion"
     }

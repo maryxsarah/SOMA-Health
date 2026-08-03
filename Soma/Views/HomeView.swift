@@ -28,9 +28,11 @@ struct HomeView: View {
     /// source = gym_photo), not workout completion -- see
     /// fetchGymPhotoScanDates's own doc comment.
     @State private var scanStreak = 0
-    /// Raw scan dates -- drives the scan row's `locked` state (today's scan
-    /// already used), per guide 03's three-state rule.
+    /// Raw scan dates -- feeds the scan streak.
     @State private var scanDates: Set<String> = []
+    /// All AI generations logged today (any source) -- compared against the
+    /// tier's daily limit to drive the scan row's `locked` state.
+    @State private var todaysGenerationCount = 0
     /// Profile's weekly session target -- the week card's progress bar and
     /// streak pill must agree with Profile (guide 03, SELF-CHECK).
     @State private var weeklyTarget: Int?
@@ -112,7 +114,12 @@ struct HomeView: View {
             HealthDashboardView()
         }
         .sheet(isPresented: $showGymPhotoFlow, onDismiss: {
-            Task { await loadTodaysAIPlan() }
+            Task {
+                await loadTodaysAIPlan()
+                // A scan just happened -- refresh the quota count and streak
+                // so the scan row's locked state reflects it immediately.
+                await loadWeeklyProgressAndStreak()
+            }
             guard pendingGymPlan != nil else { return }
             Task {
                 // The seeded sheet needs today's recommendation, which can
@@ -350,8 +357,16 @@ struct HomeView: View {
 
             Divider().overlay(SomaTokens.hairline)
 
-            SomaButton(title: "Start workout", size: .lg, variant: .primary) {
-                requestDetailAccess { showDetail = true }
+            if todaysWorkoutLog != nil {
+                // Today's session is already logged -- reviewing it is the
+                // action now; the detail sheet shows the completed state.
+                SomaButton(title: "Check workout details", size: .lg, variant: .secondary) {
+                    requestDetailAccess { showDetail = true }
+                }
+            } else {
+                SomaButton(title: "Start workout", size: .lg, variant: .primary) {
+                    requestDetailAccess { showDetail = true }
+                }
             }
         }
     }
@@ -376,10 +391,18 @@ struct HomeView: View {
 
     private enum ScanState { case available, locked, hidden }
 
+    /// Mirrors the server's tiered quota (generationLimits.ts): 3/day on
+    /// annual, 1/day otherwise -- an explicit product decision there.
+    private var dailyGenerationLimit: Int {
+        SubscriptionManager.shared.tier == "annual" ? 3 : 1
+    }
+
     private var scanState: ScanState {
         // A committed or completed workout removes the row entirely.
         if todaysWorkoutLog != nil || todaysAIPlan?.addedToPlan == true { return .hidden }
-        if scanDates.contains(Self.todayDateString()) { return .locked }
+        // Lock only when today's quota is actually spent -- one scan must not
+        // lock out an annual subscriber who still has generations left.
+        if todaysGenerationCount >= dailyGenerationLimit { return .locked }
         return .available
     }
 
@@ -409,24 +432,36 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
         case .locked:
-            // The locked copy says what happened before it asks for money.
-            Button {
-                Superwall.shared.register(placement: "view_premium")
-            } label: {
+            if SubscriptionManager.shared.tier == "annual" {
+                // Already on the top tier -- pitching an upgrade they own
+                // would be wrong, so just say when the quota resets.
                 scanRowBody(
                     plate: SomaTokens.warnSoft, icon: "lock.fill", iconColor: SomaTokens.warn,
-                    title: "Today's scan is used",
-                    subtitle: "Upgrade for unlimited scans and workouts"
+                    title: "Today's generations are used",
+                    subtitle: "Up to \(dailyGenerationLimit) AI workouts a day — more tomorrow"
                 ) {
-                    Text("PRO")
-                        .font(.system(size: 10.5, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(SomaTokens.accentDeep))
+                    EmptyView()
                 }
+            } else {
+                // The locked copy says what happened before it asks for money.
+                Button {
+                    Superwall.shared.register(placement: "view_premium")
+                } label: {
+                    scanRowBody(
+                        plate: SomaTokens.warnSoft, icon: "lock.fill", iconColor: SomaTokens.warn,
+                        title: "Today's scan is used",
+                        subtitle: "Upgrade for up to 3 scans and workouts a day"
+                    ) {
+                        Text("PRO")
+                            .font(.system(size: 10.5, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(SomaTokens.accentDeep))
+                    }
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -451,21 +486,28 @@ struct HomeView: View {
         }
     }
 
+    /// Tapping opens the detail sheet in its completed state -- same
+    /// destination as the readiness card's "Check workout details" CTA.
     private func todaysWorkoutCard(_ log: WorkoutLogEntry) -> some View {
-        CardView {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Today's workout")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(log.title)
-                        .font(.body.bold())
+        Button {
+            requestDetailAccess { showDetail = true }
+        } label: {
+            CardView {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Today's workout")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(log.title)
+                            .font(.body.bold())
+                    }
+                    Spacer()
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
                 }
-                Spacer()
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
             }
         }
+        .buttonStyle(.plain)
     }
 
     /// Shown once a plan is added to today's plan but not yet completed --
@@ -602,11 +644,13 @@ struct HomeView: View {
             return try? await SupabaseClient.shared.fetchProfile(id: userId)
         }()
         async let snapshotsFetch: [DailySnapshotRow] = (try? await SupabaseClient.shared.fetchTodaysSnapshots(date: Self.todayDateString())) ?? []
+        async let generationCountFetch: Int = (try? await SupabaseClient.shared.fetchTodaysGenerationCount(date: Self.todayDateString())) ?? 0
 
         scanDates = await scanDatesFetch
         scanStreak = Self.streak(from: scanDates)
         weeklyTarget = await profileFetch?.weeklySessionTarget
         todaysSnapshots = await snapshotsFetch
+        todaysGenerationCount = await generationCountFetch
     }
 
     private static func longDateString() -> String {

@@ -351,7 +351,10 @@ struct DayDetailView: View {
         isCompleting = true
         completeError = nil
         defer { isCompleting = false }
+        // templateBodyPart covers gym-photo plans, whose titles are never in
+        // the fixed suggestion list and would otherwise log as full_body.
         let bodyPart = plannedPlan.plan.substitutedBodyPart
+            ?? plannedPlan.plan.templateBodyPart
             ?? recommendation?.category.workoutSuggestions.first(where: { $0.title == plannedPlan.selectedTitle })?.bodyPart.rawValue
             ?? BodyPartFocus.fullBody.rawValue
         do {

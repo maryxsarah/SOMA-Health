@@ -40,7 +40,7 @@ export function describePregnancyGuidance(
     excludedKeywords: ["max effort", "1rm", "heavy deadlift", "contact", "box jump", "plyo"],
   };
 
-  if (trimester === null || trimester === "first") {
+  if (trimester === "first") {
     return {
       promptLine:
         `pregnant${weekLabel} -- keep effort moderate, avoid heavy breath-holding lifts and high fall-risk or contact movements, and stop immediately for pain, dizziness, or shortness of breath`,
@@ -57,7 +57,8 @@ export function describePregnancyGuidance(
     };
   }
 
-  // third trimester -- broadest exclusions
+  // Third trimester OR unknown week -- a safety default has to fail
+  // conservative, so no recorded week gets the broadest exclusions.
   const keywords = [
     ...base.excludedKeywords,
     "supine",
@@ -70,9 +71,10 @@ export function describePregnancyGuidance(
     "sprint",
     "agility",
   ];
+  const stage = trimester === "third" ? `${weekLabel}, third trimester` : " (week not recorded -- assume late pregnancy)";
   return {
     promptLine:
-      `pregnant${weekLabel}, third trimester -- avoid lying flat on the back, jumping/running/high-impact cardio, heavy breath-holding lifts, and any high fall-risk or contact movements; favor gentle, well-supported, low-impact work`,
+      `pregnant${stage} -- avoid lying flat on the back, jumping/running/high-impact cardio, heavy breath-holding lifts, and any high fall-risk or contact movements; favor gentle, well-supported, low-impact work`,
     excludedKeywords: keywords,
   };
 }
