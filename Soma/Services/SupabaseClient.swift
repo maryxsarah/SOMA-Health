@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Thin URLSession wrapper over Supabase's Auth REST API, PostgREST, and
 /// Edge Functions. V1's needs are narrow enough (one Auth grant, a couple
@@ -265,7 +266,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -541,6 +542,16 @@ final class SupabaseClient {
         ])
         let (d2, r2) = try await urlSession.data(for: clearRequest)
         try Self.assertSuccess(r2, data: d2)
+    }
+
+    /// Downloads and decodes a body photo via its signed URL -- shared by
+    /// every screen that renders one (ProfileView, GoalBodyProgressView).
+    /// Best-effort: nil on any failure (network, decode) since a missing
+    /// photo just means an empty slot, not an error worth surfacing.
+    func loadBodyPhotoImage(path: String) async -> UIImage? {
+        guard let url = try? await signedBodyPhotoURL(path: path),
+              let (data, _) = try? await urlSession.data(from: url) else { return nil }
+        return UIImage(data: data)
     }
 
     /// Re-points the "latest" pointer column at an older history entry --

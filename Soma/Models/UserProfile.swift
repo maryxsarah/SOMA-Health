@@ -155,6 +155,18 @@ struct UserProfile: Codable, Equatable {
     /// read back until the goal-progress bar needed it alongside
     /// weightKg/desiredWeightKg to recompute GoalPace.estimatedMonths.
     var goalPace: GoalPace? = nil
+    /// Read-only -- the AI's own comparison of the user's goal/current
+    /// photos (analyze-body-photo). Shown directly on the Progress screen
+    /// as of the product-owner decision reversing this feature's original
+    /// "never shown to the user" posture -- see
+    /// Config.enableBodyPhotoVisionAnalysis's doc comment for the history.
+    /// Nil = never analyzed (e.g. only one photo set so far); PostgREST
+    /// sends the column as JSON `null` in that case, not an absent key, so
+    /// this must be Optional -- a non-optional array default only covers
+    /// a missing KEY, not a present-but-null value (which is the common
+    /// case here for anyone not yet analyzed).
+    var bodyPhotoEmphasisTags: [GoalTag]? = nil
+    var trainingEmphasis: TrainingEmphasis? = nil
     /// Read-only, server-assigned at account creation -- the journey
     /// "start date" the goal-progress bar counts elapsed days from. Not a
     /// plan-start date (there isn't a separate one), but close enough: for
@@ -191,6 +203,8 @@ struct UserProfile: Codable, Equatable {
         case dateOfBirth = "date_of_birth"
         case goalPace = "goal_pace"
         case createdAt = "created_at"
+        case bodyPhotoEmphasisTags = "body_photo_emphasis_tags"
+        case trainingEmphasis = "training_emphasis"
     }
 
     /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.

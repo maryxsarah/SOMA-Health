@@ -24,7 +24,7 @@ struct HomeView: View {
     @State private var hasGoalBodyPhoto = false
     @State private var hasCurrentBodyPhoto = false
     @State private var isConfirmedAdultForBodyPhotos = false
-    @State private var profileOpensBodyPhotos = false
+    @State private var showGoalBodyProgress = false
     @State private var showSeededDetail = false
     @State private var pendingGymPlan: (AIWorkoutPlan, String, String)?
 
@@ -147,12 +147,13 @@ struct HomeView: View {
             // The beta toggle lives in Profile -- refetch so the promo
             // card appears (or disappears) the moment the sheet closes.
             Task { await loadSportGoal() }
-            Task { await loadGoalBodyPhotoState() }
-            // Reset so the gear icon's plain "open profile" path never
-            // inherits a stale true from a previous goal-progress tap.
-            profileOpensBodyPhotos = false
         }) {
-            ProfileView(openBodyPhotosOnAppear: profileOpensBodyPhotos)
+            ProfileView()
+        }
+        .sheet(isPresented: $showGoalBodyProgress, onDismiss: {
+            Task { await loadGoalBodyPhotoState() }
+        }) {
+            GoalBodyProgressView()
         }
         .sheet(isPresented: $showHealthDashboard) {
             HealthDashboardView()
@@ -709,8 +710,7 @@ struct HomeView: View {
         if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
             Button {
                 AnalyticsManager.shared.featureUsed(name: "goal_progress_home_card")
-                profileOpensBodyPhotos = true
-                showProfile = true
+                showGoalBodyProgress = true
             } label: {
                 if hasGoalBodyPhoto && hasCurrentBodyPhoto {
                     scanRowBody(

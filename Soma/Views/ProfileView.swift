@@ -18,12 +18,6 @@ struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
-    /// True when HomeView's goal-progress card opened this sheet directly --
-    /// jumps straight to the body photos detail sheet instead of landing on
-    /// the plain Training tab, so "see your progress" is actually one tap,
-    /// not "open profile, then find the row yourself."
-    var openBodyPhotosOnAppear = false
-
     @State private var section: ProfileSection = .training
     @State private var activeSheet: ProfileSheet?
     @State private var showReferralCodeSheet = false
@@ -80,29 +74,15 @@ struct ProfileView: View {
     @State private var showHealthDashboard = false
     @State private var completedWorkoutStreak = 0
 
-    // Body photos -- gated by Config.enableBodyPhotoUpload, see the
-    // "Goal & Current Photos" row below.
-    @State private var goalBodyPhotoPath: String?
-    @State private var currentBodyPhotoPath: String?
-    // Feeds GoalJourneyProgress (the progress bar/tenure stat shown above
-    // the photo slots) -- read-only, sourced from `profile` in load().
-    @State private var journeyCreatedAt: String?
-    @State private var journeyGoalPace: GoalPace?
-    @State private var journeyWeightKg: Double?
-    @State private var journeyDesiredWeightKg: Double?
-    @State private var goalBodyPhotoImage: UIImage?
-    @State private var currentBodyPhotoImage: UIImage?
-    @State private var goalPhotoItem: PhotosPickerItem?
-    @State private var currentPhotoItem: PhotosPickerItem?
-    @State private var goalPhotoHistory: [BodyPhotoEntry] = []
-    @State private var currentPhotoHistory: [BodyPhotoEntry] = []
-    @State private var showingPhotoComparison = false
-    @State private var isUploadingGoalPhoto = false
-    @State private var isUploadingCurrentPhoto = false
+    // Body photos -- gated by Config.enableBodyPhotoUpload. The actual
+    // photos/history/upload UI now lives entirely in GoalBodyProgressView
+    // (its own destination, not a Profile settings sheet) -- this row only
+    // needs to know whether to show the entry point at all.
     /// Adult-only gate (App Store 4+ rating) -- fails closed until load()
     /// confirms an 18+ date_of_birth, same posture as PostSetupFlowView's
     /// matching gate on the onboarding version of this same feature.
     @State private var isConfirmedAdultForBodyPhotos = false
+    @State private var showGoalBodyProgress = false
 
     var body: some View {
         ScrollView {
@@ -141,19 +121,11 @@ struct ProfileView: View {
         .sheet(isPresented: $showHealthDashboard) {
             HealthDashboardView()
         }
+        .sheet(isPresented: $showGoalBodyProgress) {
+            GoalBodyProgressView()
+        }
         .task {
             await load()
-            // Gated the same way the row itself is (feature flag + adult
-            // confirmation) -- a deep link can't bypass either check.
-            if openBodyPhotosOnAppear && Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
-                activeSheet = .bodyPhotos
-            }
-        }
-        .onChange(of: goalPhotoItem) { _, newItem in
-            Task { await uploadBodyPhoto(kind: .goal, item: newItem) }
-        }
-        .onChange(of: currentPhotoItem) { _, newItem in
-            Task { await uploadBodyPhoto(kind: .current, item: newItem) }
         }
         .confirmationDialog(
             "Log out of Soma?",
@@ -348,10 +320,10 @@ struct ProfileView: View {
 
             if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
                 summaryRow(
-                    title: "Body photos",
-                    consequence: "Helps personalize your plan toward your goal",
-                    value: "\(goalPhotoHistory.count) goal, \(currentPhotoHistory.count) current"
-                ) { activeSheet = .bodyPhotos }
+                    title: "Your progress",
+                    consequence: "Goal photo, current photo, and how you'll get there",
+                    value: ""
+                ) { showGoalBodyProgress = true }
             }
 
             groupEyebrow("INSIGHTS")
@@ -559,7 +531,6 @@ struct ProfileView: View {
                     case .weeklyTarget: weeklyTargetEditor
                     case .injuries: injuriesEditor
                     case .pregnancy: pregnancyEditor
-                    case .bodyPhotos: bodyPhotosEditor
                     case .contactEmail: contactEmailEditor
                     case .region: regionEditor
                     }
@@ -733,96 +704,6 @@ struct ProfileView: View {
         }
     }
 
-    private var bodyPhotosEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Optional -- helps personalize your plan toward your goal.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if let journeyProgress {
-                journeyProgressSection(journeyProgress)
-            }
-
-            // errorMessage otherwise only renders on the Account tab --
-            // a failed remove/upload here would look like a silent no-op.
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-            HStack(spacing: 16) {
-                bodyPhotoSlot(
-                    title: "Goal body",
-                    image: goalBodyPhotoImage,
-                    isUploading: isUploadingGoalPhoto,
-                    selection: $goalPhotoItem,
-                    onRemove: { Task { await removeBodyPhoto(kind: .goal) } }
-                )
-                bodyPhotoSlot(
-                    title: "Current body",
-                    image: currentBodyPhotoImage,
-                    isUploading: isUploadingCurrentPhoto,
-                    selection: $currentPhotoItem,
-                    onRemove: { Task { await removeBodyPhoto(kind: .current) } }
-                )
-            }
-            // Tapping "Current body" above already replaces the photo (and
-            // keeps the old one in history -- see removeBodyPhoto's
-            // "promote the newest remaining upload" comment) -- this just
-            // names that same action explicitly as ongoing progress
-            // tracking, not a one-time setup step, since it's easy to
-            // assume the slot above is "done" once it's filled once.
-            if currentBodyPhotoImage != nil {
-                PhotosPicker(selection: $currentPhotoItem, matching: .images) {
-                    Label("Add a new progress photo", systemImage: "camera.fill")
-                        .font(.caption.bold())
-                }
-            }
-            if let goalBodyPhotoImage, let currentBodyPhotoImage {
-                Button {
-                    AnalyticsManager.shared.featureUsed(name: "body_photo_comparison")
-                    showingPhotoComparison = true
-                } label: {
-                    Label("Compare Goal vs. Current", systemImage: "arrow.left.and.right.square")
-                        .font(.caption.bold())
-                }
-                .sheet(isPresented: $showingPhotoComparison) {
-                    BodyPhotoComparisonView(goalImage: goalBodyPhotoImage, currentImage: currentBodyPhotoImage)
-                }
-            }
-        }
-    }
-
-    private var journeyProgress: GoalJourneyProgress? {
-        GoalJourneyProgress.compute(
-            createdAt: journeyCreatedAt,
-            weightKg: journeyWeightKg,
-            desiredWeightKg: journeyDesiredWeightKg,
-            goalPace: journeyGoalPace
-        )
-    }
-
-    /// "Day X" always shows (real, always-available data); the bar/estimate
-    /// underneath only appears when a real timeline estimate exists --
-    /// never a fabricated percentage for someone who never set a desired
-    /// weight/pace.
-    private func journeyProgressSection(_ progress: GoalJourneyProgress) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Day \(progress.daysElapsed + 1) of your journey")
-                .font(.subheadline.bold())
-            ProgressView(value: progress.fraction)
-                .tint(SomaTokens.accent)
-            Text(
-                progress.fraction >= 1.0
-                    ? "Past your estimated ~\(progress.estimatedTotalDays / 30)-month timeline -- steady progress still counts."
-                    : "Roughly \(progress.estimatedTotalDays / 30) months to your goal at your chosen pace."
-            )
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.bottom, 4)
-    }
-
     private var contactEmailEditor: some View {
         TextField("you@example.com", text: $contactEmailText)
             .textInputAutocapitalization(.never)
@@ -930,23 +811,7 @@ struct ProfileView: View {
         cityText = profile.city ?? ""
         betaOptIn = (try? await SupabaseClient.shared.fetchBetaOptIn()) ?? false
 
-        goalBodyPhotoPath = profile.goalBodyPhotoPath
-        currentBodyPhotoPath = profile.currentBodyPhotoPath
         isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
-        journeyCreatedAt = profile.createdAt
-        journeyGoalPace = profile.goalPace
-        journeyWeightKg = profile.weightKg
-        journeyDesiredWeightKg = profile.desiredWeightKg
-        if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
-            if let path = profile.goalBodyPhotoPath {
-                goalBodyPhotoImage = await loadBodyPhoto(path: path)
-            }
-            if let path = profile.currentBodyPhotoPath {
-                currentBodyPhotoImage = await loadBodyPhoto(path: path)
-            }
-            goalPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .goal)) ?? []
-            currentPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .current)) ?? []
-        }
 
         completedWorkoutStreak = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates())
             .map(Self.streak(from:)) ?? 0
@@ -1048,130 +913,6 @@ struct ProfileView: View {
         return Set(logs.map(\.date)).count
     }
 
-    private func loadBodyPhoto(path: String) async -> UIImage? {
-        guard let url = try? await SupabaseClient.shared.signedBodyPhotoURL(path: path),
-              let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
-        return UIImage(data: data)
-    }
-
-    private func bodyPhotoSlot(title: String, image: UIImage?, isUploading: Bool, selection: Binding<PhotosPickerItem?>, onRemove: @escaping () -> Void) -> some View {
-        VStack(spacing: 8) {
-            PhotosPicker(selection: selection, matching: .images) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color(.systemGray6))
-                        .frame(height: 140)
-                    if let image {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(height: 140)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    } else if isUploading {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "plus")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if image != nil {
-                Button("Remove photo", role: .destructive, action: onRemove)
-                    .font(.caption)
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-            }
-        }
-    }
-
-    private func uploadBodyPhoto(kind: SupabaseClient.BodyPhotoKind, item: PhotosPickerItem?) async {
-        guard let item, let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
-        guard let compressed = ImageCompression.jpeg(image) else {
-            errorMessage = "Couldn't process that photo. Try another one."
-            return
-        }
-
-        if kind == .goal { isUploadingGoalPhoto = true } else { isUploadingCurrentPhoto = true }
-        defer {
-            if kind == .goal { isUploadingGoalPhoto = false } else { isUploadingCurrentPhoto = false }
-        }
-
-        do {
-            try await SupabaseClient.shared.uploadBodyPhoto(kind: kind, imageData: compressed)
-            if kind == .goal { goalBodyPhotoImage = image } else { currentBodyPhotoImage = image }
-            // Upload paths are unique per call now (no more fixed-name
-            // overwrite), so the locally-held path/history need a refresh
-            // to stay in sync with what removeBodyPhoto will act on next.
-            if let userId = SupabaseClient.shared.currentUserID,
-               let refreshed = try? await SupabaseClient.shared.fetchProfile(id: userId) {
-                goalBodyPhotoPath = refreshed.goalBodyPhotoPath
-                currentBodyPhotoPath = refreshed.currentBodyPhotoPath
-            }
-            // Silent, fire-and-forget -- fires the instant both photos
-            // exist, whichever upload just completed the pair. No loading
-            // state, no error surfaced: a failed/skipped analysis is
-            // invisible by design (see Config.enableBodyPhotoVisionAnalysis).
-            if goalBodyPhotoPath != nil, currentBodyPhotoPath != nil {
-                Task { try? await SupabaseClient.shared.analyzeBodyPhotos() }
-            }
-            if kind == .goal {
-                goalPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .goal)) ?? []
-            } else {
-                currentPhotoHistory = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: .current)) ?? []
-            }
-        } catch {
-            errorMessage = "Couldn't upload that photo. Try again."
-        }
-    }
-
-    private func removeBodyPhoto(kind: SupabaseClient.BodyPhotoKind) async {
-        let path = kind == .goal ? goalBodyPhotoPath : currentBodyPhotoPath
-        guard let path else {
-            errorMessage = "No photo to remove."
-            return
-        }
-        errorMessage = nil
-        do {
-            try await SupabaseClient.shared.deleteBodyPhoto(kind: kind, path: path)
-            // Promote the newest remaining upload so repeated Remove taps
-            // walk back through the whole history instead of stranding it.
-            let history = (try? await SupabaseClient.shared.fetchBodyPhotos(kind: kind)) ?? []
-            var next = history.first
-            if let candidate = next {
-                do {
-                    try await SupabaseClient.shared.pinBodyPhoto(kind: kind, path: candidate.storagePath)
-                } catch {
-                    // Pin failed, so the server pointer is still empty -- showing
-                    // the promoted photo anyway would recreate BUG-45's stranded state.
-                    next = nil
-                    errorMessage = "Photo removed, but the previous one couldn't be restored. Try again."
-                }
-            }
-            let nextImage: UIImage? = if let next { await loadBodyPhoto(path: next.storagePath) } else { nil }
-            if kind == .goal {
-                goalBodyPhotoImage = nextImage
-                goalBodyPhotoPath = next?.storagePath
-                goalPhotoHistory = history
-            } else {
-                currentBodyPhotoImage = nextImage
-                currentBodyPhotoPath = next?.storagePath
-                currentPhotoHistory = history
-            }
-            // The old analysis followed the deleted photo out; refresh it
-            // silently if a full pair still exists.
-            if goalBodyPhotoPath != nil, currentBodyPhotoPath != nil {
-                Task { try? await SupabaseClient.shared.analyzeBodyPhotos() }
-            }
-        } catch {
-            errorMessage = "Couldn't remove that photo. Try again."
-        }
-    }
-
     private func save() {
         guard let userId = SupabaseClient.shared.currentUserID else { return }
         isSaving = true
@@ -1230,7 +971,7 @@ private enum ProfileSection: String, CaseIterable, Identifiable {
 }
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, bodyPhotos, contactEmail, region
+    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -1240,7 +981,6 @@ private enum ProfileSheet: String, Identifiable {
         case .weeklyTarget: "Weekly target"
         case .injuries: "Injuries"
         case .pregnancy: "Pregnancy"
-        case .bodyPhotos: "Body photos"
         case .contactEmail: "Contact email"
         case .region: "Region"
         }
