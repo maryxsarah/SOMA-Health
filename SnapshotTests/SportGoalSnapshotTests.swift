@@ -236,6 +236,30 @@ final class SportGoalSnapshotTests: XCTestCase {
         snapshotView(view, named: "start-metric-target-reveal")
     }
 
+    func test_SGP_B4_customCoachFormStartsEmpty() throws {
+        let sport = try decode(Sport.self, #"{"id": "sp-volleyball", "name": "Volleyball"}"#)
+        let view = NavigationStack {
+            CustomGoalFormView(sport: sport) {}
+                .somaBackground()
+        }
+        snapshotView(view, height: 1500, named: "custom-form-empty")
+    }
+
+    func test_SGP_B7_safetyConflictRequiresExplicitAcknowledgment() throws {
+        // Both wire shapes: a bare string and the pregnancy-flagged object.
+        let conflicts = [
+            try decode(GoalSafetyConflict.self, #""Depth jumps may conflict with your noted knee injury.""#),
+            try decode(GoalSafetyConflict.self, #"{"message": "High-impact plyometrics aren't recommended during pregnancy.", "pregnancy": true}"#),
+        ]
+        snapshotView(
+            GoalConflictWarningView(conflicts: conflicts, onAcknowledge: {})
+                .padding(20)
+                .somaBackground(),
+            height: 420,
+            named: "create-safety-conflicts"
+        )
+    }
+
     // MARK: - D. Progress & re-test
 
     func test_SGP_D7_week1ConfirmBaselineOpen() throws {
@@ -311,6 +335,25 @@ final class SportGoalSnapshotTests: XCTestCase {
         )
     }
 
+    func test_SGP_D6_withinNoiseBandReadsAsHonestNoChange() throws {
+        let view = GoalHubView(
+            goal: try userGoal(ageDays: 28),
+            catalog: try catalog(),
+            history: [],
+            onChanged: {},
+            onPickNewGoal: {},
+            onNextBlock: { _, _ in },
+            seedMeasurements: [
+                try measurement("m-1", kind: "baseline", value: 42, daysAgo: 28),
+                try measurement("m-2", kind: "baseline_confirm", value: 43, daysAgo: 23),
+            ],
+            seedNoChangeResult: true
+        )
+        .environmentObject(try appState(recommendationCategory: "moderate"))
+        .somaBackground()
+        snapshotView(view, named: "hub-retest-no-change")
+    }
+
     // MARK: - E. Lifecycle edges
 
     func test_SGP_E1_userPauseIsCalmAndResumable() throws {
@@ -354,6 +397,28 @@ final class SportGoalSnapshotTests: XCTestCase {
             readiness: "moderate",
             named: "hub-sport-dark-unavailable"
         )
+    }
+
+    func test_SGP_E8_customGoalOffersCoachExportAfterSessions() throws {
+        let customGoal = try decode(UserGoal.self, """
+        {"id": "ug-c1", "kind": "custom", "target_kind": "commitment", "status": "active",
+         "created_at": "\(iso(daysAgo: 14))", "recheck_date": "\(day(fromNow: 42))",
+         "workout_text": "3 rounds: 10 approach jumps, 10 block jumps, wall touches",
+         "coach_name": "Reyes", "duration_weeks": 8, "frequency_per_week": 3}
+        """)
+        let view = GoalHubView(
+            goal: customGoal,
+            catalog: try catalog(),
+            history: [],
+            onChanged: {},
+            onPickNewGoal: {},
+            onNextBlock: { _, _ in },
+            seedMeasurements: [],
+            seedSessionsDone: 5
+        )
+        .environmentObject(try appState(recommendationCategory: "moderate"))
+        .somaBackground()
+        snapshotView(view, height: 900, named: "hub-custom-coach-export")
     }
 
     func test_SGP_E5_achievementCelebratoryVsNeutral() {

@@ -287,6 +287,8 @@ struct HomeView: View {
                     .font(.title3)
                     .foregroundStyle(Theme.pillFill)
             }
+            // Stable hook for XCUITest (see UITests/CASES.md).
+            .accessibilityIdentifier("profile-button")
         }
         .padding(.top, 2)
     }

@@ -22,7 +22,8 @@ struct GoalHubView: View {
         onPickNewGoal: @escaping () -> Void,
         onNextBlock: @escaping (_ goalID: String, _ prefillBaseline: Double?) -> Void,
         seedMeasurements: [GoalMeasurement]? = nil,
-        seedSessionsDone: Int = 0
+        seedSessionsDone: Int = 0,
+        seedNoChangeResult: Bool = false
     ) {
         self.goal = goal
         self.catalog = catalog
@@ -33,6 +34,7 @@ struct GoalHubView: View {
         seededMeasurements = seedMeasurements
         _measurements = State(initialValue: seedMeasurements ?? [])
         _sessionsDone = State(initialValue: seedSessionsDone)
+        _retestResult = State(initialValue: seedNoChangeResult ? .noChange : nil)
     }
 
     @EnvironmentObject private var appState: AppState
@@ -132,11 +134,16 @@ struct GoalHubView: View {
         measurements.last.flatMap { SportGoalFormat.parseTimestamp($0.measuredAt) }
     }
 
-    /// Resuming (or continuing) after >4 measurement-free weeks means the
-    /// starting point moved -- re-measure first (detraining rule).
+    /// Detraining rule: the starting point moved only when a re-test sat
+    /// OPEN for >4 measurement-free weeks. A long quiet stretch between the
+    /// checkpoint and a far-off final is the normal cadence, not staleness
+    /// -- keying off "days since last measurement" alone forced a
+    /// re-baseline on every on-schedule final.
     private var baselineIsStale: Bool {
-        guard let latestMeasurementDate else { return false }
-        return Date().timeIntervalSince(latestMeasurementDate) > 28 * 86400
+        guard let latestMeasurementDate,
+              Date().timeIntervalSince(latestMeasurementDate) > 28 * 86400,
+              let scheduled = scheduledEvent else { return false }
+        return daysUntilOpen(scheduled) <= -28
     }
 
     private var readinessAllowsMaxTest: Bool {
@@ -157,6 +164,8 @@ struct GoalHubView: View {
                 }
 
                 header
+
+                baselineConfirmNote
 
                 if goal.kind == .custom || presetGoal?.kind == .qualitative {
                     sessionsCard
@@ -197,6 +206,7 @@ struct GoalHubView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .foregroundStyle(SomaTokens.ink3)
+                        .accessibilityLabel("Goal options")
                 }
             }
         }
@@ -232,14 +242,20 @@ struct GoalHubView: View {
         }
     }
 
+    /// Custom goals carry no catalog sport, so the sport segment (and its
+    /// separator) must vanish cleanly rather than render "· COACH REYES".
     private var eyebrowText: String {
-        if goal.kind == .custom {
+        let trailing: String = if goal.kind == .custom {
             if let coachName = goal.coachName, !coachName.isEmpty {
-                return "\(sportName.uppercased()) · COACH \(coachName.uppercased())"
+                "COACH \(coachName.uppercased())"
+            } else {
+                "COACH'S TASK"
             }
-            return "\(sportName.uppercased()) · COACH'S TASK"
+        } else {
+            "GOAL"
         }
-        return "\(sportName.uppercased()) · GOAL"
+        let sport = sportName.uppercased()
+        return sport.isEmpty ? trailing : "\(sport) · \(trailing)"
     }
 
     private var sportName: String {
@@ -295,13 +311,23 @@ struct GoalHubView: View {
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink3)
             }
-            if let start = goal.startDate,
-               Date().timeIntervalSince(start) < 7 * 86400,
-               !measurements.contains(where: { $0.kind == .baselineConfirm }) {
-                Text("In ~5 days we'll confirm your baseline — second attempts usually score higher.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(SomaTokens.ink3)
-            }
+        }
+    }
+
+    /// Week-1 double-baseline explainer -- guide 04 renders it as its own
+    /// note CARD, not as a third gray line jammed into the header.
+    @ViewBuilder
+    private var baselineConfirmNote: some View {
+        if goal.kind != .custom,
+           let start = goal.startDate,
+           Date().timeIntervalSince(start) < 7 * 86400,
+           !measurements.contains(where: { $0.kind == .baselineConfirm }) {
+            Text("Confirm your baseline in ~5 days — second attempts usually score higher. The better of the two becomes your starting point.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(SomaTokens.ink2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
         }
     }
 
@@ -440,9 +466,10 @@ struct GoalHubView: View {
 
     // MARK: - Re-test (A4, in place)
 
-    private var nextEvent: RetestEvent? {
+    /// The ladder position by schedule alone -- staleness is applied on top
+    /// in `nextEvent` (and consulted by `baselineIsStale`, so no cycle).
+    private var scheduledEvent: RetestEvent? {
         guard goal.status == .active else { return nil }
-        if baselineIsStale || resumeNeedsRebaseline { return .rebaseline }
         // A milestone goal's stored starting stage IS its baseline.
         let hasBaseline = measurements.contains { $0.kind == .baseline } || milestoneBaselineIndex != nil
         let hasConfirm = measurements.contains { $0.kind == .baselineConfirm }
@@ -451,6 +478,12 @@ struct GoalHubView: View {
         if !hasConfirm { return .baselineConfirm }
         if !hasCheckpoint { return .checkpoint }
         return .final
+    }
+
+    private var nextEvent: RetestEvent? {
+        guard let scheduled = scheduledEvent else { return nil }
+        if baselineIsStale || resumeNeedsRebaseline { return .rebaseline }
+        return scheduled
     }
 
     /// Days until the next event opens; 0 or negative means it's open now.

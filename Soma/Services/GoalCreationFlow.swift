@@ -16,16 +16,22 @@ enum GoalCreationFlow {
 
     /// Pass `retrying` (a goal from a previous `.baselineFailed`) to retry
     /// just the baseline insert without re-creating the goal.
+    /// `create`/`insertBaseline` default to the live client; tests inject
+    /// stubs (SGP-B6) -- the sequencing itself is what this type owns.
     static func start(
         _ request: CreateGoalRequest,
         retrying: UserGoal? = nil,
+        create: (CreateGoalRequest) async throws -> CreateGoalOutcome = { try await SupabaseClient.shared.createGoal($0) },
+        insertBaseline: (String, Double) async throws -> Void = {
+            try await SupabaseClient.shared.insertMeasurement(userGoalId: $0, kind: .baseline, value: $1)
+        },
         onCreated: () async -> Void
     ) async throws -> Outcome {
         let goal: UserGoal
         if let retrying {
             goal = retrying
         } else {
-            switch try await SupabaseClient.shared.createGoal(request) {
+            switch try await create(request) {
             case .conflicts(let found):
                 return .conflicts(found)
             case .created(let created):
@@ -36,7 +42,7 @@ enum GoalCreationFlow {
         // is surfaced, never swallowed into a silently empty chart.
         if let value = request.baselineValue {
             do {
-                try await SupabaseClient.shared.insertMeasurement(userGoalId: goal.id, kind: .baseline, value: value)
+                try await insertBaseline(goal.id, value)
             } catch {
                 return .baselineFailed(created: goal)
             }

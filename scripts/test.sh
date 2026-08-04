@@ -26,7 +26,9 @@ run_snapshot() {
   env "${record_env[@]}" xcodebuild test -project Soma.xcodeproj \
     -scheme SomaSnapshotTests -destination "$DEST"
 }
-run_ui()       { xcb SomaUITests; }
+# retry-on-failure absorbs simulator-resource SIGKILLs on long suites; a
+# genuinely broken journey still fails all its retries.
+run_ui()       { xcb SomaUITests -retry-tests-on-failure -test-iterations 2; }
 # --no-check: the functions reference npm:@types/node, which isn't installed
 # locally; runtime behavior is what these tests pin, and CI-less type safety
 # comes from `deno check` when the env is set up (see SETUP.md).

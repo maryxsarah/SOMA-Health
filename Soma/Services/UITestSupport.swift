@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Fixture harness for SomaUITests (see UITests/CASES.md). Active only in
 /// DEBUG builds launched with `--ui-test-fixtures`; Release compiles to a
@@ -26,6 +27,8 @@ enum UITestSupport {
     /// Supabase session and pre-seeds the UserDefaults the scenario needs.
     static func bootstrapIfNeeded() {
         guard isActive else { return }
+        // Animations only cost wall-clock and simulator memory here.
+        UIView.setAnimationsEnabled(false)
         KeychainStore().save(StoredSession(
             userID: "00000000-0000-0000-0000-0000000000ff",
             accessToken: "fixture-access-token",
@@ -34,13 +37,12 @@ enum UITestSupport {
         ))
         let defaults = UserDefaults.standard
         defaults.set(true, forKey: "com.soma.app.onboardingComplete")
-        // J1 exercises the first-tap beta popup; every other journey skips
-        // straight past the promo affordances.
-        let firstRun = FixtureScenario.current == .catalogOpen
-        defaults.set(!firstRun, forKey: "sportGoalPromoDismissed")
-        defaults.set(!firstRun, forKey: "sportGoalOnboardingSeen")
+        let scenario = FixtureScenario.current
+        defaults.set(scenario.promoDismissedAtLaunch, forKey: "sportGoalPromoDismissed")
+        defaults.set(scenario.onboardingSeenAtLaunch, forKey: "sportGoalOnboardingSeen")
     }
     #else
+    static let isActive = false
     static let stubbedSession: URLSession? = nil
     static func bootstrapIfNeeded() {}
     #endif
@@ -55,35 +57,65 @@ enum UITestSupport {
 enum FixtureScenario: String {
     /// J1: catalog visible, no goal yet, beta popup not seen.
     case catalogOpen
-    /// J2: active jump goal in week 2 + today's AI plan carrying a goal block.
+    /// J2/J5: active jump goal in week 2 + today's AI plan with a goal block.
     case activeGoalWeek2
-    /// J3: week 4, ETA slipped +9 days (2 missed + 3 low-readiness).
+    /// J3/J13: week 4, ETA slipped +9 days (2 missed + 3 low-readiness).
     case activeGoalWeek4Slipped
-    /// J4: day 28, baseline confirmed, checkpoint re-test open, moderate day.
+    /// J8: day 6, baseline logged, confirm window open.
+    case activeGoalDay6
+    /// J4/J9: day 28, baseline confirmed, checkpoint open, moderate day.
     case activeGoalDay28
     /// J4 negative: same day-28 state on a requested rest day.
     case activeGoalDay28Rest
+    /// J11/J12: ETA reached, all pre-final measurements in, final open.
+    case activeGoalAtEta
+    /// J6: existing coach's-task goal, week 2, three sessions already done.
+    case customGoalWeek2
+    /// J7: catalog open, creating the coach's task from the form.
+    case customCoachFlow
+    /// J14: catalog dark until the user flips the beta toggle in Profile.
+    case betaGate
 
     static var current: FixtureScenario {
         ProcessInfo.processInfo.environment["UITEST_SCENARIO"]
             .flatMap(FixtureScenario.init(rawValue:)) ?? .catalogOpen
     }
 
-    var hasActiveGoal: Bool { self != .catalogOpen }
+    var hasActiveGoal: Bool {
+        switch self {
+        case .catalogOpen, .customCoachFlow, .betaGate: false
+        default: true
+        }
+    }
 
-    var recommendationCategory: String {
+    var isCustomGoal: Bool { self == .customGoalWeek2 }
+
+    var defaultCategory: String {
         self == .activeGoalDay28Rest ? "rest" : "moderate"
     }
 
     /// Days since the goal block started.
     var goalAgeDays: Int {
         switch self {
-        case .catalogOpen: 0
-        case .activeGoalWeek2: 10
+        case .catalogOpen, .customCoachFlow, .betaGate: 0
+        case .activeGoalDay6: 6
+        case .activeGoalWeek2, .customGoalWeek2: 10
         case .activeGoalWeek4Slipped: 27
         case .activeGoalDay28, .activeGoalDay28Rest: 28
+        case .activeGoalAtEta: 70
         }
     }
+
+    var promoDismissedAtLaunch: Bool {
+        switch self {
+        case .catalogOpen, .customCoachFlow, .betaGate: false
+        default: true
+        }
+    }
+
+    /// J1 exercises the first-tap popup; the other front-door scenarios go
+    /// straight to the sport list.
+    var onboardingSeenAtLaunch: Bool { self != .catalogOpen }
 }
 
 // MARK: - Fixture data (PostgREST wire shapes)
@@ -93,6 +125,7 @@ enum FixtureScenario: String {
 enum FixtureData {
     static let goalID = "00000000-0000-0000-0000-00000000aa01"
     static let userGoalID = "00000000-0000-0000-0000-00000000bb01"
+    static let customGoalID = "00000000-0000-0000-0000-00000000cc01"
 
     static func iso(daysAgo: Int) -> String {
         ISO8601DateFormatter().string(from: Date().addingTimeInterval(TimeInterval(-daysAgo * 86400)))
@@ -132,26 +165,52 @@ enum FixtureData {
         ],
     ]
 
-    static func userGoal(scenario: FixtureScenario) -> [String: Any] {
+    static func presetGoalRow(ageDays: Int, status: String = "active", pauseReason: String? = nil, slip: Bool = false) -> [String: Any] {
         var row: [String: Any] = [
             "id": userGoalID,
             "goal_id": goalID,
             "kind": "preset",
             "target_kind": "metric",
-            "status": "active",
+            "status": status,
             "baseline_value": 42,
             "target_low": 3,
             "target_high": 6,
-            "created_at": iso(daysAgo: scenario.goalAgeDays),
-            "eta_start": day(fromNow: 70 - scenario.goalAgeDays),
-            "eta_end": day(fromNow: 84 - scenario.goalAgeDays),
-            "phase": scenario.goalAgeDays > 21 ? "build" : "foundation",
+            "created_at": iso(daysAgo: ageDays),
+            "eta_start": day(fromNow: 70 - ageDays),
+            "eta_end": day(fromNow: 84 - ageDays),
+            "phase": ageDays > 21 ? "build" : "foundation",
         ]
-        if scenario == .activeGoalWeek4Slipped {
+        if let pauseReason { row["pause_reason"] = pauseReason }
+        if slip {
             row["eta_slip_days"] = 9
             row["eta_slip_reason"] = "2 missed sessions + 3 low-readiness days"
         }
         return row
+    }
+
+    static func customGoalRow(ageDays: Int, status: String = "active", pauseReason: String? = nil) -> [String: Any] {
+        var row: [String: Any] = [
+            "id": customGoalID,
+            "kind": "custom",
+            "target_kind": "commitment",
+            "status": status,
+            "coach_name": "Alex",
+            "given_text": "Approach jump needs more spring before the season",
+            "workout_text": "3 rounds: 10 approach jumps, 8 depth drops, 10 banded squats. Full rest between rounds.",
+            "duration_weeks": 8,
+            "frequency_per_week": 2,
+            "created_at": iso(daysAgo: ageDays),
+            "recheck_date": day(fromNow: 56 - ageDays),
+        ]
+        if let pauseReason { row["pause_reason"] = pauseReason }
+        return row
+    }
+
+    static func goalRow(scenario: FixtureScenario, status: String, pauseReason: String?) -> [String: Any] {
+        scenario.isCustomGoal
+            ? customGoalRow(ageDays: scenario.goalAgeDays, status: status, pauseReason: pauseReason)
+            : presetGoalRow(ageDays: scenario.goalAgeDays, status: status, pauseReason: pauseReason,
+                            slip: scenario == .activeGoalWeek4Slipped)
     }
 
     static func measurements(scenario: FixtureScenario) -> [[String: Any]] {
@@ -160,8 +219,10 @@ enum FixtureData {
              "value": value, "measured_at": iso(daysAgo: daysAgo)]
         }
         switch scenario {
-        case .catalogOpen:
+        case .catalogOpen, .customCoachFlow, .betaGate, .customGoalWeek2:
             return []
+        case .activeGoalDay6:
+            return [row("m-1", "baseline", 42, daysAgo: 6)]
         case .activeGoalWeek2:
             return [row("m-1", "baseline", 42, daysAgo: 10)]
         case .activeGoalWeek4Slipped:
@@ -170,13 +231,30 @@ enum FixtureData {
         case .activeGoalDay28, .activeGoalDay28Rest:
             return [row("m-1", "baseline", 42, daysAgo: 28),
                     row("m-2", "baseline_confirm", 43, daysAgo: 23)]
+        case .activeGoalAtEta:
+            return [row("m-1", "baseline", 42, daysAgo: 70),
+                    row("m-2", "baseline_confirm", 43, daysAgo: 65),
+                    row("m-3", "checkpoint", 45, daysAgo: 42)]
         }
     }
 
-    static func recommendation(scenario: FixtureScenario) -> [String: Any] {
+    /// Three past sessions for the coach's-task hub ("3 of 16"); none today,
+    /// so Home still offers "Start workout".
+    static var customGoalPastLogs: [[String: Any]] {
+        [1, 3, 5].enumerated().map { index, daysAgo in
+            ["id": "wl-seed-\(index)",
+             "date": day(fromNow: -daysAgo),
+             "title": "Coach Alex's task",
+             "body_part": "legs",
+             "category": "moderate",
+             "completed_at": iso(daysAgo: daysAgo)]
+        }
+    }
+
+    static func recommendation(scenario: FixtureScenario, requested: String?) -> [String: Any] {
         var row: [String: Any] = [
             "date": today,
-            "category": scenario.recommendationCategory,
+            "category": requested ?? scenario.defaultCategory,
             "message": "Solid day for quality work.",
             "reason": "healthkit_medium",
             "data_confidence": "high",
@@ -184,7 +262,9 @@ enum FixtureData {
             "injury_cap_applied": false,
             "load_cap_applied": false,
         ]
-        if scenario == .activeGoalDay28Rest {
+        if let requested {
+            row["user_requested_category"] = requested
+        } else if scenario == .activeGoalDay28Rest {
             row["user_requested_category"] = "rest"
         }
         return row
@@ -222,38 +302,20 @@ enum FixtureData {
             ],
         ]]
     }
-
-    /// The row create-goal answers with in J1 (mirrors the edge function's
-    /// { created: true, goal } response).
-    static var createdGoalResponse: [String: Any] {
-        [
-            "created": true,
-            "goal": [
-                "id": userGoalID,
-                "goal_id": goalID,
-                "kind": "preset",
-                "target_kind": "metric",
-                "status": "active",
-                "baseline_value": 42,
-                "target_low": 3,
-                "target_high": 6,
-                "created_at": iso(daysAgo: 0),
-                "eta_start": day(fromNow: 70),
-                "eta_end": day(fromNow: 84),
-                "phase": "foundation",
-            ] as [String: Any],
-        ]
-    }
 }
 
 // MARK: - URLProtocol stub
 
 /// Routes every SupabaseClient request to a canned wire response. Mutable
-/// state (created goal, logged workouts, inserted measurements) lives in
-/// statics so a journey's writes are visible to its later reads.
+/// state (created goal, status changes, rest-day override, logged workouts)
+/// lives in statics so a journey's writes are visible to its later reads.
 final class FixtureURLProtocol: URLProtocol {
     private static let stateLock = NSLock()
     private static var goalCreated = false
+    private static var goalStatus = "active"
+    private static var goalPauseReason: String?
+    private static var requestedCategory: String?
+    private static var betaOptedIn = false
     private static var loggedWorkouts: [[String: Any]] = []
     private static var insertedMeasurements: [[String: Any]] = []
 
@@ -264,10 +326,10 @@ final class FixtureURLProtocol: URLProtocol {
     override func startLoading() {
         let scenario = FixtureScenario.current
         let path = request.url?.path ?? ""
-        let query = request.url?.query ?? ""
+        let query = request.url?.query?.removingPercentEncoding ?? ""
         let method = request.httpMethod ?? "GET"
 
-        let body = route(scenario: scenario, path: path, query: query, method: method)
+        let body = route(scenario: scenario, path: path, query: query, method: method, requestBody: requestBodyJSON())
 
         let data = (try? JSONSerialization.data(withJSONObject: body.payload)) ?? Data("[]".utf8)
         let response = HTTPURLResponse(
@@ -281,28 +343,84 @@ final class FixtureURLProtocol: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
 
+    /// URLProtocol never sees `httpBody` -- only the stream.
+    private func requestBodyJSON() -> [String: Any] {
+        guard let stream = request.httpBodyStream else { return [:] }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        let bufferSize = 16 * 1024
+        var buffer = [UInt8](repeating: 0, count: bufferSize)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: bufferSize)
+            guard read > 0 else { break }
+            data.append(buffer, count: read)
+        }
+        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
+    /// PostgREST-style day filtering ("date=eq.X", "date=gte.A&date=lte.B").
+    private func filterByDate(_ rows: [[String: Any]], query: String) -> [[String: Any]] {
+        var eq: String?, gte: String?, lte: String?
+        for param in query.components(separatedBy: "&") {
+            if param.hasPrefix("date=eq.") { eq = String(param.dropFirst(8)) }
+            if param.hasPrefix("date=gte.") { gte = String(param.dropFirst(9)) }
+            if param.hasPrefix("date=lte.") { lte = String(param.dropFirst(9)) }
+        }
+        return rows.filter { row in
+            guard let date = row["date"] as? String else { return true }
+            if let eq, date != eq { return false }
+            if let gte, date < gte { return false }
+            if let lte, date > lte { return false }
+            return true
+        }
+    }
+
     private func route(
-        scenario: FixtureScenario, path: String, query: String, method: String
+        scenario: FixtureScenario, path: String, query: String, method: String, requestBody: [String: Any]
     ) -> (payload: Any, status: Int) {
         Self.stateLock.lock()
         defer { Self.stateLock.unlock() }
 
         switch true {
-        // Catalog
+        // Catalog. betaGate serves it dark until the beta toggle is on --
+        // the same "empty fetch == off" contract the real RLS enforces.
         case path.hasSuffix("/rest/v1/sports"):
-            return (FixtureData.sports, 200)
+            let visible = scenario != .betaGate || Self.betaOptedIn
+            return (visible ? FixtureData.sports : [], 200)
         case path.hasSuffix("/rest/v1/sport_goals"):
-            return (FixtureData.sportGoals, 200)
+            let visible = scenario != .betaGate || Self.betaOptedIn
+            return (visible ? FixtureData.sportGoals : [], 200)
+
+        case path.hasSuffix("/rest/v1/beta_optins") && method == "GET":
+            return (Self.betaOptedIn ? [["user_id": "00000000-0000-0000-0000-0000000000ff"]] : [], 200)
+        case path.hasSuffix("/rest/v1/beta_optins") && method == "POST":
+            Self.betaOptedIn = true
+            return ([:] as [String: Any], 201)
+        case path.contains("/rest/v1/beta_optins") && method == "DELETE":
+            Self.betaOptedIn = false
+            return ([:] as [String: Any], 204)
 
         // Goal rows
         case path.hasSuffix("/rest/v1/user_goal") && method == "GET":
-            let hasGoal = scenario.hasActiveGoal || Self.goalCreated
+            let exists = scenario.hasActiveGoal || Self.goalCreated
+            let row: [String: Any]? = {
+                guard exists else { return nil }
+                if Self.goalCreated, !scenario.hasActiveGoal {
+                    return scenario == .customCoachFlow
+                        ? FixtureData.customGoalRow(ageDays: 0, status: Self.goalStatus, pauseReason: Self.goalPauseReason)
+                        : FixtureData.presetGoalRow(ageDays: 0, status: Self.goalStatus, pauseReason: Self.goalPauseReason)
+                }
+                return FixtureData.goalRow(scenario: scenario, status: Self.goalStatus, pauseReason: Self.goalPauseReason)
+            }()
             if query.contains("status=eq.active") {
-                let age = Self.goalCreated && !scenario.hasActiveGoal ? FixtureScenario.catalogOpen : scenario
-                return (hasGoal ? [FixtureData.userGoal(scenario: age)] : [], 200)
+                return (row.flatMap { Self.goalStatus == "active" ? [$0] : [] } ?? [], 200)
             }
-            return ([], 200) // history
-        case path.hasSuffix("/rest/v1/user_goal"): // PATCH lifecycle writes
+            // History: everything that isn't active.
+            return (row.flatMap { Self.goalStatus == "active" ? [] : [$0] } ?? [], 200)
+        case path.contains("/rest/v1/user_goal") && method == "PATCH":
+            if let status = requestBody["status"] as? String { Self.goalStatus = status }
+            Self.goalPauseReason = requestBody["pause_reason"] as? String
             return ([:] as [String: Any], 204)
 
         case path.hasSuffix("/rest/v1/goal_measurement_log") && method == "GET":
@@ -311,46 +429,55 @@ final class FixtureURLProtocol: URLProtocol {
             Self.insertedMeasurements.append([
                 "id": "m-new-\(Self.insertedMeasurements.count + 1)",
                 "user_goal_id": FixtureData.userGoalID,
-                "kind": "checkpoint",
-                "value": 46,
+                "kind": requestBody["kind"] as? String ?? "checkpoint",
+                "value": requestBody["value"] as? Double ?? 0,
                 "measured_at": FixtureData.iso(daysAgo: 0),
             ])
             return ([:] as [String: Any], 201)
 
         case path.hasSuffix("/functions/v1/create-goal"):
             Self.goalCreated = true
-            return (FixtureData.createdGoalResponse, 200)
+            Self.goalStatus = "active"
+            let goal = scenario == .customCoachFlow
+                ? FixtureData.customGoalRow(ageDays: 0)
+                : FixtureData.presetGoalRow(ageDays: 0)
+            return (["created": true, "goal": goal], 200)
 
         // Home data
         case path.hasSuffix("/rest/v1/daily_recommendation"):
-            return ([FixtureData.recommendation(scenario: scenario)], 200)
+            return ([FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory)], 200)
         case path.hasSuffix("/rest/v1/daily_snapshot"):
             return ([], 200)
         case path.hasSuffix("/rest/v1/ai_workout_plan"):
             return (scenario == .activeGoalWeek2 ? FixtureData.todaysAIPlan : [], 200)
 
-        // Workout log (J2 writes, Home/detail reads)
+        // The rest-day override (C3): category=null clears the request.
+        case path.hasSuffix("/functions/v1/set-recommendation-override"):
+            Self.requestedCategory = requestBody["category"] as? String
+            return (FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory), 200)
+
+        // Workout log: writes recorded, reads day-filtered like PostgREST.
         case path.hasSuffix("/rest/v1/workout_log") && method == "POST":
             Self.loggedWorkouts.append([
                 "id": "wl-\(Self.loggedWorkouts.count + 1)",
-                "date": FixtureData.today,
-                "title": "Lower body strength",
-                "body_part": "legs",
-                "category": "moderate",
+                "date": requestBody["date"] as? String ?? FixtureData.today,
+                "title": requestBody["title"] as? String ?? "Workout",
+                "body_part": requestBody["body_part"] as? String ?? "full_body",
+                "category": requestBody["category"] as? String ?? "moderate",
                 "completed_at": FixtureData.iso(daysAgo: 0),
             ])
             return ([:] as [String: Any], 201)
         case path.contains("/rest/v1/workout_log"):
-            return (Self.loggedWorkouts, 200)
+            let seeded = scenario == .customGoalWeek2 ? FixtureData.customGoalPastLogs : []
+            return (filterByDate(seeded + Self.loggedWorkouts, query: query), 200)
 
         // Paywall bypass: far-future referral bonus means the detail sheet
         // never routes through Superwall in tests.
         case path.hasSuffix("/rest/v1/users") && method == "GET":
             return ([["referral_bonus_until": "2099-01-01T00:00:00Z"]], 200)
 
-        case path.hasSuffix("/functions/v1/set-recommendation-override"),
-             path.hasSuffix("/functions/v1/generate-recommendation"):
-            return (FixtureData.recommendation(scenario: scenario), 200)
+        case path.hasSuffix("/functions/v1/generate-recommendation"):
+            return (FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory), 200)
 
         // Everything else: harmless empties in the right container shape.
         case method == "GET" && path.contains("/rest/v1/"):
