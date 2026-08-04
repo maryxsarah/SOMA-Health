@@ -43,6 +43,16 @@ struct HomeView: View {
     @State private var activeSportGoal: UserGoal?
     @State private var sportGoalCatalog: SportCatalog?
     @State private var showSportGoalScreen = false
+    /// Launch-period promo entry: dismiss is forever (guide 05's rule),
+    /// so it persists across sessions rather than living in view state.
+    @AppStorage("sportGoalPromoDismissed") private var sportGoalPromoDismissed = false
+    /// The onboarding gallery shows on the FIRST card tap only (guide 08);
+    /// after that the card goes straight to the sport list.
+    @AppStorage("sportGoalOnboardingSeen") private var sportGoalOnboardingSeen = false
+    @State private var showSportGoalOnboarding = false
+    /// Set when onboarding's "Pick a goal" fires -- the goal flow sheet
+    /// opens from the cover's onDismiss, never over a live cover.
+    @State private var openGoalFlowAfterOnboarding = false
     /// "Not feeling it today?" confirmation dialog, and the in-flight state
     /// for setting/clearing that request. See restDayRequestControl.
     @State private var showRestDayOptions = false
@@ -53,12 +63,18 @@ struct HomeView: View {
             // Guide 03 order: nav pill → greeting → week card → readiness
             // card → scan row. The orb is gone (22% of the screen carrying
             // no information); raw metric tiles live in the dashboard.
-            VStack(spacing: 12) {
+            // 16 (was 12): the orb-era screen breathed more; with it gone
+            // the cards read cramped at 12 on a standard-height device.
+            VStack(spacing: 16) {
                 topRow
 
                 greetingBlock
 
                 weekCard
+
+                if showSportGoalPromo {
+                    sportGoalPromoCard
+                }
 
                 Group {
                     if let recommendation = appState.currentRecommendation {
@@ -116,7 +132,11 @@ struct HomeView: View {
                 RecommendationDetailView(recommendation: recommendation)
             }
         }
-        .sheet(isPresented: $showProfile) {
+        .sheet(isPresented: $showProfile, onDismiss: {
+            // The beta toggle lives in Profile -- refetch so the promo
+            // card appears (or disappears) the moment the sheet closes.
+            Task { await loadSportGoal() }
+        }) {
             ProfileView()
         }
         .sheet(isPresented: $showHealthDashboard) {
@@ -126,6 +146,21 @@ struct HomeView: View {
             Task { await loadSportGoal() }
         }) {
             SportGoalFlowView()
+        }
+        .fullScreenCover(isPresented: $showSportGoalOnboarding, onDismiss: {
+            if openGoalFlowAfterOnboarding {
+                openGoalFlowAfterOnboarding = false
+                showSportGoalScreen = true
+            }
+        }) {
+            SportGoalOnboardingView(
+                onPickGoal: {
+                    openGoalFlowAfterOnboarding = true
+                    showSportGoalOnboarding = false
+                },
+                onClose: { showSportGoalOnboarding = false }
+            )
+            .presentationBackground(.clear)
         }
         .sheet(isPresented: $showGymPhotoFlow, onDismiss: {
             Task {
@@ -442,6 +477,80 @@ struct HomeView: View {
             // Best-effort, same as the other Home refresh calls -- the
             // affordance stays in its pre-tap state so the user can retry.
         }
+    }
+
+    /// The card shows only while the feature's front door makes sense:
+    /// beta catalog open, no goal yet, never after a dismiss.
+    private var showSportGoalPromo: Bool {
+        Config.enableSportGoals
+            && !sportGoalPromoDismissed
+            && activeSportGoal == nil
+            && sportGoalCatalog?.isEmpty == false
+    }
+
+    /// Temporary NEW promo card (guide 05) -- the beta feature's front
+    /// door. Once a goal exists the readiness card's goal row replaces it.
+    private var sportGoalPromoCard: some View {
+        // Two sibling buttons, no gesture layered over the whole card --
+        // the open area and the dismiss X can never steal each other's tap.
+        HStack(spacing: 0) {
+            Button {
+                if sportGoalOnboardingSeen {
+                    showSportGoalScreen = true
+                } else {
+                    sportGoalOnboardingSeen = true
+                    showSportGoalOnboarding = true
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(SomaTokens.accentSoft)
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            Image(systemName: "target")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(SomaTokens.accent)
+                        )
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text("Train for your sport")
+                                .font(.system(size: 14.5, weight: .semibold))
+                                .foregroundStyle(SomaTokens.ink)
+                            Text("NEW")
+                                .font(.system(size: 10, weight: .bold))
+                                .tracking(0.6)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(SomaTokens.accent))
+                        }
+                        Text("Pick one measurable goal — we build it into your plan")
+                            .font(.system(size: 12))
+                            .foregroundStyle(SomaTokens.ink4)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button {
+                sportGoalPromoDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink5)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, 14)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(SomaTokens.surface)
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(SomaTokens.accentSoft, lineWidth: 1))
+        )
     }
 
     /// A quiet one-line goal status + chevron -- deliberately not a button
@@ -765,14 +874,15 @@ struct HomeView: View {
     /// the same natural "off" state the server kill switch produces.
     private func loadSportGoal() async {
         guard Config.enableSportGoals else { return }
-        let needCatalog = sportGoalCatalog == nil
         // In parallel -- the goal read no longer gates the catalog read.
+        // The catalog is always refetched: it's RLS-gated by the beta
+        // toggle, so this is what makes the promo card appear (or every
+        // entry point vanish) in the same session the toggle changes.
         async let goalFetch: UserGoal? = try? await SupabaseClient.shared.fetchActiveGoal()
-        async let catalogFetch: SportCatalog? = needCatalog
-            ? (try? await SupabaseClient.shared.fetchSportCatalog()) : nil
+        async let catalogFetch: SportCatalog? = try? await SupabaseClient.shared.fetchSportCatalog()
         activeSportGoal = await goalFetch
-        if activeSportGoal != nil, needCatalog {
-            sportGoalCatalog = await catalogFetch
+        if let catalog = await catalogFetch {
+            sportGoalCatalog = catalog
         }
     }
 

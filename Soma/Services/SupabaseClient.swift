@@ -8,7 +8,9 @@ final class SupabaseClient {
     static let shared = SupabaseClient()
 
     private let keychain = KeychainStore()
-    private let urlSession = URLSession.shared
+    // Every request funnels through this one session; SomaUITests swap it
+    // for a fixture-serving stub (nil outside `--ui-test-fixtures` runs).
+    private let urlSession = UITestSupport.stubbedSession ?? URLSession.shared
 
     private init() {}
 

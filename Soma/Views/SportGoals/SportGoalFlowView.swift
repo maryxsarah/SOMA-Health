@@ -1,7 +1,8 @@
 import SwiftUI
 
 enum SportGoalRoute: Hashable {
-    case picker
+    case sports
+    case goals(sportID: String)
     case start(goalID: String, prefillBaseline: Double?)
     case custom(sportID: String)
 }
@@ -15,6 +16,18 @@ struct SportGoalFlowView: View {
     @State private var isLoading = true
     @State private var loadFailed = false
     @State private var path: [SportGoalRoute] = []
+    /// SomaSnapshotTests only: renders a terminal state (e.g. the dark-
+    /// catalog card) without the loading pass.
+    private let isSeededForTesting: Bool
+
+    init(seedCatalog: SportCatalog? = nil, seedLoadFailed: Bool = false) {
+        isSeededForTesting = seedCatalog != nil || seedLoadFailed
+        if isSeededForTesting {
+            _catalog = State(initialValue: seedCatalog ?? SportCatalog())
+            _isLoading = State(initialValue: false)
+            _loadFailed = State(initialValue: seedLoadFailed)
+        }
+    }
 
     /// The goal the hub shows: the active one, else the newest paused one
     /// (a paused goal doesn't hold the active slot but stays reachable).
@@ -47,17 +60,15 @@ struct SportGoalFlowView: View {
                 catalog: catalog,
                 history: history.filter { $0.id != currentGoal.id },
                 onChanged: { Task { await load() } },
-                onPickNewGoal: { path.append(.picker) },
+                onPickNewGoal: { path.append(.sports) },
                 onNextBlock: { goalID, baseline in
                     path.append(.start(goalID: goalID, prefillBaseline: baseline))
                 }
             )
         } else if !catalog.isEmpty {
-            GoalPickerView(
-                catalog: catalog,
-                onSelectPreset: { goal in path.append(.start(goalID: goal.id, prefillBaseline: nil)) },
-                onSelectCustom: { sport in path.append(.custom(sportID: sport.id)) }
-            )
+            SportListView(catalog: catalog) { sport in
+                path.append(.goals(sportID: sport.id))
+            }
         } else {
             unavailableCard
         }
@@ -66,12 +77,19 @@ struct SportGoalFlowView: View {
     @ViewBuilder
     private func destination(for route: SportGoalRoute) -> some View {
         switch route {
-        case .picker:
-            GoalPickerView(
-                catalog: catalog,
-                onSelectPreset: { goal in path.append(.start(goalID: goal.id, prefillBaseline: nil)) },
-                onSelectCustom: { sport in path.append(.custom(sportID: sport.id)) }
-            )
+        case .sports:
+            SportListView(catalog: catalog) { sport in
+                path.append(.goals(sportID: sport.id))
+            }
+        case .goals(let sportID):
+            if let sport = catalog.sports.first(where: { $0.id == sportID }) {
+                GoalPickerView(
+                    sport: sport,
+                    catalog: catalog,
+                    onSelectPreset: { goal in path.append(.start(goalID: goal.id, prefillBaseline: nil)) },
+                    onSelectCustom: { path.append(.custom(sportID: sportID)) }
+                )
+            }
         case .start(let goalID, let prefillBaseline):
             if let goal = catalog.goal(id: goalID) {
                 GoalStartView(goal: goal, sport: catalog.sport(for: goal), prefillBaseline: prefillBaseline) {
@@ -106,6 +124,7 @@ struct SportGoalFlowView: View {
     }
 
     private func load() async {
+        guard !isSeededForTesting else { return }
         loadFailed = false
         do {
             catalog = try await SupabaseClient.shared.fetchSportCatalog()

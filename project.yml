@@ -42,6 +42,10 @@ packages:
   Superwall:
     url: https://github.com/superwall/Superwall-iOS
     from: 4.0.0
+  # Snapshot testing (SomaSnapshotTests only -- never linked into the app).
+  SnapshotTesting:
+    url: https://github.com/pointfreeco/swift-snapshot-testing
+    from: 1.17.0
 
 targets:
   Soma:
@@ -168,6 +172,41 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.skollnitzer.soma.tests
         GENERATE_INFOPLIST_FILE: true
 
+  # Screen-state snapshot tests for the sport-goals feature (see
+  # UITests/CASES.md for the case registry). Reference PNGs live in
+  # SnapshotTests/__Snapshots__/ and are pinned to iPhone 17 Pro / iOS 26.5.
+  # Run: scripts/test.sh snapshot   (record: scripts/test.sh snapshot --record)
+  SomaSnapshotTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SnapshotTests
+    dependencies:
+      - target: Soma
+      - package: SnapshotTesting
+        product: SnapshotTesting
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.skollnitzer.soma.snapshottests
+        GENERATE_INFOPLIST_FILE: true
+
+  # XCUITest journeys against a stubbed network (UITestSupport.swift serves
+  # PostgREST-wire fixtures inside the app, DEBUG only). Case registry and
+  # scenario map: UITests/CASES.md. Run: scripts/test.sh ui
+  SomaUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+        excludes:
+          - "CASES.md"
+    dependencies:
+      - target: Soma
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.skollnitzer.soma.uitests
+        GENERATE_INFOPLIST_FILE: true
+
 # Explicit scheme -- without this block, this XcodeGen version does not
 # auto-generate one, so Xcode's Run button (and a physical device target)
 # has nothing to build against and shows "No scheme".
@@ -199,3 +238,29 @@ schemes:
       config: Debug
     archive:
       config: Release
+
+  # Separate schemes so the slow layers never piggyback on a plain
+  # `xcodebuild test -scheme Soma` (units stay the fast default).
+  SomaSnapshotTests:
+    build:
+      targets:
+        Soma: all
+        SomaSnapshotTests: [test]
+    test:
+      config: Debug
+      targets:
+        - SomaSnapshotTests
+    run:
+      config: Debug
+
+  SomaUITests:
+    build:
+      targets:
+        Soma: all
+        SomaUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - SomaUITests
+    run:
+      config: Debug

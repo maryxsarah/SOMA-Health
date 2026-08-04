@@ -47,18 +47,37 @@ extension UserGoal {
     }
 }
 
-/// Small capsule badge for a goal's kind ("metric" / "milestone" / "in words").
+/// Uppercase capsule badge for a goal's kind. METRIC / MILESTONE read as
+/// accent (the honest, measured kinds); CUSTOM / IN WORDS stay neutral.
 struct GoalKindBadge: View {
-    let kind: SportGoalKind
+    let text: String
+    let isAccent: Bool
+
+    init(kind: SportGoalKind) {
+        switch kind {
+        case .metric: text = "METRIC"; isAccent = true
+        case .milestone: text = "MILESTONE"; isAccent = true
+        case .qualitative: text = "IN WORDS"; isAccent = false
+        case .unknown: text = ""; isAccent = false
+        }
+    }
+
+    private init(text: String, isAccent: Bool) {
+        self.text = text
+        self.isAccent = isAccent
+    }
+
+    static let custom = GoalKindBadge(text: "CUSTOM", isAccent: false)
 
     var body: some View {
-        if !kind.badgeText.isEmpty {
-            Text(kind.badgeText)
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(SomaTokens.ink3)
+        if !text.isEmpty {
+            Text(text)
+                .font(.system(size: 10.5, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(isAccent ? SomaTokens.accent : SomaTokens.ink2)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
-                .background(Capsule().fill(SomaTokens.surface3))
+                .background(Capsule().fill(isAccent ? SomaTokens.accentSoft : SomaTokens.surface4))
         }
     }
 }

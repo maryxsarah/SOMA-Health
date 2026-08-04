@@ -55,6 +55,8 @@ struct RulerNumberPicker: View {
             }
             .frame(height: 68)
             .contentShape(Rectangle())
+            // Stable hook for XCUITest drags (see UITests/CASES.md).
+            .accessibilityIdentifier("ruler-number-picker")
             .gesture(
                 DragGesture()
                     .onChanged { drag in

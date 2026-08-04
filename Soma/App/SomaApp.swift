@@ -7,6 +7,12 @@ struct SomaApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var sessionManager = SessionManager()
 
+    init() {
+        // Must precede AppState's first read of the keychain/UserDefaults.
+        // (@StateObject defers its wrappedValue autoclosure past this body.)
+        UITestSupport.bootstrapIfNeeded()
+    }
+
     var body: some Scene {
         WindowGroup {
             // Exactly the 4 screens in sequence -- no NavigationStack, no
