@@ -21,7 +21,7 @@ struct NotificationEnablementView: View {
             CardView {
                 Text(notificationsEnabled ? "Notifications enabled" : "Enable notifications")
                     .font(.body.bold())
-                Text("Soma sends one notification each morning with your training recommendation.")
+                Text("Soma sends your morning training recommendation, plus a few light check-ins through the day -- a movement nudge, an evening reminder if today's workout is still open, and a quick progress update.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -33,6 +33,15 @@ struct NotificationEnablementView: View {
                         do {
                             try await NotificationManager.shared.requestAuthorization()
                             notificationsEnabled = true
+                            // Same-day coverage: the wake-time-triggered
+                            // refresh (BackgroundTaskManager) won't run
+                            // again until tomorrow morning, so without
+                            // this a user enabling notifications mid-day
+                            // would see none of today's engagement
+                            // notifications. Best-effort/fire-and-forget --
+                            // scheduleToday already skips any time that's
+                            // already passed today.
+                            Task { await NotificationManager.shared.scheduleTodaysEngagementNotifications() }
                         } catch {
                             errorMessage = error.localizedDescription
                         }

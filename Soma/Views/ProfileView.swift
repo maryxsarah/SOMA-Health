@@ -84,6 +84,12 @@ struct ProfileView: View {
     // "Goal & Current Photos" row below.
     @State private var goalBodyPhotoPath: String?
     @State private var currentBodyPhotoPath: String?
+    // Feeds GoalJourneyProgress (the progress bar/tenure stat shown above
+    // the photo slots) -- read-only, sourced from `profile` in load().
+    @State private var journeyCreatedAt: String?
+    @State private var journeyGoalPace: GoalPace?
+    @State private var journeyWeightKg: Double?
+    @State private var journeyDesiredWeightKg: Double?
     @State private var goalBodyPhotoImage: UIImage?
     @State private var currentBodyPhotoImage: UIImage?
     @State private var goalPhotoItem: PhotosPickerItem?
@@ -732,6 +738,11 @@ struct ProfileView: View {
             Text("Optional -- helps personalize your plan toward your goal.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if let journeyProgress {
+                journeyProgressSection(journeyProgress)
+            }
+
             // errorMessage otherwise only renders on the Account tab --
             // a failed remove/upload here would look like a silent no-op.
             if let errorMessage {
@@ -755,6 +766,18 @@ struct ProfileView: View {
                     onRemove: { Task { await removeBodyPhoto(kind: .current) } }
                 )
             }
+            // Tapping "Current body" above already replaces the photo (and
+            // keeps the old one in history -- see removeBodyPhoto's
+            // "promote the newest remaining upload" comment) -- this just
+            // names that same action explicitly as ongoing progress
+            // tracking, not a one-time setup step, since it's easy to
+            // assume the slot above is "done" once it's filled once.
+            if currentBodyPhotoImage != nil {
+                PhotosPicker(selection: $currentPhotoItem, matching: .images) {
+                    Label("Add a new progress photo", systemImage: "camera.fill")
+                        .font(.caption.bold())
+                }
+            }
             if let goalBodyPhotoImage, let currentBodyPhotoImage {
                 Button {
                     AnalyticsManager.shared.featureUsed(name: "body_photo_comparison")
@@ -768,6 +791,36 @@ struct ProfileView: View {
                 }
             }
         }
+    }
+
+    private var journeyProgress: GoalJourneyProgress? {
+        GoalJourneyProgress.compute(
+            createdAt: journeyCreatedAt,
+            weightKg: journeyWeightKg,
+            desiredWeightKg: journeyDesiredWeightKg,
+            goalPace: journeyGoalPace
+        )
+    }
+
+    /// "Day X" always shows (real, always-available data); the bar/estimate
+    /// underneath only appears when a real timeline estimate exists --
+    /// never a fabricated percentage for someone who never set a desired
+    /// weight/pace.
+    private func journeyProgressSection(_ progress: GoalJourneyProgress) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Day \(progress.daysElapsed + 1) of your journey")
+                .font(.subheadline.bold())
+            ProgressView(value: progress.fraction)
+                .tint(SomaTokens.accent)
+            Text(
+                progress.fraction >= 1.0
+                    ? "Past your estimated ~\(progress.estimatedTotalDays / 30)-month timeline -- steady progress still counts."
+                    : "Roughly \(progress.estimatedTotalDays / 30) months to your goal at your chosen pace."
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.bottom, 4)
     }
 
     private var contactEmailEditor: some View {
@@ -880,6 +933,10 @@ struct ProfileView: View {
         goalBodyPhotoPath = profile.goalBodyPhotoPath
         currentBodyPhotoPath = profile.currentBodyPhotoPath
         isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
+        journeyCreatedAt = profile.createdAt
+        journeyGoalPace = profile.goalPace
+        journeyWeightKg = profile.weightKg
+        journeyDesiredWeightKg = profile.desiredWeightKg
         if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
             if let path = profile.goalBodyPhotoPath {
                 goalBodyPhotoImage = await loadBodyPhoto(path: path)

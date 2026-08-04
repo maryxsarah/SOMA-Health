@@ -151,6 +151,18 @@ struct UserProfile: Codable, Equatable {
     /// Exists on this model ONLY for the Goal Body adult-only gate
     /// (bodyPhotosEditor); every other date-of-birth use is server-side.
     var dateOfBirth: String? = nil
+    /// Read-only -- written at onboarding (saveOnboardingSurvey), never
+    /// read back until the goal-progress bar needed it alongside
+    /// weightKg/desiredWeightKg to recompute GoalPace.estimatedMonths.
+    var goalPace: GoalPace? = nil
+    /// Read-only, server-assigned at account creation -- the journey
+    /// "start date" the goal-progress bar counts elapsed days from. Not a
+    /// plan-start date (there isn't a separate one), but close enough: for
+    /// the vast majority of users onboarding happens in one sitting.
+    /// Raw ISO8601 wire string, same reason as dateOfBirth above (this
+    /// model is decoded with a plain JSONDecoder that has no date
+    /// strategy configured -- parsed on demand where actually needed).
+    var createdAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
@@ -177,6 +189,8 @@ struct UserProfile: Codable, Equatable {
         case journeyStage = "journey_stage"
         case blockersNotes = "blockers_notes"
         case dateOfBirth = "date_of_birth"
+        case goalPace = "goal_pace"
+        case createdAt = "created_at"
     }
 
     /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.
