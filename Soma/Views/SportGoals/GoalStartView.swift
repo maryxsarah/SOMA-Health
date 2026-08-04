@@ -21,7 +21,9 @@ struct GoalStartView: View {
     /// the next tap retries only the baseline (see GoalCreationFlow).
     @State private var pendingBaselineGoal: UserGoal?
 
-    init(goal: SportGoal, sport: Sport?, prefillBaseline: Double? = nil, onCreated: @escaping () async -> Void) {
+    /// `seedStage` is for SomaSnapshotTests only -- renders the milestone
+    /// target block without a tap.
+    init(goal: SportGoal, sport: Sport?, prefillBaseline: Double? = nil, seedStage: String? = nil, onCreated: @escaping () async -> Void) {
         self.goal = goal
         self.sport = sport
         self.prefillBaseline = prefillBaseline
@@ -30,6 +32,7 @@ struct GoalStartView: View {
         let mid = (range.lowerBound + range.upperBound) / 2
         _baselineValue = State(initialValue: prefillBaseline ?? mid.rounded())
         _hasEnteredValue = State(initialValue: prefillBaseline != nil)
+        _selectedStage = State(initialValue: seedStage)
     }
 
     private var hasBaseline: Bool {
@@ -139,7 +142,17 @@ struct GoalStartView: View {
                 .font(.body.bold())
             switch goal.kind {
             case .milestone:
-                if goal.stageLabels.isEmpty {
+                // Chips carry the raw ladder key (what the server stores);
+                // only their titles are display copy.
+                if !goal.stageLadder.isEmpty {
+                    FlowLayout {
+                        ForEach(goal.stageLadder, id: \.self) { key in
+                            SomaChip(title: SportGoal.stageDisplayName(key), isSelected: selectedStage == key) {
+                                selectedStage = key
+                            }
+                        }
+                    }
+                } else if goal.stageLabels.isEmpty {
                     ruler
                 } else {
                     FlowLayout {
@@ -197,6 +210,33 @@ struct GoalStartView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink3)
             }
+        } else if goal.kind == .milestone, let selectedStage,
+                  let index = goal.stageIndex(of: selectedStage),
+                  goal.stageLadder.indices.contains(index + 1) {
+            // The next rung of the ladder IS the target -- honest horizon
+            // from the evidence band, never a number (guide 03 milestone row).
+            CardView {
+                Text("A realistic target")
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(SomaTokens.ink3)
+                Text(SportGoal.stageDisplayName(goal.stageLadder[index + 1]))
+                    .font(Theme.display)
+                    .foregroundStyle(SomaTokens.accent)
+                if let band = goal.band(forLevel: experienceLevel),
+                   let weeksLow = band.weeksLow, let weeksHigh = band.weeksHigh {
+                    Text("next stage · usually \(weeksLow)–\(weeksHigh) weeks")
+                        .font(.system(size: 14))
+                        .foregroundStyle(SomaTokens.ink2)
+                } else {
+                    Text("the next stage on the ladder")
+                        .font(.system(size: 14))
+                        .foregroundStyle(SomaTokens.ink2)
+                }
+                Text("Stage-based — no numbers needed.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(SomaTokens.ink3)
+            }
         } else if goal.kind == .qualitative {
             CardView {
                 Text("Your target")
@@ -227,7 +267,7 @@ struct GoalStartView: View {
     }
 
     private var baselineText: String {
-        if goal.kind == .milestone, let selectedStage { return selectedStage }
+        if goal.kind == .milestone, let selectedStage { return SportGoal.stageDisplayName(selectedStage) }
         return SportGoalFormat.value(baselineValue, unit: goal.unit)
     }
 

@@ -38,15 +38,6 @@ enum SportGoalKind: String, Codable {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = SportGoalKind(rawValue: raw) ?? .unknown
     }
-
-    var badgeText: String {
-        switch self {
-        case .metric: "metric"
-        case .milestone: "milestone"
-        case .qualitative: "in words"
-        case .unknown: ""
-        }
-    }
 }
 
 /// One row of a goal's evidence-backed target table: a starting-level band
@@ -121,6 +112,8 @@ struct SportGoal: Codable, Identifiable, Hashable {
     let protocolText: String?
     let noiseBand: Double?
     let targetTable: [SportGoalTargetBand]
+    /// Milestone stage keys from the seeded `target_table.ladder`, in order.
+    let stageLadder: [String]
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, unit, key, promise
@@ -134,6 +127,7 @@ struct SportGoal: Codable, Identifiable, Hashable {
     /// The seeded `target_table` is a wrapper object with the bands inside.
     private struct TargetTableWrapper: Decodable {
         let bands: [String: SportGoalTargetBand]?
+        let ladder: [String]?
     }
 
     init(from decoder: Decoder) throws {
@@ -159,13 +153,17 @@ struct SportGoal: Codable, Identifiable, Hashable {
         }
         if let array = try? c.decodeIfPresent([SportGoalTargetBand].self, forKey: .targetTable) {
             targetTable = array
+            stageLadder = []
         } else if let wrapper = try? c.decodeIfPresent(TargetTableWrapper.self, forKey: .targetTable),
-                  let wrapped = wrapper.bands {
-            targetTable = bands(fromDict: wrapped)
+                  wrapper.bands != nil || wrapper.ladder != nil {
+            targetTable = wrapper.bands.map(bands(fromDict:)) ?? []
+            stageLadder = wrapper.ladder ?? []
         } else if let dict = try? c.decodeIfPresent([String: SportGoalTargetBand].self, forKey: .targetTable) {
             targetTable = bands(fromDict: dict)
+            stageLadder = []
         } else {
             targetTable = []
+            stageLadder = []
         }
     }
 
@@ -180,14 +178,16 @@ struct SportGoal: Codable, Identifiable, Hashable {
 
     /// One-line row caption -- server copy when present, else derived
     /// deterministically from unit/kind (fixed copy, not fabricated data).
+    /// Milestone goals never claim a unit: stages, not numbers (copy rule 2).
     var promiseLine: String {
         if let promise, !promise.isEmpty { return promise }
-        if let unit, !unit.isEmpty { return "Measurable in \(unit)" }
         switch kind {
-        case .milestone: return "Tracked in stages"
+        case .milestone: return "Stage-based — no numbers needed"
         case .qualitative: return "A target in your own words"
-        default: return "Measured, honestly"
+        default: break
         }
+        if let unit, !unit.isEmpty { return "Measurable in \(unit)" }
+        return "Measured, honestly"
     }
 
     /// The three-numbered-lines protocol from the server's protocol text.
@@ -229,10 +229,32 @@ struct SportGoal: Codable, Identifiable, Hashable {
         targetTable.first { $0.label == label }
     }
 
-    /// Stage chips for milestone goals come from the target table's labels
-    /// -- never invented client-side.
+    /// Stage chips for milestone goals come from the seeded ladder (band
+    /// labels as legacy fallback) -- never invented client-side.
     var stageLabels: [String] {
-        targetTable.compactMap(\.label)
+        if !stageLadder.isEmpty { return stageLadder.map(Self.stageDisplayName) }
+        return targetTable.compactMap(\.label)
+    }
+
+    /// Ladder index for a stored stage -- matches raw keys and, for rows
+    /// written before keys were stored, the display names.
+    func stageIndex(of stage: String) -> Int? {
+        if let i = stageLadder.firstIndex(of: stage) { return i }
+        return stageLadder.firstIndex { Self.stageDisplayName($0) == stage }
+    }
+
+    /// Display copy for a ladder key; unknown keys fall back to a plain
+    /// sentence-cased form of the key itself.
+    static func stageDisplayName(_ key: String) -> String {
+        switch key {
+        case "never_tried": return "Never tried"
+        case "feet_lift": return "Feet lift"
+        case "hold_3s": return "Holds 3 s"
+        case "hold_seconds": return "Timed hold"
+        default:
+            let words = key.replacingOccurrences(of: "_", with: " ")
+            return words.prefix(1).uppercased() + words.dropFirst()
+        }
     }
 
     /// Ruler bounds derived from the band edges when present.
@@ -327,6 +349,8 @@ struct UserGoal: Codable, Identifiable, Hashable {
     let targetKind: GoalTargetKind
     let status: UserGoalStatus
     let baselineValue: Double?
+    let baselineStage: String?
+    let targetText: String?
     let targetLow: Double?
     let targetHigh: Double?
     let etaStart: String?
@@ -358,6 +382,8 @@ struct UserGoal: Codable, Identifiable, Hashable {
         case goalId = "goal_id"
         case targetKind = "target_kind"
         case baselineValue = "baseline_value"
+        case baselineStage = "baseline_stage"
+        case targetText = "target_text"
         case targetLow = "target_low"
         case targetHigh = "target_high"
         case etaStart = "eta_start"
@@ -390,6 +416,8 @@ struct UserGoal: Codable, Identifiable, Hashable {
         targetKind = (try? c.decodeIfPresent(GoalTargetKind.self, forKey: .targetKind)) ?? .unknown
         status = (try? c.decodeIfPresent(UserGoalStatus.self, forKey: .status)) ?? .unknown
         baselineValue = try? c.decodeIfPresent(Double.self, forKey: .baselineValue)
+        baselineStage = try? c.decodeIfPresent(String.self, forKey: .baselineStage)
+        targetText = try? c.decodeIfPresent(String.self, forKey: .targetText)
         targetLow = try? c.decodeIfPresent(Double.self, forKey: .targetLow)
         targetHigh = try? c.decodeIfPresent(Double.self, forKey: .targetHigh)
         etaStart = try? c.decodeIfPresent(String.self, forKey: .etaStart)

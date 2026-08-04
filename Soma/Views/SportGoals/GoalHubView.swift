@@ -10,6 +10,30 @@ struct GoalHubView: View {
     let onChanged: () -> Void
     let onPickNewGoal: () -> Void
     let onNextBlock: (_ goalID: String, _ prefillBaseline: Double?) -> Void
+    /// Non-nil only from SomaSnapshotTests: pre-seeds the fetched state so a
+    /// lifecycle variant can render without a network round-trip.
+    private let seededMeasurements: [GoalMeasurement]?
+
+    init(
+        goal: UserGoal,
+        catalog: SportCatalog,
+        history: [UserGoal],
+        onChanged: @escaping () -> Void,
+        onPickNewGoal: @escaping () -> Void,
+        onNextBlock: @escaping (_ goalID: String, _ prefillBaseline: Double?) -> Void,
+        seedMeasurements: [GoalMeasurement]? = nil,
+        seedSessionsDone: Int = 0
+    ) {
+        self.goal = goal
+        self.catalog = catalog
+        self.history = history
+        self.onChanged = onChanged
+        self.onPickNewGoal = onPickNewGoal
+        self.onNextBlock = onNextBlock
+        seededMeasurements = seedMeasurements
+        _measurements = State(initialValue: seedMeasurements ?? [])
+        _sessionsDone = State(initialValue: seedSessionsDone)
+    }
 
     @EnvironmentObject private var appState: AppState
 
@@ -17,6 +41,7 @@ struct GoalHubView: View {
     @State private var sessionsDone = 0
     @State private var retestExpanded = false
     @State private var retestValue: Double = 0
+    @State private var retestStage: String?
     @State private var attempts: [Double] = []
     @State private var retestResult: RetestResult?
     @State private var showEndDialog = false
@@ -57,6 +82,37 @@ struct GoalHubView: View {
 
     private var isPaused: Bool { goal.status == .paused }
 
+    // MARK: - Milestone (stage ladder)
+
+    private var isMilestone: Bool { presetGoal?.kind == .milestone }
+
+    /// Raw ladder keys; measurements for a milestone goal store the index
+    /// into this ladder -- stages, never invented numbers.
+    private var ladder: [String] { presetGoal?.stageLadder ?? [] }
+
+    /// The starting stage as a ladder index (the stored stage is the
+    /// milestone counterpart of `baselineValue`).
+    private var milestoneBaselineIndex: Double? {
+        guard isMilestone, let stage = goal.baselineStage else { return nil }
+        return presetGoal?.stageIndex(of: stage).map(Double.init)
+    }
+
+    /// Latest known stage: last measurement wins, else the stored baseline.
+    private var currentStageIndex: Int? {
+        guard isMilestone else { return nil }
+        if let last = measurements.last?.value { return Int(last.rounded()) }
+        return milestoneBaselineIndex.map(Int.init)
+    }
+
+    /// Stage name for a stored measurement value; numeric formatting for
+    /// everything that isn't a milestone goal.
+    private func measurementText(_ value: Double) -> String {
+        guard isMilestone, !ladder.isEmpty else { return SportGoalFormat.value(value, unit: unit) }
+        let index = Int(value.rounded())
+        guard ladder.indices.contains(index) else { return SportGoalFormat.value(value) }
+        return SportGoal.stageDisplayName(ladder[index])
+    }
+
     /// Metric machinery exists for presets with a unit and customs that
     /// defined their own measurable.
     private var hasMetric: Bool {
@@ -69,6 +125,7 @@ struct GoalHubView: View {
         measurements.last(where: { $0.kind == .baselineConfirm })?.value
             ?? measurements.first(where: { $0.kind == .baseline })?.value
             ?? goal.baselineValue
+            ?? milestoneBaselineIndex
     }
 
     private var latestMeasurementDate: Date? {
@@ -105,7 +162,11 @@ struct GoalHubView: View {
                     sessionsCard
                 }
                 if hasMetric {
-                    chartCard
+                    if isMilestone {
+                        stageCard
+                    } else {
+                        chartCard
+                    }
                     if !isPaused, !isUnavailable {
                         retestSection
                     }
@@ -202,6 +263,27 @@ struct GoalHubView: View {
                 Text("≈ \(target) by \(SportGoalFormat.dateRange(lo, hi))")
                     .font(.system(size: 14))
                     .foregroundStyle(SomaTokens.ink2)
+            }
+            // Milestone target: the next rung, an honest window, no numbers.
+            if isMilestone, let index = currentStageIndex, ladder.indices.contains(index + 1) {
+                let next = SportGoal.stageDisplayName(ladder[index + 1])
+                if let horizon = goal.horizonWeeks {
+                    Text("\(next) — next stage · usually \(horizon.low)–\(horizon.high) weeks")
+                        .font(.system(size: 14))
+                        .foregroundStyle(SomaTokens.ink2)
+                } else {
+                    Text("\(next) — the next stage on the ladder")
+                        .font(.system(size: 14))
+                        .foregroundStyle(SomaTokens.ink2)
+                }
+            }
+            // A goal "in words" shows the words themselves as its target.
+            if presetGoal?.kind == .qualitative, let words = goal.targetText, !words.isEmpty {
+                Text("“\(words)”")
+                    .font(.system(size: 20, design: .serif).italic())
+                Text("Progress is sessions done plus your own check-in — no invented numbers.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(SomaTokens.ink3)
             }
             if let weekLine = goal.weekLine {
                 Text(weekLine.prefix(1).uppercased() + weekLine.dropFirst())
@@ -315,6 +397,26 @@ struct GoalHubView: View {
 
     // MARK: - Chart
 
+    /// Milestone progress is the ladder, not a line -- charting stage
+    /// indices would dress ordinals up as measurements (copy rule 2).
+    private var stageCard: some View {
+        CardView {
+            Text("Progress")
+                .font(.body.bold())
+            if let index = currentStageIndex, ladder.indices.contains(index) {
+                Text(SportGoal.stageDisplayName(ladder[index]))
+                    .font(.system(size: 24, design: .serif).italic())
+                Text("Stage \(index + 1) of \(ladder.count) — stage-based, no numbers needed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No stage recorded yet — your starting stage begins the ladder.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var chartCard: some View {
         CardView {
             Text("Progress")
@@ -341,7 +443,8 @@ struct GoalHubView: View {
     private var nextEvent: RetestEvent? {
         guard goal.status == .active else { return nil }
         if baselineIsStale || resumeNeedsRebaseline { return .rebaseline }
-        let hasBaseline = measurements.contains { $0.kind == .baseline }
+        // A milestone goal's stored starting stage IS its baseline.
+        let hasBaseline = measurements.contains { $0.kind == .baseline } || milestoneBaselineIndex != nil
         let hasConfirm = measurements.contains { $0.kind == .baselineConfirm }
         let hasCheckpoint = measurements.contains { $0.kind == .checkpoint }
         if !hasBaseline { return .rebaseline }
@@ -383,6 +486,7 @@ struct GoalHubView: View {
             } else {
                 SomaButton(title: retestButtonTitle(event), size: .md, variant: .primary) {
                     retestValue = officialBaseline ?? presetGoal?.entryRange.lowerBound ?? 0
+                    retestStage = currentStageIndex.flatMap { ladder.indices.contains($0) ? ladder[$0] : nil }
                     attempts = []
                     retestExpanded = true
                 }
@@ -391,7 +495,15 @@ struct GoalHubView: View {
     }
 
     private func retestButtonTitle(_ event: RetestEvent) -> String {
-        switch event {
+        if isMilestone {
+            return switch event {
+            case .rebaseline: "Re-check your stage"
+            case .baselineConfirm: "Confirm your stage"
+            case .checkpoint: "Mid-block check-in"
+            case .final: "Final check-in"
+            }
+        }
+        return switch event {
         case .rebaseline: "Re-measure your baseline"
         case .baselineConfirm: "Confirm your baseline"
         case .checkpoint: "Mid-block re-test"
@@ -399,12 +511,17 @@ struct GoalHubView: View {
         }
     }
 
+    private func lockedRowText(daysLeft: Int) -> String {
+        if daysLeft >= 14 { return "Re-test opens in \(Int((Double(daysLeft) / 7).rounded())) weeks" }
+        return daysLeft == 1 ? "Re-test opens in 1 day" : "Re-test opens in \(daysLeft) days"
+    }
+
     private func lockedRow(daysLeft: Int) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "lock.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SomaTokens.ink4)
-            Text(daysLeft >= 14 ? "Re-test opens in \(Int((Double(daysLeft) / 7).rounded())) weeks" : "Re-test opens in \(daysLeft) days")
+            Text(lockedRowText(daysLeft: daysLeft))
                 .font(.system(size: 13.5, weight: .semibold))
                 .foregroundStyle(SomaTokens.ink3)
             Spacer()
@@ -426,8 +543,9 @@ struct GoalHubView: View {
         .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
     }
 
-    /// A4 entry: one protocol reminder line, ruler, attempt counter --
-    /// the result replaces this in place on save.
+    /// A4 entry: one protocol reminder line, then a ruler + attempts for
+    /// metric goals or stage chips for milestone goals -- the result
+    /// replaces this in place on save.
     private func retestEntryCard(_ event: RetestEvent) -> some View {
         CardView {
             if let reminder = presetGoal?.protocolLines.first {
@@ -435,33 +553,52 @@ struct GoalHubView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            RulerNumberPicker(
-                value: $retestValue,
-                range: presetGoal?.entryRange ?? 0...200,
-                unit: unit
-            )
-            HStack {
-                Text(attempts.isEmpty ? "Best of 3 counts" : "Attempts: \(attempts.map { SportGoalFormat.value($0) }.joined(separator: " · "))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if attempts.count < 3 {
-                    Button("Record attempt \(attempts.count + 1)") {
-                        attempts.append(retestValue)
+            if isMilestone, !ladder.isEmpty {
+                FlowLayout {
+                    ForEach(ladder, id: \.self) { key in
+                        SomaChip(title: SportGoal.stageDisplayName(key), isSelected: retestStage == key) {
+                            retestStage = key
+                        }
                     }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(SomaTokens.accent)
-                    .buttonStyle(.plain)
                 }
-            }
-            let best = attempts.max() ?? retestValue
-            SomaButton(
-                title: isWorking ? "Saving…" : "Save \(SportGoalFormat.value(best, unit: unit))",
-                size: .md,
-                variant: .primary,
-                isEnabled: !isWorking
-            ) {
-                Task { await saveRetest(event, value: best) }
+                SomaButton(
+                    title: isWorking ? "Saving…" : "Save \(retestStage.map(SportGoal.stageDisplayName) ?? "your stage")",
+                    size: .md,
+                    variant: .primary,
+                    isEnabled: !isWorking && retestStage != nil
+                ) {
+                    guard let retestStage, let index = ladder.firstIndex(of: retestStage) else { return }
+                    Task { await saveRetest(event, value: Double(index)) }
+                }
+            } else {
+                RulerNumberPicker(
+                    value: $retestValue,
+                    range: presetGoal?.entryRange ?? 0...200,
+                    unit: unit
+                )
+                HStack {
+                    Text(attempts.isEmpty ? "Best of 3 counts" : "Attempts: \(attempts.map { SportGoalFormat.value($0) }.joined(separator: " · "))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if attempts.count < 3 {
+                        Button("Record attempt \(attempts.count + 1)") {
+                            attempts.append(retestValue)
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                        .buttonStyle(.plain)
+                    }
+                }
+                let best = attempts.max() ?? retestValue
+                SomaButton(
+                    title: isWorking ? "Saving…" : "Save \(SportGoalFormat.value(best, unit: unit))",
+                    size: .md,
+                    variant: .primary,
+                    isEnabled: !isWorking
+                ) {
+                    Task { await saveRetest(event, value: best) }
+                }
             }
             Button("Not now") { retestExpanded = false }
                 .font(.system(size: 13, weight: .semibold))
@@ -476,9 +613,9 @@ struct GoalHubView: View {
         switch result {
         case .confirmed(let value):
             CardView {
-                Text("Baseline confirmed")
+                Text(isMilestone ? "Stage confirmed" : "Baseline confirmed")
                     .font(.body.bold())
-                Text(SportGoalFormat.value(value, unit: unit))
+                Text(measurementText(value))
                     .font(Theme.display)
                 Text("This is your official starting point for the block.")
                     .font(.caption)
@@ -487,21 +624,27 @@ struct GoalHubView: View {
             }
         case .noChange:
             CardView {
-                Text("No change yet — normal at this stage.")
+                Text(isMilestone ? "Same stage — normal at this point." : "No change yet — normal at this stage.")
                     .font(.body.bold())
-                Text("The re-test landed within measurement noise. Session data still shows the work happening.")
+                Text(isMilestone
+                    ? "Stages take time to unlock. Session data still shows the work happening."
+                    : "The re-test landed within measurement noise. Session data still shows the work happening.")
                     .font(.system(size: 13))
                     .foregroundStyle(SomaTokens.ink2)
                 dismissResultButton
             }
         case .progress(let value, let delta):
             CardView {
-                Text("Progress")
+                Text(isMilestone ? (delta > 0 ? "New stage" : "Stage recorded") : "Progress")
                     .font(.body.bold())
-                Text(SportGoalFormat.delta(delta, unit: unit))
+                Text(isMilestone ? measurementText(value) : SportGoalFormat.delta(delta, unit: unit))
                     .font(Theme.display)
                     .foregroundStyle(SomaTokens.accent)
-                Text("Now at \(SportGoalFormat.value(value, unit: unit))\(targetPositionSuffix(delta))")
+                Text(isMilestone
+                    ? (delta > 0
+                        ? "Up from \(measurementText(value - delta))."
+                        : "An earlier stage than last time — stages wobble, the work still counts.")
+                    : "Now at \(SportGoalFormat.value(value, unit: unit))\(targetPositionSuffix(delta))")
                     .font(.system(size: 13))
                     .foregroundStyle(SomaTokens.ink2)
                 dismissResultButton
@@ -519,7 +662,7 @@ struct GoalHubView: View {
     /// The completion moment IS the achievement card, no separate screen.
     private func finalResultCard(achieved: Bool, value: Double, delta: Double) -> some View {
         let dateRange = blockDateRange
-        let deltaText = SportGoalFormat.delta(delta, unit: unit)
+        let deltaText = isMilestone ? measurementText(value) : SportGoalFormat.delta(delta, unit: unit)
         let name = goal.displayName(in: catalog)
         return VStack(alignment: .leading, spacing: 12) {
             AchievementCardView(variant: achieved
@@ -617,11 +760,24 @@ struct GoalHubView: View {
         let start = past.startDate ?? Date()
         let end = past.completedAt.flatMap(SportGoalFormat.parseTimestamp) ?? start
         let range = SportGoalFormat.monthRange(start, end)
-        guard let result = past.resultValue, let baseline = past.baselineValue else {
+        let pastGoal = past.goalId.flatMap(catalog.goal(id:))
+        // A milestone block's baseline is its stored starting stage.
+        let pastBaseline = past.baselineValue
+            ?? past.baselineStage.flatMap { pastGoal?.stageIndex(of: $0).map(Double.init) }
+        guard let result = past.resultValue, let baseline = pastBaseline else {
             return .neutral(goalName: name, deltaText: "Block complete", dateRange: range)
         }
         let delta = result - baseline
-        let pastUnit = past.kind == .custom ? past.customMetricUnit : past.goalId.flatMap(catalog.goal(id:))?.unit
+        // Past milestone blocks read as their reached stage, not "+1".
+        if pastGoal?.kind == .milestone, !(pastGoal?.stageLadder.isEmpty ?? true) {
+            let ladder = pastGoal?.stageLadder ?? []
+            let index = Int(result.rounded())
+            let stageText = ladder.indices.contains(index) ? SportGoal.stageDisplayName(ladder[index]) : "Block complete"
+            return delta >= 1
+                ? .celebratory(goalName: name, deltaText: stageText, dateRange: range)
+                : .neutral(goalName: name, deltaText: stageText, dateRange: range)
+        }
+        let pastUnit = past.kind == .custom ? past.customMetricUnit : pastGoal?.unit
         let deltaText = SportGoalFormat.delta(delta, unit: pastUnit)
         if let low = past.targetLow, delta >= low {
             return .celebratory(goalName: name, deltaText: deltaText, dateRange: range)
@@ -647,6 +803,7 @@ struct GoalHubView: View {
     // MARK: - Actions
 
     private func load() async {
+        guard seededMeasurements == nil else { return }
         measurements = (try? await SupabaseClient.shared.fetchGoalMeasurements(userGoalId: goal.id)) ?? []
         await loadSessions()
     }

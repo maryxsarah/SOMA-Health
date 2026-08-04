@@ -1,16 +1,119 @@
 import SwiftUI
 
-/// A1 -- one grouped list replaces sport picker + goal picker: slim sport
-/// section headers, preset goal rows, and a per-sport "Your own" row.
-struct GoalPickerView: View {
+/// The shared S1/S2 list block (README "Block anatomy"): standalone white
+/// card, 46×46 icon plate, title + optional badge, note line, chevron.
+private struct GoalListBlock: View {
+    var icon: String
+    var plateColor: Color = SomaTokens.accentSoft
+    var iconColor: Color = SomaTokens.accent
+    var title: String
+    var badge: GoalKindBadge?
+    var note: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(plateColor)
+                    .frame(width: 46, height: 46)
+                    .overlay(
+                        Image(systemName: icon)
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(iconColor)
+                    )
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text(title)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(SomaTokens.ink)
+                        badge
+                    }
+                    Text(note)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(SomaTokens.ink3)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink5)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
+                    .fill(SomaTokens.surface)
+                    .shadow(color: SomaTokens.ink.opacity(0.06), radius: 2, y: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// S1 -- the sport list. One identical block per sport; adding a sport is
+/// a config change, never a new screen.
+struct SportListView: View {
     let catalog: SportCatalog
-    let onSelectPreset: (SportGoal) -> Void
-    let onSelectCustom: (Sport) -> Void
+    let onSelectSport: (Sport) -> Void
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("NEW GOAL · ONE AT A TIME")
+                        .font(.system(size: 12, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(SomaTokens.ink4)
+                    Text("What do you train for?")
+                        .font(Theme.display)
+                }
+
+                ForEach(catalog.sports) { sport in
+                    GoalListBlock(
+                        icon: sport.iconSystemName,
+                        title: sport.name,
+                        note: sportNote(sport)
+                    ) {
+                        onSelectSport(sport)
+                    }
+                }
+
+                Text("Every sport has measurable goals — plus your own coach's task, tracked the same honest way.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(SomaTokens.ink4)
+                    .padding(.top, 4)
+            }
+            .padding(20)
+        }
+    }
+
+    private func sportNote(_ sport: Sport) -> String {
+        let goals = catalog.goals(for: sport)
+        let count = goals.count
+        let names = goals.map { $0.name.lowercased() }.joined(separator: ", ")
+        guard count > 0 else { return "Your own coach's task" }
+        return "\(count) \(count == 1 ? "goal" : "goals") · \(names)"
+    }
+}
+
+/// S2 -- goals of ONE chosen sport, same block anatomy, plus the single
+/// "Your own" coach's-task block under its own eyebrow. Generic: any sport
+/// renders from the catalog, no per-sport screens.
+struct GoalPickerView: View {
+    let sport: Sport
+    let catalog: SportCatalog
+    let onSelectPreset: (SportGoal) -> Void
+    let onSelectCustom: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(sport.name.uppercased())
+                        .font(.system(size: 12, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(SomaTokens.ink4)
                     Text("Pick a goal")
                         .font(Theme.display)
                     Text("One goal at a time — measured honestly, matched to your readiness every day.")
@@ -18,102 +121,51 @@ struct GoalPickerView: View {
                         .foregroundStyle(SomaTokens.ink2)
                 }
 
-                ForEach(catalog.sports) { sport in
-                    sportSection(sport)
+                VStack(spacing: 12) {
+                    ForEach(catalog.goals(for: sport)) { goal in
+                        GoalListBlock(
+                            icon: sport.iconSystemName,
+                            title: goal.name,
+                            badge: GoalKindBadge(kind: goal.kind),
+                            note: goal.promiseLine
+                        ) {
+                            onSelectPreset(goal)
+                        }
+                    }
                 }
+
+                // Padel's known sport risk -- one caption, this screen only.
+                if sport.name.lowercased().contains("padel") {
+                    Text("Certified eye protection is recommended for all padel play.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(SomaTokens.ink3)
+                }
+
+                Text("YOUR OWN")
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(SomaTokens.ink4)
+                    .padding(.top, 4)
+
+                GoalListBlock(
+                    icon: "list.clipboard",
+                    plateColor: SomaTokens.heartSoft,
+                    iconColor: SomaTokens.heart,
+                    title: "Your own — coach's task",
+                    badge: .custom,
+                    note: "Attach your coach's assignment — Soma schedules and tracks it"
+                ) {
+                    onSelectCustom()
+                }
+
+                Text("Got a task from your coach? Add it here — do the work in Soma and show them your progress: sessions and measurements export as one card.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(SomaTokens.ink3)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
             }
             .padding(20)
         }
-    }
-
-    private func sportSection(_ sport: Sport) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: sport.iconSystemName)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(SomaTokens.ink3)
-                Text(sport.name.uppercased())
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(0.8)
-                    .foregroundStyle(SomaTokens.ink3)
-            }
-            .padding(.top, 4)
-
-            // One caption line for padel only -- eye injuries are the
-            // sport's known risk; certified protection cuts it sharply.
-            if sport.name.lowercased().contains("padel") {
-                Text("Certified eye protection is recommended for all padel play.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(SomaTokens.ink3)
-            }
-
-            VStack(spacing: 8) {
-                ForEach(catalog.goals(for: sport)) { goal in
-                    goalRow(goal)
-                }
-                customRow(sport)
-            }
-        }
-    }
-
-    private func goalRow(_ goal: SportGoal) -> some View {
-        Button {
-            onSelectPreset(goal)
-        } label: {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(goal.name)
-                        .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(SomaTokens.ink)
-                    Text(goal.promiseLine)
-                        .font(.system(size: 12))
-                        .foregroundStyle(SomaTokens.ink3)
-                        .lineLimit(1)
-                }
-                Spacer()
-                GoalKindBadge(kind: goal.kind)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(SomaTokens.ink5)
-            }
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func customRow(_ sport: Sport) -> some View {
-        Button {
-            onSelectCustom(sport)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(SomaTokens.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Your own — coach's task")
-                        .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(SomaTokens.ink)
-                    Text("Attach your coach's assignment — Soma schedules and tracks it")
-                        .font(.system(size: 12))
-                        .foregroundStyle(SomaTokens.ink3)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(SomaTokens.ink5)
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous)
-                    .fill(SomaTokens.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous)
-                            .strokeBorder(SomaTokens.hairline, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    )
-            )
-        }
-        .buttonStyle(.plain)
     }
 }
