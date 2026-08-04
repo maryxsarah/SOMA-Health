@@ -41,10 +41,10 @@ Case IDs are referenced from test names, e.g. `test_SGP_D2_etaSlipLine`.
 | SGP-B1 | journey | **"I want to raise my vertical jump":** Home promo → onboarding popup → Volleyball → Standing vertical jump → measurement protocol shown → baseline via ruler → live target reveal ("+3–6 cm in 10–12 weeks · re-test around …") → "Start the block" → Home shows the goal row | uitest **J1** | automated |
 | SGP-B2 | state | Milestone goal (Crow pose): stage chips instead of ruler, target = next rung of the ladder, no invented numbers | snapshot | automated |
 | SGP-B3 | state | Baseline outside every evidence band: "Baseline recorded" card, promises nothing | snapshot | automated |
-| SGP-B4 | journey | Custom coach goal: form requires the workout text, creation lands on the coach-task hub ("COACH ALEX", 0 of 16 sessions) | uitest **J7** | automated |
+| SGP-B4 | journey | Custom coach goal: form requires the workout text, creation lands on the coach-task hub ("COACH ALEX", 0 of 16 sessions) | uitest **J7** + snapshot | automated |
 | SGP-B5 | negative | Second active goal → HTTP 409 → "You already have an active goal…" error shown, nothing created | manual + deno (partial unique index; create-goal) | covered |
-| SGP-B6 | negative | Goal created but baseline insert failed → button retries **only** the baseline (no duplicate goal; BUG-78) | unit (`GoalCreationFlow`) | planned |
-| SGP-B7 | state | Safety conflict at create (e.g. pregnancy × unsafe goal keywords): warning card requires explicit acknowledgment | snapshot + deno (`goalConflicts_test.ts`) | covered (deno) / planned (snapshot) |
+| SGP-B6 | negative | Goal created but baseline insert failed → button retries **only** the baseline (no duplicate goal; BUG-78) | unit (`GoalCreationFlowTests`) | automated |
+| SGP-B7 | state | Safety conflict at create (e.g. pregnancy × unsafe goal keywords): warning card requires explicit acknowledgment | snapshot + deno (`goalConflicts_test.ts`) | automated |
 
 ## C. Daily training
 
@@ -101,7 +101,7 @@ Superwall paywall never gates the detail sheet.
 | J4 `test_SGP_D5_retestOpenOnModerateDay` | `activeGoalDay28` | SGP-D5 (progress card) |
 | — `test_SGP_D4_restDayDefersRetest` | `activeGoalDay28Rest` | SGP-D4 |
 | J5 `test_SGP_C3_restDayRequestAndUndo` | `activeGoalWeek2` | SGP-C3 client side |
-| J6 `test_SGP_E8_coachTaskHubCountsSessionsAndExports` | `customGoalWeek2` | SGP-E8, session counting |
+| J6 `test_SGP_E8_coachTaskHubCountsSessionsAndExports` | `customGoalWeek2` | SGP-E8, session counting (+ snapshot of the export hub) |
 | J7 `test_SGP_B4_createCoachTask` | `customCoachFlow` | SGP-B4 |
 | J8 `test_SGP_D7_confirmBaselineOnDay5` | `activeGoalDay6` | SGP-D7 |
 | J9 `test_SGP_D6_withinNoiseReadsNoChange` | `activeGoalDay28` | SGP-D6 |

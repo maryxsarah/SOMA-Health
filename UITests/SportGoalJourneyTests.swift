@@ -32,11 +32,13 @@ final class SportGoalJourneyTests: XCTestCase {
         app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", needle)).firstMatch
     }
 
-    /// Drags a sheet down by its top edge — reliable regardless of where
-    /// the sheet's inner scroll view happens to be scrolled.
+    /// Drags a sheet down by its header — reliable regardless of where the
+    /// sheet's inner scroll view happens to be scrolled. The grab point must
+    /// be INSIDE the sheet: a page sheet's top edge sits at ~7.5% of the
+    /// screen, so dy 0.06 landed on the dimming view and dragged nothing.
     private func dismissSheet(_ app: XCUIApplication) {
         let window = app.windows.firstMatch
-        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06))
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
             .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
     }
 
