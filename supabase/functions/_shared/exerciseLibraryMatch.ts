@@ -127,15 +127,24 @@ export async function fetchCandidateExerciseNames(
   // deno-lint-ignore no-explicit-any
   const withEquipmentFilter = (query: any) =>
     equipmentValues ? query.or(equipmentOrClause(equipmentValues)) : query;
+  // Excluded from every tier below, same "assume the more restrictive
+  // case by default" posture as equipment (assume you don't have gear you
+  // didn't list) -- most users train alone, and a suggestion that needs a
+  // second person with no solo alternative isn't actually usable. See the
+  // requires_partner migration for how this was classified.
+  // deno-lint-ignore no-explicit-any
+  const withoutPartnerRequired = (query: any) => query.eq("requires_partner", false);
 
   let mainNames: string[] = [];
   if (bodyPart !== "cardio" && bodyPart !== "recovery") {
     let query = withEquipmentFilter(
-      supabase
-        .from("exercise_library")
-        .select("name")
-        .in("level", levelValues)
-        .limit(MAIN_CANDIDATE_LIMIT),
+      withoutPartnerRequired(
+        supabase
+          .from("exercise_library")
+          .select("name")
+          .in("level", levelValues)
+          .limit(MAIN_CANDIDATE_LIMIT),
+      ),
     );
     if (muscles.length > 0) query = query.overlaps("primary_muscles", muscles);
     const { data } = await query;
@@ -148,12 +157,14 @@ export async function fetchCandidateExerciseNames(
     // (the "Bodyweight Flyes"-on-EZ-bars bug).
     if (mainNames.length === 0) {
       const { data: byEquipmentOnly } = await withEquipmentFilter(
-        supabase
-          .from("exercise_library")
-          .select("name")
-          .eq("category", "strength")
-          .in("level", levelValues)
-          .limit(FALLBACK_LIMIT),
+        withoutPartnerRequired(
+          supabase
+            .from("exercise_library")
+            .select("name")
+            .eq("category", "strength")
+            .in("level", levelValues)
+            .limit(FALLBACK_LIMIT),
+        ),
       );
       // deno-lint-ignore no-explicit-any
       mainNames = (byEquipmentOnly ?? []).map((r: any) => r.name);
@@ -161,24 +172,28 @@ export async function fetchCandidateExerciseNames(
     if (mainNames.length === 0) {
       // Last resort so the enum is never empty -- beginner bodyweight
       // work is the one thing every user can safely be handed.
-      const { data: broadFallback } = await supabase
-        .from("exercise_library")
-        .select("name")
-        .eq("category", "strength")
-        .eq("equipment", "body only")
-        .eq("level", "beginner")
-        .limit(FALLBACK_LIMIT);
+      const { data: broadFallback } = await withoutPartnerRequired(
+        supabase
+          .from("exercise_library")
+          .select("name")
+          .eq("category", "strength")
+          .eq("equipment", "body only")
+          .eq("level", "beginner")
+          .limit(FALLBACK_LIMIT),
+      );
       // deno-lint-ignore no-explicit-any
       mainNames = (broadFallback ?? []).map((r: any) => r.name);
     }
   } else if (bodyPart === "cardio") {
     const { data } = await withEquipmentFilter(
-      supabase
-        .from("exercise_library")
-        .select("name")
-        .eq("category", "cardio")
-        .in("level", levelValues)
-        .limit(FALLBACK_LIMIT),
+      withoutPartnerRequired(
+        supabase
+          .from("exercise_library")
+          .select("name")
+          .eq("category", "cardio")
+          .in("level", levelValues)
+          .limit(FALLBACK_LIMIT),
+      ),
     );
     // deno-lint-ignore no-explicit-any
     mainNames = (data ?? []).map((r: any) => r.name);
@@ -186,48 +201,56 @@ export async function fetchCandidateExerciseNames(
     // Cardio equipment is a weak signal (running needs no gym): broaden
     // rather than hand a cardio day a stretch-only vocabulary.
     if (mainNames.length === 0) {
-      const { data: anyEquipment } = await supabase
-        .from("exercise_library")
-        .select("name")
-        .eq("category", "cardio")
-        .in("level", levelValues)
-        .limit(FALLBACK_LIMIT);
+      const { data: anyEquipment } = await withoutPartnerRequired(
+        supabase
+          .from("exercise_library")
+          .select("name")
+          .eq("category", "cardio")
+          .in("level", levelValues)
+          .limit(FALLBACK_LIMIT),
+      );
       // deno-lint-ignore no-explicit-any
       mainNames = (anyEquipment ?? []).map((r: any) => r.name);
     }
     if (mainNames.length === 0) {
-      const { data: anyCardio } = await supabase
-        .from("exercise_library")
-        .select("name")
-        .eq("category", "cardio")
-        .limit(FALLBACK_LIMIT);
+      const { data: anyCardio } = await withoutPartnerRequired(
+        supabase
+          .from("exercise_library")
+          .select("name")
+          .eq("category", "cardio")
+          .limit(FALLBACK_LIMIT),
+      );
       // deno-lint-ignore no-explicit-any
       mainNames = (anyCardio ?? []).map((r: any) => r.name);
     }
   }
 
   const { data: stretchData } = await withEquipmentFilter(
-    supabase
-      .from("exercise_library")
-      .select("name")
-      .eq("category", "stretching")
-      .in("level", levelValues)
-      .limit(STRETCH_CANDIDATE_LIMIT),
+    withoutPartnerRequired(
+      supabase
+        .from("exercise_library")
+        .select("name")
+        .eq("category", "stretching")
+        .in("level", levelValues)
+        .limit(STRETCH_CANDIDATE_LIMIT),
+    ),
   );
   // deno-lint-ignore no-explicit-any
   const stretchNames: string[] = (stretchData ?? []).map((r: any) => r.name);
 
   // Goal-mapped exercises join the pool only when they pass the same
-  // equipment and level filters as everything else -- no side door.
+  // equipment, level, and partner filters as everything else -- no side door.
   let goalNames: string[] = [];
   if (goalExerciseIds.length > 0) {
     const { data: goalData } = await withEquipmentFilter(
-      supabase
-        .from("exercise_library")
-        .select("name")
-        .in("id", goalExerciseIds)
-        .in("level", levelValues)
-        .limit(MAIN_CANDIDATE_LIMIT),
+      withoutPartnerRequired(
+        supabase
+          .from("exercise_library")
+          .select("name")
+          .in("id", goalExerciseIds)
+          .in("level", levelValues)
+          .limit(MAIN_CANDIDATE_LIMIT),
+      ),
     );
     // deno-lint-ignore no-explicit-any
     goalNames = (goalData ?? []).map((r: any) => r.name);
@@ -242,12 +265,14 @@ export async function fetchCandidateExerciseNames(
 
   // Safety exclusions emptied the list. Broaden to beginner bodyweight work
   // and re-filter -- NEVER hand back the contraindicated names themselves.
-  const { data: safeFallback } = await supabase
-    .from("exercise_library")
-    .select("name")
-    .eq("equipment", "body only")
-    .eq("level", "beginner")
-    .limit(FALLBACK_LIMIT);
+  const { data: safeFallback } = await withoutPartnerRequired(
+    supabase
+      .from("exercise_library")
+      .select("name")
+      .eq("equipment", "body only")
+      .eq("level", "beginner")
+      .limit(FALLBACK_LIMIT),
+  );
   // deno-lint-ignore no-explicit-any
   const safeNames = dropExcluded((safeFallback ?? []).map((r: any) => r.name));
   if (safeNames.length > 0) return safeNames;

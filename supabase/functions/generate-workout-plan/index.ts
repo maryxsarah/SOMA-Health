@@ -39,6 +39,7 @@ import { describeSexAwareConsiderations } from "./sexAwareGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
+import type { TrainingEmphasis } from "../_shared/nutritionTargets.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
 import { computeEtaShift, conceptFromRow, decideGoalWork, decideSafetyPause, deriveEtaInputs, derivePhase, type GoalBlockHistoryEntry, type GoalWorkBlock, type GoalWorkConcept } from "./goalWork.ts";
 
@@ -158,6 +159,12 @@ interface UserRow {
   blockers: string[] | null;
   accomplishment_goals: string[] | null;
   desired_weight_kg: number | null;
+  /// Silent output of analyze-body-photo's goal/current comparison (same
+  /// source as body_photo_emphasis_tags above) -- a coarser directional
+  /// read (cut/recomp/bulk/maintain) than the tag set, used here to bias
+  /// finisher selection and to add one more prompt line. Kept separate
+  /// from `goals`, same reasoning as body_photo_emphasis_tags.
+  training_emphasis: TrainingEmphasis | null;
 }
 
 interface SnapshotRow {
@@ -334,7 +341,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg")
+      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -392,6 +399,7 @@ Deno.serve(async (req: Request) => {
       finisherExcludedKeywords,
       (recentLogs ?? []) as WorkoutLogRow[],
       addDays(date, -1),
+      (userRow as UserRow | null)?.training_emphasis ?? null,
     );
 
     // Same closed-vocabulary keyword exclusions used to keep the finisher
@@ -672,6 +680,16 @@ function buildPrompt(
   const bodyPhotoEmphasisLine = userRow?.body_photo_emphasis_tags?.length
     ? `\nA comparison of the user's current and goal-body photos additionally suggests emphasizing: ${userRow.body_photo_emphasis_tags.join(", ")}. Treat this as a secondary signal alongside -- not a replacement for -- the stated goals above.`
     : "";
+  // Same source, coarser reading (see UserRow.training_emphasis) -- nudges
+  // exercise SELECTION/composition (e.g. more conditioning work on a cut,
+  // more heavy compound work on a bulk), same secondary-signal framing as
+  // bodyPhotoEmphasisLine above. The finisher's own modality is already
+  // handled deterministically before this prompt exists (see
+  // decideFinisher's trainingEmphasis param) -- this line is for the rest
+  // of the session's composition, not a duplicate instruction for that.
+  const trainingEmphasisLine = userRow?.training_emphasis
+    ? `\nThe same photo comparison also suggests an overall training direction of "${userRow.training_emphasis}" (cut = lean out/reduce fat, bulk = add size, recomp = both/composition change, maintain = little change wanted). Let this gently inform today's exercise mix alongside the goals and emphasis above -- e.g. a "cut" direction favors a bit more conditioning/metabolic work where the day's structure allows it; a "bulk" direction favors sticking with heavier compound work. Never let this override the day's intensity category, injury exclusions, or equipment above.`
+    : "";
   const equipment = userRow?.equipment?.length
     ? userRow.equipment.join(", ")
     : "no equipment (bodyweight only)";
@@ -770,7 +788,7 @@ The user has already chosen today's workout from the app's suggestion list: "${s
 
 Today's training intensity (already decided by the app's recovery-based rules -- do not override it): ${category}.
 Today's actual health data driving that intensity: ${healthLines}
-User's goals: ${goals}.${bodyPhotoEmphasisLine}
+User's goals: ${goals}.${bodyPhotoEmphasisLine}${trainingEmphasisLine}
 Training experience: ${experience}. ${experienceGuidance}
 Available equipment: ${equipment}.
 Noted injuries: ${injuries}.${injuryNotes}

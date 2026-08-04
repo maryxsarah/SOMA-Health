@@ -52,6 +52,7 @@ interface Row {
   equipment: string | null;
   primary_muscles: string[];
   level: string;
+  requires_partner: boolean;
 }
 
 /// Chainable thenable mimicking the small slice of postgrest-js the
@@ -101,19 +102,22 @@ function mockSupabase(rows: Row[]) {
 }
 
 const LIBRARY: Row[] = [
-  { id: "bodyweight-flyes", name: "Bodyweight Flyes", category: "strength", equipment: "e-z curl bar", primary_muscles: ["chest"], level: "intermediate" },
-  { id: "pushups", name: "Pushups", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "beginner" },
-  { id: "barbell-bench-press", name: "Barbell Bench Press", category: "strength", equipment: "barbell", primary_muscles: ["chest"], level: "beginner" },
-  { id: "one-arm-push-up", name: "One-Arm Push-Up", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "expert" },
-  { id: "bodyweight-squat", name: "Bodyweight Squat", category: "strength", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner" },
-  { id: "behind-head-chest-stretch", name: "Behind Head Chest Stretch", category: "stretching", equipment: "body only", primary_muscles: ["chest"], level: "beginner" },
-  { id: "exercise-ball-stretch", name: "Exercise Ball Stretch", category: "stretching", equipment: "exercise ball", primary_muscles: ["chest"], level: "beginner" },
-  { id: "running-treadmill", name: "Running, Treadmill", category: "cardio", equipment: "machine", primary_muscles: ["quadriceps"], level: "beginner" },
-  { id: "jumping-jacks", name: "Jumping Jacks", category: "cardio", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner" },
-  { id: "trail-running-walking", name: "Trail Running/Walking", category: "cardio", equipment: null, primary_muscles: ["quadriceps"], level: "beginner" },
-  { id: "arm-circles", name: "Arm Circles", category: "strength", equipment: null, primary_muscles: ["shoulders"], level: "beginner" },
-  { id: "depth-jump-leap", name: "Depth Jump Leap", category: "plyometrics", equipment: "body only", primary_muscles: ["quadriceps"], level: "intermediate" },
-  { id: "barbell-back-squat", name: "Barbell Back Squat", category: "strength", equipment: "barbell", primary_muscles: ["quadriceps"], level: "intermediate" },
+  { id: "bodyweight-flyes", name: "Bodyweight Flyes", category: "strength", equipment: "e-z curl bar", primary_muscles: ["chest"], level: "intermediate", requires_partner: false },
+  { id: "pushups", name: "Pushups", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "beginner", requires_partner: false },
+  { id: "barbell-bench-press", name: "Barbell Bench Press", category: "strength", equipment: "barbell", primary_muscles: ["chest"], level: "beginner", requires_partner: false },
+  { id: "one-arm-push-up", name: "One-Arm Push-Up", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "expert", requires_partner: false },
+  { id: "bodyweight-squat", name: "Bodyweight Squat", category: "strength", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner", requires_partner: false },
+  { id: "behind-head-chest-stretch", name: "Behind Head Chest Stretch", category: "stretching", equipment: "body only", primary_muscles: ["chest"], level: "beginner", requires_partner: false },
+  { id: "exercise-ball-stretch", name: "Exercise Ball Stretch", category: "stretching", equipment: "exercise ball", primary_muscles: ["chest"], level: "beginner", requires_partner: false },
+  { id: "running-treadmill", name: "Running, Treadmill", category: "cardio", equipment: "machine", primary_muscles: ["quadriceps"], level: "beginner", requires_partner: false },
+  { id: "jumping-jacks", name: "Jumping Jacks", category: "cardio", equipment: "body only", primary_muscles: ["quadriceps"], level: "beginner", requires_partner: false },
+  { id: "trail-running-walking", name: "Trail Running/Walking", category: "cardio", equipment: null, primary_muscles: ["quadriceps"], level: "beginner", requires_partner: false },
+  { id: "arm-circles", name: "Arm Circles", category: "strength", equipment: null, primary_muscles: ["shoulders"], level: "beginner", requires_partner: false },
+  { id: "depth-jump-leap", name: "Depth Jump Leap", category: "plyometrics", equipment: "body only", primary_muscles: ["quadriceps"], level: "intermediate", requires_partner: false },
+  { id: "barbell-back-squat", name: "Barbell Back Squat", category: "strength", equipment: "barbell", primary_muscles: ["quadriceps"], level: "intermediate", requires_partner: false },
+  { id: "prone-manual-hamstring", name: "Prone Manual Hamstring", category: "strength", equipment: "body only", primary_muscles: ["hamstrings"], level: "beginner", requires_partner: true },
+  { id: "overhead-lat", name: "Overhead Lat", category: "stretching", equipment: "body only", primary_muscles: ["lats"], level: "beginner", requires_partner: true },
+  { id: "return-push-from-stance", name: "Return Push from Stance", category: "cardio", equipment: "medicine ball", primary_muscles: ["shoulders"], level: "beginner", requires_partner: true },
 ];
 
 Deno.test("REGRESSION: floor-only user never sees the EZ-bar 'Bodyweight Flyes'", async () => {
@@ -262,4 +266,34 @@ Deno.test("REGRESSION: goal exercises above the user's level stay out of the voc
     mockSupabase(LIBRARY), "upper_body", [], [], "moderate", ["depth-jump-leap"],
   );
   assert(moderate.includes("Depth Jump Leap"));
+});
+
+Deno.test("REGRESSION: a partner-required strength exercise never joins the main candidate pool", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "lower_body", [], []);
+  assertFalse(names.includes("Prone Manual Hamstring"), "partner-required exercise leaked into a solo user's plan");
+});
+
+Deno.test("REGRESSION: a partner-required stretch never joins the candidate pool", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "upper_body", [], []);
+  assertFalse(names.includes("Overhead Lat"), "partner-required stretch leaked into a solo user's plan");
+  // The (non-partner) stretch fixture still joins normally.
+  assert(names.includes("Behind Head Chest Stretch"));
+});
+
+Deno.test("REGRESSION: a partner-required cardio exercise never joins the candidate pool", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "cardio", [], []);
+  assertFalse(names.includes("Return Push from Stance"), "partner-required cardio drill leaked into a solo user's plan");
+});
+
+Deno.test("REGRESSION: a partner-required goal-mapped exercise is unioned out, same as an equipment/level mismatch", async () => {
+  const names = await fetchCandidateExerciseNames(
+    mockSupabase(LIBRARY), "lower_body", [], [], null, ["prone-manual-hamstring", "depth-jump-leap"],
+  );
+  assertFalse(names.includes("Prone Manual Hamstring"), "partner-required goal exercise bypassed the filter");
+  assert(names.includes("Depth Jump Leap"));
+});
+
+Deno.test("INVARIANT: excluding partner-required exercises never empties the enum when solo alternatives exist", async () => {
+  const names = await fetchCandidateExerciseNames(mockSupabase(LIBRARY), "lower_body", [], []);
+  assert(names.length > 0);
 });
