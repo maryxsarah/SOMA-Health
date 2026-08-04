@@ -160,6 +160,37 @@ enum BlockerTag: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Where the user is on their fitness/health journey -- deliberately
+/// separate from `ExperienceLevel` (training competency, e.g. "can I do a
+/// barbell squat safely") and `WorkoutFrequency` (current weekly volume):
+/// this is motivational/journey context that neither of those capture,
+/// e.g. a `six_plus` advanced lifter can still be `returningAfterBreak`
+/// after an injury layoff, and a `zeroToTwo` newbie might be either
+/// `justStarting` or someone who's tried and stalled many times before.
+enum JourneyStage: String, Codable, CaseIterable, Identifiable {
+    case justStarting = "just_starting"
+    case returningAfterBreak = "returning_after_break"
+    case consistentButPlateaued = "consistent_but_plateaued"
+    case experienced
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .justStarting: "Just starting out"
+        case .returningAfterBreak: "Returning after a break"
+        case .consistentButPlateaued: "Consistent, but plateaued"
+        case .experienced: "Experienced and progressing"
+        }
+    }
+    var systemImageName: String {
+        switch self {
+        case .justStarting: "sparkles"
+        case .returningAfterBreak: "arrow.clockwise"
+        case .consistentButPlateaued: "chart.line.flattrend.xyaxis"
+        case .experienced: "trophy.fill"
+        }
+    }
+}
+
 enum DietType: String, Codable, CaseIterable, Identifiable {
     // `noDiet`, not `none`: this is consumed as `DietType?`, and a case
     // literally named `none` would make `answers.dietType = .none` resolve
@@ -230,6 +261,9 @@ struct OnboardingSurveyAnswers: Equatable {
     var dateOfBirth: Date?
     var referralSource: ReferralSource?
     var weightKg: Double?
+    /// Optional -- Goal Body feature (TDEE calculation, and the ruler
+    /// picker defaults to a sane middle value rather than 0 if unset).
+    var heightCm: Double?
     var worksWithTrainer: Bool?
     // Multi-select -- more than one goal/accomplishment genuinely applies
     // for most people, and forcing a single pick here just meant whichever
@@ -237,7 +271,13 @@ struct OnboardingSurveyAnswers: Equatable {
     var goal: Set<GoalTag> = []
     var desiredWeightKg: Double?
     var goalPace: GoalPace?
+    var journeyStage: JourneyStage?
     var blockers: Set<BlockerTag> = []
+    /// Optional free-text elaboration on `blockers`, same shape as
+    /// injuryNotes alongside injuryTags -- structured tags drive filtering,
+    /// free text is display-only context for humans (a coach) or future
+    /// prompt personalization.
+    var blockersNotes: String?
     var dietType: DietType?
     var accomplishmentGoals: Set<AccomplishmentGoal> = []
     var marketingOptIn = false

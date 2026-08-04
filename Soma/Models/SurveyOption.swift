@@ -21,6 +21,7 @@ extension DietType: SurveyOption {
 }
 extension AccomplishmentGoal: SurveyOption {}
 extension BlockerTag: SurveyOption {}
+extension JourneyStage: SurveyOption {}
 
 extension GoalTag: SurveyOption {
     var systemImageName: String {

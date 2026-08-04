@@ -87,6 +87,10 @@ struct ProfileView: View {
     @State private var showingPhotoComparison = false
     @State private var isUploadingGoalPhoto = false
     @State private var isUploadingCurrentPhoto = false
+    /// Adult-only gate (App Store 4+ rating) -- fails closed until load()
+    /// confirms an 18+ date_of_birth, same posture as PostSetupFlowView's
+    /// matching gate on the onboarding version of this same feature.
+    @State private var isConfirmedAdultForBodyPhotos = false
 
     var body: some View {
         ScrollView {
@@ -325,7 +329,7 @@ struct ProfileView: View {
                 value: pregnancy == true ? (pregnancyWeek.map { "Week \($0)" } ?? "Yes") : "Not set"
             ) { activeSheet = .pregnancy }
 
-            if Config.enableBodyPhotoUpload {
+            if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
                 summaryRow(
                     title: "Body photos",
                     consequence: "Helps personalize your plan toward your goal",
@@ -864,7 +868,8 @@ struct ProfileView: View {
 
         goalBodyPhotoPath = profile.goalBodyPhotoPath
         currentBodyPhotoPath = profile.currentBodyPhotoPath
-        if Config.enableBodyPhotoUpload {
+        isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
+        if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
             if let path = profile.goalBodyPhotoPath {
                 goalBodyPhotoImage = await loadBodyPhoto(path: path)
             }

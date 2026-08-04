@@ -236,11 +236,16 @@ final class SupabaseClient {
         }
         if let source = answers.referralSource { body["referral_source"] = source.rawValue }
         if let weight = answers.weightKg { body["weight_kg"] = weight }
+        if let height = answers.heightCm { body["height_cm"] = height }
         if let trainer = answers.worksWithTrainer { body["works_with_trainer"] = trainer }
         if !answers.goal.isEmpty { body["goals"] = answers.goal.map(\.rawValue) }
         if let desired = answers.desiredWeightKg { body["desired_weight_kg"] = desired }
         if let pace = answers.goalPace { body["goal_pace"] = pace.rawValue }
+        if let journeyStage = answers.journeyStage { body["journey_stage"] = journeyStage.rawValue }
         if !answers.blockers.isEmpty { body["blockers"] = answers.blockers.map(\.rawValue) }
+        if let blockersNotes = answers.blockersNotes, !blockersNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["blockers_notes"] = blockersNotes
+        }
         if let diet = answers.dietType { body["diet_type"] = diet.rawValue }
         if !answers.accomplishmentGoals.isEmpty { body["accomplishment_goals"] = answers.accomplishmentGoals.map(\.rawValue) }
         body["marketing_opt_in"] = answers.marketingOptIn
@@ -260,7 +265,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,weight_kg,desired_weight_kg,country,city&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -292,6 +297,9 @@ final class SupabaseClient {
         body["weekly_session_target"] = profile.weeklySessionTarget ?? NSNull()
         body["country"] = profile.country ?? NSNull()
         body["city"] = profile.city ?? NSNull()
+        body["height_cm"] = profile.heightCm ?? NSNull()
+        body["journey_stage"] = profile.journeyStage?.rawValue ?? NSNull()
+        body["blockers_notes"] = profile.blockersNotes ?? NSNull()
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")

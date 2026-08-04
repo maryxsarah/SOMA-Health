@@ -22,8 +22,15 @@ struct BodyPhotosStepView: View {
             VStack(spacing: 8) {
                 Text("Show us your goal")
                     .font(Theme.display)
-                Text("Optional -- add a goal-body reference photo and a current photo to help personalize your plan. You can skip this and add it later from your profile.")
+                Text("Optional -- add a goal-body reference photo and a current photo to help point your plan and nutrition in the right direction. You can skip this and add it later from your profile.")
                     .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                // Constraint 8: never a "you will look exactly like this"
+                // promise -- genetics, photo editing/filters, and realistic
+                // timelines acknowledged up front, not just implied.
+                Text("This is a training direction, not a guarantee -- genetics differ, goal photos are sometimes edited or filtered, and real results take time.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }

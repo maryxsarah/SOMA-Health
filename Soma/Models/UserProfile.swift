@@ -141,6 +141,16 @@ struct UserProfile: Codable, Equatable {
     /// them) -- feeds the dashboard's Body section.
     var weightKg: Double? = nil
     var desiredWeightKg: Double? = nil
+    /// Editable via the general save() flow, unlike weightKg/desiredWeightKg
+    /// above -- height doesn't change often, but there's no reason to lock
+    /// it the way the dashboard's weight-progress fields are locked.
+    var heightCm: Double? = nil
+    var journeyStage: JourneyStage? = nil
+    var blockersNotes: String? = nil
+    /// Read-only (set at onboarding, never edited here) -- "yyyy-MM-dd".
+    /// Exists on this model ONLY for the Goal Body adult-only gate
+    /// (bodyPhotosEditor); every other date-of-birth use is server-side.
+    var dateOfBirth: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
@@ -163,6 +173,10 @@ struct UserProfile: Codable, Equatable {
         case currentBodyPhotoPath = "current_body_photo_path"
         case weightKg = "weight_kg"
         case desiredWeightKg = "desired_weight_kg"
+        case heightCm = "height_cm"
+        case journeyStage = "journey_stage"
+        case blockersNotes = "blockers_notes"
+        case dateOfBirth = "date_of_birth"
     }
 
     /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.
