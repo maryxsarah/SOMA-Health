@@ -40,6 +40,17 @@ struct AIWorkoutPlanView: View {
         .sheet(item: $selectedExercise) { exercise in
             ExerciseDetailView(exercise: exercise)
         }
+        // Fire-and-forget: warms ExerciseLibraryCache for every exercise in
+        // the plan as soon as it renders, so tapping into any of them
+        // later (ExerciseDetailView) usually finds a cache hit instead of
+        // starting cold. Never blocks the plan itself from rendering.
+        .task(id: plan.focus) {
+            await SupabaseClient.shared.prefetchExerciseLibraryEntries(for: allExercises)
+        }
+    }
+
+    private var allExercises: [AIExercise] {
+        plan.warmUp + plan.blocks.flatMap(\.exercises) + plan.coolDown
     }
 
     private func aiPhaseSection(title: String, exercises: [AIExercise]) -> some View {

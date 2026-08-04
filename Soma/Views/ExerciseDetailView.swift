@@ -15,16 +15,16 @@ struct ExerciseDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
+                // Everything the user picked/was told to do (name, sets,
+                // reps, weight, intensity, the AI's own coaching cue) comes
+                // straight from `exercise` -- already in memory, no fetch
+                // needed -- so it renders on the very first frame. Only the
+                // media/tags/library-instructions area (which DOES need a
+                // network round trip) shows its own small loading state,
+                // instead of the whole sheet blocking behind one spinner
+                // until that round trip finishes.
                 VStack(alignment: .leading, spacing: 16) {
-                    if isLoading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 60)
-                    } else if let entry, !entry.imagePaths.isEmpty {
-                        imagePager(entry)
-                    } else {
-                        noMediaPlaceholder
-                    }
+                    mediaArea
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text(exercise.name)
@@ -34,13 +34,6 @@ struct ExerciseDetailView: View {
                             .foregroundStyle(Theme.pillFill)
                     }
 
-                    if let entry {
-                        tagsRow(entry)
-                        if !entry.instructions.isEmpty {
-                            instructionsSection(entry)
-                        }
-                    }
-
                     if !exercise.instructions.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Coaching cue")
@@ -48,6 +41,13 @@ struct ExerciseDetailView: View {
                                 .foregroundStyle(.secondary)
                             Text(exercise.instructions)
                                 .font(.subheadline)
+                        }
+                    }
+
+                    if let entry {
+                        tagsRow(entry)
+                        if !entry.instructions.isEmpty {
+                            instructionsSection(entry)
                         }
                     }
                 }
@@ -62,6 +62,23 @@ struct ExerciseDetailView: View {
             }
         }
         .task { await load() }
+    }
+
+    @ViewBuilder
+    private var mediaArea: some View {
+        if let entry, !entry.imagePaths.isEmpty {
+            imagePager(entry)
+        } else if isLoading {
+            // A lightweight placeholder, not a full-sheet blocker -- the
+            // rest of the sheet (name/sets/reps/coaching cue above) is
+            // already visible and interactive while this resolves.
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.systemGray6))
+                .frame(height: 220)
+                .overlay(ProgressView())
+        } else {
+            noMediaPlaceholder
+        }
     }
 
     private func imagePager(_ entry: ExerciseLibraryEntry) -> some View {

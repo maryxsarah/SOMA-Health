@@ -791,6 +791,11 @@ final class SupabaseClient {
     /// when neither is available or nothing matches -- an honest "no media"
     /// state, not a fuzzy best-effort match.
     func fetchExerciseLibraryEntry(libraryId: String?, name: String) async throws -> ExerciseLibraryEntry? {
+        let cacheKey = Self.exerciseLibraryCacheKey(libraryId: libraryId, name: name)
+        if let cached = await ExerciseLibraryCache.shared.cached(for: cacheKey) {
+            return cached
+        }
+
         let path: String
         if let libraryId, !libraryId.isEmpty {
             let encodedId = libraryId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? libraryId
@@ -803,6 +808,9 @@ final class SupabaseClient {
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([ExerciseLibraryEntry].self, from: data)
+        if let entry = rows.first {
+            await ExerciseLibraryCache.shared.store(entry, for: cacheKey)
+        }
         return rows.first
     }
 
