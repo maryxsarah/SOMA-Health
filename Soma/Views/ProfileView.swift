@@ -18,6 +18,12 @@ struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
+    /// True when HomeView's goal-progress card opened this sheet directly --
+    /// jumps straight to the body photos detail sheet instead of landing on
+    /// the plain Training tab, so "see your progress" is actually one tap,
+    /// not "open profile, then find the row yourself."
+    var openBodyPhotosOnAppear = false
+
     @State private var section: ProfileSection = .training
     @State private var activeSheet: ProfileSheet?
     @State private var showReferralCodeSheet = false
@@ -131,6 +137,11 @@ struct ProfileView: View {
         }
         .task {
             await load()
+            // Gated the same way the row itself is (feature flag + adult
+            // confirmation) -- a deep link can't bypass either check.
+            if openBodyPhotosOnAppear && Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
+                activeSheet = .bodyPhotos
+            }
         }
         .onChange(of: goalPhotoItem) { _, newItem in
             Task { await uploadBodyPhoto(kind: .goal, item: newItem) }

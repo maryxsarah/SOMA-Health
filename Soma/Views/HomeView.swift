@@ -17,6 +17,14 @@ struct HomeView: View {
     @State private var timelineEntries: [WorkoutTimelineEntry] = []
 
     @State private var showGymPhotoFlow = false
+    // Goal-progress card -- previously the only way to find the goal/
+    // current body photo feature was one buried row deep in Profile's
+    // Training tab. Loaded independently of `profile` in ProfileView since
+    // Home never otherwise touches the users row's photo/DOB fields.
+    @State private var hasGoalBodyPhoto = false
+    @State private var hasCurrentBodyPhoto = false
+    @State private var isConfirmedAdultForBodyPhotos = false
+    @State private var profileOpensBodyPhotos = false
     @State private var showSeededDetail = false
     @State private var pendingGymPlan: (AIWorkoutPlan, String, String)?
 
@@ -92,6 +100,8 @@ struct HomeView: View {
 
                 scanRow
 
+                goalProgressRow
+
                 if !timelineEntries.isEmpty {
                     timelineCard
                 }
@@ -110,6 +120,7 @@ struct HomeView: View {
             await loadTimeline()
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
+            await loadGoalBodyPhotoState()
         }
         .refreshable {
             await checkNow()
@@ -136,8 +147,12 @@ struct HomeView: View {
             // The beta toggle lives in Profile -- refetch so the promo
             // card appears (or disappears) the moment the sheet closes.
             Task { await loadSportGoal() }
+            Task { await loadGoalBodyPhotoState() }
+            // Reset so the gear icon's plain "open profile" path never
+            // inherits a stale true from a previous goal-progress tap.
+            profileOpensBodyPhotos = false
         }) {
-            ProfileView()
+            ProfileView(openBodyPhotosOnAppear: profileOpensBodyPhotos)
         }
         .sheet(isPresented: $showHealthDashboard) {
             HealthDashboardView()
@@ -681,6 +696,48 @@ struct HomeView: View {
         }
     }
 
+    /// Previously the only way to find the goal/current body photo feature
+    /// was one row buried deep in Profile's Training tab -- this surfaces
+    /// it on Home instead, in one of two states: a CTA to add photos at
+    /// all, or (once both exist) a tap-through to the actual comparison,
+    /// framed as "your progress" rather than a settings row, since seeing
+    /// it regularly is what's meant to keep someone coming back. Gated the
+    /// same way the underlying feature already is (flag + adult
+    /// confirmation) -- this is a second entry point, not a bypass.
+    @ViewBuilder
+    private var goalProgressRow: some View {
+        if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
+            Button {
+                AnalyticsManager.shared.featureUsed(name: "goal_progress_home_card")
+                profileOpensBodyPhotos = true
+                showProfile = true
+            } label: {
+                if hasGoalBodyPhoto && hasCurrentBodyPhoto {
+                    scanRowBody(
+                        plate: SomaTokens.accentSoft, icon: "photo.on.rectangle.angled", iconColor: SomaTokens.accent,
+                        title: "Your progress",
+                        subtitle: "See how you're tracking toward your goal photo"
+                    ) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(SomaTokens.ink4)
+                    }
+                } else {
+                    scanRowBody(
+                        plate: SomaTokens.accentSoft, icon: "camera.fill", iconColor: SomaTokens.accent,
+                        title: "Add your goal photo",
+                        subtitle: "Helps point your plan and nutrition in the right direction"
+                    ) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(SomaTokens.ink4)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private func scanRowBody(plate: Color, icon: String, iconColor: Color, title: String, subtitle: String, @ViewBuilder trailing: () -> some View) -> some View {
         CardView {
             HStack(spacing: 12) {
@@ -864,10 +921,22 @@ struct HomeView: View {
 
         scanDates = await scanDatesFetch
         scanStreak = Self.streak(from: scanDates)
-        weeklyTarget = await profileFetch?.weeklySessionTarget
+        let profile = await profileFetch
+        weeklyTarget = profile?.weeklySessionTarget
         todaysSnapshots = await snapshotsFetch
         todaysGenerationCount = await generationCountFetch
         await loadSportGoal()
+    }
+
+    /// Reuses loadWeeklyProgressAndStreak's own profile fetch would mean
+    /// waiting on scan dates/snapshots too just to know if a goal photo is
+    /// set -- cheap enough on its own to just fetch again independently.
+    private func loadGoalBodyPhotoState() async {
+        guard let userId = SupabaseClient.shared.currentUserID,
+              let profile = try? await SupabaseClient.shared.fetchProfile(id: userId) else { return }
+        hasGoalBodyPhoto = profile.goalBodyPhotoPath != nil
+        hasCurrentBodyPhoto = profile.currentBodyPhotoPath != nil
+        isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
     }
 
     /// Best-effort: no goal (or a failed fetch) simply means no goal row --
