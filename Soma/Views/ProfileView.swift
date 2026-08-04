@@ -70,7 +70,7 @@ struct ProfileView: View {
     @State private var activeSportGoal: UserGoal?
     @State private var sportGoalCatalog: SportCatalog?
     @State private var completedSportGoals = 0
-    @State private var hasPausedSportGoal = false
+    @State private var pausedSportGoal: UserGoal?
     @State private var showHealthDashboard = false
     @State private var completedWorkoutStreak = 0
 
@@ -210,7 +210,7 @@ struct ProfileView: View {
         }
         // Only nudged while the catalog is actually open and no goal is set
         // -- an empty catalog means the feature is off, not unfinished.
-        if Config.enableSportGoals, sportCatalogAvailable, activeSportGoal == nil {
+        if Config.enableSportGoals, sportCatalogAvailable, activeSportGoal == nil, pausedSportGoal == nil {
             items.append(Nudge(id: "goal", text: "pick a goal"))
         }
         return items
@@ -289,13 +289,18 @@ struct ProfileView: View {
     /// Kill switch: the row exists only when the server-gated catalog has
     /// content, or the user already has goal data to reach.
     private var showSportGoalRow: Bool {
-        Config.enableSportGoals && (sportCatalogAvailable || activeSportGoal != nil || completedSportGoals > 0 || hasPausedSportGoal)
+        Config.enableSportGoals && (sportCatalogAvailable || activeSportGoal != nil || completedSportGoals > 0 || pausedSportGoal != nil)
     }
 
+    /// Must mirror what the goal screen actually opens to -- a paused goal
+    /// still names the row ("Not set" while the hub shows a goal is a lie).
     private var sportGoalRowValue: String {
         let doneSuffix = completedSportGoals > 0 ? " · \(completedSportGoals) done" : ""
         if let activeSportGoal {
             return activeSportGoal.displayName(in: sportGoalCatalog) + doneSuffix
+        }
+        if let pausedSportGoal {
+            return pausedSportGoal.displayName(in: sportGoalCatalog) + " · paused"
         }
         if completedSportGoals > 0 { return "\(completedSportGoals) done" }
         return "Not set"
@@ -426,9 +431,9 @@ struct ProfileView: View {
         do {
             try await SupabaseClient.shared.setBetaOptIn(enabled)
             errorMessage = nil
-            // Refetch the catalog so the newly opened beta features appear
-            // without an app restart (they're catalog-driven, not gated here).
-            if enabled { await loadSportGoalState() }
+            // Refetch the catalog in both directions: ON surfaces the beta
+            // rows this session, OFF makes every entry point vanish.
+            await loadSportGoalState()
         } catch {
             betaOptIn = !enabled
             errorMessage = "Couldn't update beta access. Try again."
@@ -882,7 +887,7 @@ struct ProfileView: View {
         activeSportGoal = await activeGoalFetch
         let history = await historyFetch
         completedSportGoals = history.filter { $0.status == .completed }.count
-        hasPausedSportGoal = history.contains { $0.status == .paused }
+        pausedSportGoal = history.first { $0.status == .paused }
         // Mirrors achievements into Superwall attributes for targeting,
         // same real-data-only rule as setSuperwallUserAttributes.
         if completedSportGoals > 0 {
