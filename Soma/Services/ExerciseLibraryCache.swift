@@ -1,21 +1,30 @@
 import Foundation
+import UIKit
 
-/// Session-lifetime in-memory cache for exercise_library rows and a warm-up
-/// prefetch for their reference images -- ExerciseDetailView used to
-/// re-fetch the row (and AsyncImage re-fetch the image) from scratch on
-/// EVERY open, even for an exercise already viewed earlier in the same
-/// plan/session. Not persisted across app launches: this is a shared
-/// reference library, not per-user data, so a clean cache on relaunch is a
-/// fine tradeoff for not having to think about invalidation.
+/// Session-lifetime in-memory cache for exercise_library rows AND their
+/// decoded reference images. Previously the image half of this only
+/// issued a blind URLSession request hoping URLCache/AsyncImage's shared
+/// session would honor whatever cache-control Supabase Storage happens to
+/// send -- unverified, and not something this app controls. Storing the
+/// actual decoded UIImage here instead guarantees a warm repeat-load
+/// regardless of server headers: CachedExerciseImage checks this cache
+/// FIRST, so a prefetched exercise renders instantly with no network
+/// round trip and no spinner at all.
+///
+/// Not persisted across app launches: this is a shared reference library,
+/// not per-user data, so a clean cache on relaunch is a fine tradeoff for
+/// not having to think about invalidation or memory pressure eviction.
 actor ExerciseLibraryCache {
     static let shared = ExerciseLibraryCache()
 
     private var entries: [String: ExerciseLibraryEntry] = [:]
-    /// Only tracks "have we already kicked off a prefetch for this URL",
-    /// not the bytes themselves -- the actual caching happens in
-    /// URLSession/URLCache, which AsyncImage's default session also reads
-    /// from. This just prevents prefetching the same image twice.
-    private var prefetchedImageURLs: Set<URL> = []
+    private var images: [URL: UIImage] = [:]
+    /// In-flight image downloads, keyed by URL -- a plan's warm-up, main
+    /// blocks, and cool-down can all reference the same exercise (e.g. a
+    /// stretch used in both warm-up and cool-down), so without this a
+    /// prefetch and a concurrent ExerciseDetailView open could both start
+    /// their own download of the same URL at once.
+    private var inFlightImageLoads: [URL: Task<UIImage?, Never>] = [:]
 
     func cached(for key: String) -> ExerciseLibraryEntry? {
         entries[key]
@@ -25,15 +34,28 @@ actor ExerciseLibraryCache {
         entries[key] = entry
     }
 
-    /// Warms URLCache for one image (the first in the pager -- the one
-    /// most likely to actually be seen) by issuing the same request
-    /// AsyncImage will later make. Best-effort: a failed/slow prefetch
-    /// just means the detail view falls back to its own normal load, no
-    /// worse than before this existed.
-    func prefetchFirstImage(_ url: URL?) async {
-        guard let url, !prefetchedImageURLs.contains(url) else { return }
-        prefetchedImageURLs.insert(url)
-        _ = try? await URLSession.shared.data(from: url)
+    func cachedImage(for url: URL) -> UIImage? {
+        images[url]
+    }
+
+    /// Downloads (or joins an in-flight download of) `url`, decodes it,
+    /// and caches the result. The single entry point both the plan-load
+    /// prefetch and ExerciseDetailView's own on-demand load use, so
+    /// there's exactly one code path for "get this image" and exactly one
+    /// place a request can be in flight.
+    func image(for url: URL) async -> UIImage? {
+        if let cached = images[url] { return cached }
+        if let inFlight = inFlightImageLoads[url] { return await inFlight.value }
+
+        let task = Task<UIImage?, Never> {
+            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+            return UIImage(data: data)
+        }
+        inFlightImageLoads[url] = task
+        let image = await task.value
+        inFlightImageLoads[url] = nil
+        if let image { images[url] = image }
+        return image
     }
 }
 
@@ -60,8 +82,8 @@ extension SupabaseClient {
                     guard let entry = try? await self.fetchExerciseLibraryEntry(
                         libraryId: exercise.libraryId,
                         name: exercise.name
-                    ) else { return }
-                    await ExerciseLibraryCache.shared.prefetchFirstImage(entry.imageURLs.first)
+                    ), let firstURL = entry.imageURLs.first else { return }
+                    _ = await ExerciseLibraryCache.shared.image(for: firstURL)
                 }
             }
         }

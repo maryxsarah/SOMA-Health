@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// "What does this exercise actually look like" detail sheet -- tapped from
 /// any AIExercise row (AIWorkoutPlanSections.swift). Looks the real
@@ -75,7 +76,7 @@ struct ExerciseDetailView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(.systemGray6))
                 .frame(height: 220)
-                .overlay(ProgressView())
+                .overlay(SomaLoadingBar())
         } else {
             noMediaPlaceholder
         }
@@ -84,17 +85,7 @@ struct ExerciseDetailView: View {
     private func imagePager(_ entry: ExerciseLibraryEntry) -> some View {
         TabView {
             ForEach(entry.imageURLs, id: \.absoluteString) { url in
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFit()
-                    case .failure:
-                        noMediaPlaceholder
-                    default:
-                        ProgressView()
-                            .frame(maxWidth: .infinity, minHeight: 220)
-                    }
-                }
+                CachedExerciseImage(url: url, placeholder: noMediaPlaceholder)
             }
         }
         .tabViewStyle(.page)
@@ -158,5 +149,37 @@ struct ExerciseDetailView: View {
             name: exercise.name
         )
         isLoading = false
+    }
+}
+
+/// Checks ExerciseLibraryCache first -- if AIWorkoutPlanView's own-plan
+/// prefetch already ran (the common case: this view only opens from a
+/// plan already on screen), this renders instantly with no network round
+/// trip and no loading state at all. Falls back to a real fetch + the
+/// shared SomaLoadingBar otherwise, same as before this cache existed.
+private struct CachedExerciseImage<Placeholder: View>: View {
+    let url: URL
+    let placeholder: Placeholder
+
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else if failed {
+                placeholder
+            } else {
+                SomaLoadingBar()
+                    .frame(maxWidth: .infinity, minHeight: 220)
+            }
+        }
+        .task(id: url) {
+            image = await ExerciseLibraryCache.shared.image(for: url)
+            failed = image == nil
+        }
     }
 }

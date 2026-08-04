@@ -42,9 +42,9 @@ struct GoalBodyProgressView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if isLoading {
-                        ProgressView()
+                        SomaLoadingBar(messages: SomaLoadingBar.goalProgressMessages, barWidth: 240)
                             .frame(maxWidth: .infinity)
-                            .padding(.top, 80)
+                            .padding(.top, 100)
                     } else {
                         if goalImage == nil && currentImage == nil {
                             emptyStateSection
