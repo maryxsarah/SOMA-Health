@@ -266,7 +266,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -565,6 +565,68 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, column: path])
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
+    }
+
+    // MARK: - Profile picture (avatar)
+
+    /// Fixed path per user (unlike body photos, no history is kept for a
+    /// profile picture) -- x-upsert so re-uploading just overwrites the
+    /// prior image in place. Same private-bucket + binary-body pattern as
+    /// uploadBodyPhoto above.
+    func uploadAvatar(imageData: Data) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let path = "\(userId)/avatar.jpg"
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1/object/avatars/\(path)")!)
+        request.httpMethod = "POST"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("true", forHTTPHeaderField: "x-upsert")
+        request.httpBody = imageData
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        var upsertRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        upsertRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        upsertRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, "avatar_photo_path": path])
+        let (d2, r2) = try await urlSession.data(for: upsertRequest)
+        try Self.assertSuccess(r2, data: d2)
+    }
+
+    /// The bucket is private, same signed-URL requirement as body photos.
+    /// Best-effort, nil on any failure (network, decode) -- a missing
+    /// avatar just means the placeholder icon shows, not an error.
+    func loadAvatarImage(path: String) async -> UIImage? {
+        struct Response: Decodable { let signedURL: String }
+        guard var request = try? await authorizedRequest(path: "storage/v1/object/sign/avatars/\(path)", method: "POST") else { return nil }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["expiresIn": 3600])
+        guard let (data, response) = try? await urlSession.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let decoded = try? JSONDecoder().decode(Response.self, from: data),
+              let url = URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1\(decoded.signedURL)"),
+              let (imageData, _) = try? await urlSession.data(from: url) else { return nil }
+        return UIImage(data: imageData)
+    }
+
+    /// Removes the Storage object and clears the pointer column -- unlike
+    /// deleteBodyPhoto there's no history row to remove (avatars were
+    /// never versioned) and no re-analysis to trigger.
+    func deleteAvatar(path: String) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1/object/avatars/\(path)")!)
+        request.httpMethod = "DELETE"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        var clearRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        clearRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        clearRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, "avatar_photo_path": NSNull()])
+        let (d2, r2) = try await urlSession.data(for: clearRequest)
+        try Self.assertSuccess(r2, data: d2)
     }
 
     // MARK: - nutrition_targets / meal_log

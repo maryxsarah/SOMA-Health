@@ -137,6 +137,11 @@ struct UserProfile: Codable, Equatable {
     /// not through the general profile save() flow, hence the defaults.
     var goalBodyPhotoPath: String? = nil
     var currentBodyPhotoPath: String? = nil
+    /// Storage path (not the image itself) for the profile picture --
+    /// managed only via SupabaseClient's uploadAvatar/deleteAvatar, same
+    /// "not through the general save() flow" reasoning as the body-photo
+    /// paths above.
+    var avatarPhotoPath: String? = nil
     /// Read-only here (collected at onboarding; updateProfile never writes
     /// them) -- feeds the dashboard's Body section.
     var weightKg: Double? = nil
@@ -195,6 +200,7 @@ struct UserProfile: Codable, Equatable {
         case city
         case goalBodyPhotoPath = "goal_body_photo_path"
         case currentBodyPhotoPath = "current_body_photo_path"
+        case avatarPhotoPath = "avatar_photo_path"
         case weightKg = "weight_kg"
         case desiredWeightKg = "desired_weight_kg"
         case heightCm = "height_cm"

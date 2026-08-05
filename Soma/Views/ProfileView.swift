@@ -84,10 +84,35 @@ struct ProfileView: View {
     @State private var isConfirmedAdultForBodyPhotos = false
     @State private var showGoalBodyProgress = false
 
+    // Profile picture -- avatar_photo_path on `users`, its own private
+    // Storage bucket (avatars), same signed-URL pattern as body photos.
+    @State private var avatarImage: UIImage?
+    @State private var avatarPhotoPath: String?
+    @State private var avatarItem: PhotosPickerItem?
+    @State private var showAvatarPicker = false
+    @State private var isUploadingAvatar = false
+    /// Its own state, separate from the Account tab's save-flow
+    /// errorMessage -- the avatar button lives in the header, visible on
+    /// every tab, so its error needs to be visible there too rather than
+    /// only surfacing if the user happens to be on the Account tab.
+    @State private var avatarErrorMessage: String?
+
+    // Streak badges + share card -- completedWorkoutStreak above is the
+    // real number; this just renders it as a shareable image once known.
+    @State private var streakShareImage: UIImage?
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
+
+                if let avatarErrorMessage {
+                    Text(avatarErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(SomaTokens.danger)
+                }
+
+                streakSection
 
                 if !nudges.isEmpty {
                     completionNotice
@@ -124,6 +149,9 @@ struct ProfileView: View {
         .sheet(isPresented: $showGoalBodyProgress) {
             GoalBodyProgressView()
         }
+        .onChange(of: avatarItem) { _, newItem in
+            Task { await uploadAvatar(item: newItem) }
+        }
         .task {
             await load()
         }
@@ -142,14 +170,11 @@ struct ProfileView: View {
     // MARK: - Header
 
     /// No display-name field exists anywhere in this app (only contact
-    /// email, which is optional and never shown as an identity) -- a
-    /// generic icon here rather than fabricated initials.
+    /// email, which is optional and never shown as an identity) -- the
+    /// avatar itself is the one piece of real personalization here.
     private var header: some View {
         HStack(spacing: 12) {
-            Circle()
-                .fill(SomaTokens.accentSoft)
-                .frame(width: 52, height: 52)
-                .overlay(Image(systemName: "person.fill").foregroundStyle(SomaTokens.accent))
+            avatarButton
             VStack(alignment: .leading, spacing: 2) {
                 Text("Your profile")
                     .font(Theme.display)
@@ -159,6 +184,60 @@ struct ProfileView: View {
             }
         }
         .padding(.bottom, 4)
+    }
+
+    /// Tap opens a menu (Choose Photo / Remove Photo, the latter only
+    /// once one exists) rather than jumping straight into the picker --
+    /// same discoverable-but-not-cluttered pattern as Contacts/Messages'
+    /// own avatar-edit affordance. The small camera badge signals it's
+    /// editable without needing separate always-visible chrome.
+    private var avatarButton: some View {
+        Menu {
+            Button {
+                showAvatarPicker = true
+            } label: {
+                Label("Choose Photo", systemImage: "photo")
+            }
+            if avatarImage != nil {
+                Button(role: .destructive) {
+                    Task { await removeAvatar() }
+                } label: {
+                    Label("Remove Photo", systemImage: "trash")
+                }
+            }
+        } label: {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let avatarImage {
+                        Image(uiImage: avatarImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Circle()
+                            .fill(SomaTokens.accentSoft)
+                            .overlay(Image(systemName: "person.fill").foregroundStyle(SomaTokens.accent))
+                    }
+                }
+                .frame(width: 52, height: 52)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(SomaTokens.hairline, lineWidth: 1))
+                .opacity(isUploadingAvatar ? 0.4 : 1)
+
+                if isUploadingAvatar {
+                    ProgressView()
+                        .frame(width: 52, height: 52)
+                } else {
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(5)
+                        .background(Circle().fill(SomaTokens.accent))
+                        .overlay(Circle().stroke(SomaTokens.surface, lineWidth: 2))
+                }
+            }
+        }
+        .disabled(isUploadingAvatar)
+        .photosPicker(isPresented: $showAvatarPicker, selection: $avatarItem, matching: .images)
     }
 
     /// Every clause here is real, currently-known data -- connected
@@ -179,6 +258,124 @@ struct ProfileView: View {
             parts.append(category)
         }
         return parts.isEmpty ? "Soma uses this to tailor which workouts it suggests." : parts.joined(separator: " · ")
+    }
+
+    // MARK: - Streak
+
+    /// Visible as soon as Settings opens, above every tab -- the real
+    /// completedWorkoutStreak count (same source as the header line and
+    /// Home's calendar strip), shown as badges instead of just a number,
+    /// plus an Oura-style share card once there's something worth sharing.
+    private var streakSection: some View {
+        CardView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center, spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(colors: [SomaTokens.accent, SomaTokens.accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 46, height: 46)
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.white)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(completedWorkoutStreak > 0 ? "\(completedWorkoutStreak)-day streak" : "No active streak")
+                            .font(.system(size: 16.5, weight: .bold))
+                        Text(completedWorkoutStreak > 0 ? "Keep showing up -- consistency compounds." : "Log a workout today to start one.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if completedWorkoutStreak > 0, let streakShareImage {
+                        ShareLink(
+                            item: Image(uiImage: streakShareImage),
+                            preview: SharePreview("My \(completedWorkoutStreak)-day Soma streak", image: Image(uiImage: streakShareImage))
+                        ) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(SomaTokens.accent)
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(SomaTokens.accentSoft))
+                        }
+                    }
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(StreakMilestone.allCases) { milestone in
+                            streakBadge(milestone)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func streakBadge(_ milestone: StreakMilestone) -> some View {
+        let achieved = milestone.isAchieved(streak: completedWorkoutStreak)
+        return VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(achieved
+                        ? AnyShapeStyle(LinearGradient(colors: [SomaTokens.accent, SomaTokens.accentDeep], startPoint: .top, endPoint: .bottom))
+                        : AnyShapeStyle(SomaTokens.surface3))
+                    .frame(width: 42, height: 42)
+                Image(systemName: achieved ? "flame.fill" : "lock.fill")
+                    .font(.system(size: 15))
+                    .foregroundStyle(achieved ? .white : SomaTokens.ink4)
+            }
+            Text(milestone.title)
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(achieved ? SomaTokens.ink : SomaTokens.ink4)
+        }
+        .frame(width: 54)
+    }
+
+    /// A fixed-size branded card rendered off-screen to a real UIImage via
+    /// ImageRenderer, then handed to ShareLink -- same idea as Oura's
+    /// streak-share card. Rebuilt whenever the streak count changes so a
+    /// stale number can never be shared.
+    private struct StreakShareCardView: View {
+        let streakDays: Int
+
+        var body: some View {
+            ZStack {
+                LinearGradient(colors: [SomaTokens.accentDeep, SomaTokens.accent], startPoint: .top, endPoint: .bottom)
+                VStack(spacing: 22) {
+                    Spacer()
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 60))
+                        .foregroundStyle(.white)
+                    Text("\(streakDays)")
+                        .font(.system(size: 92, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(streakDays == 1 ? "DAY STREAK" : "DAY STREAK")
+                        .font(.system(size: 22, weight: .bold))
+                        .tracking(3)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Spacer()
+                    Text("SOMA")
+                        .font(.system(size: 20, weight: .heavy))
+                        .tracking(7)
+                        .foregroundStyle(.white)
+                        .padding(.bottom, 44)
+                }
+            }
+            .frame(width: 390, height: 844)
+        }
+    }
+
+    /// Synchronous on the main actor -- a static branded card renders in
+    /// well under a frame, so there's no need for a loading state around
+    /// this. nil (hides the Share button) whenever there's nothing to
+    /// share yet.
+    private func renderStreakShareImage() {
+        guard completedWorkoutStreak > 0 else {
+            streakShareImage = nil
+            return
+        }
+        let renderer = ImageRenderer(content: StreakShareCardView(streakDays: completedWorkoutStreak))
+        renderer.scale = 3
+        streakShareImage = renderer.uiImage
     }
 
     // MARK: - Completion notice
@@ -813,13 +1010,53 @@ struct ProfileView: View {
 
         isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
 
+        avatarPhotoPath = profile.avatarPhotoPath
+        if let avatarPhotoPath {
+            avatarImage = await SupabaseClient.shared.loadAvatarImage(path: avatarPhotoPath)
+        } else {
+            avatarImage = nil
+        }
+
         completedWorkoutStreak = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates())
             .map(Self.streak(from:)) ?? 0
+        renderStreakShareImage()
         sessionsDoneThisWeek = await Self.workoutsThisWeek()
         await loadSportGoalState()
         await loadConnectionStatus()
 
         setSuperwallUserAttributes(profile: profile)
+    }
+
+    /// Compresses, uploads, and updates local state so the header shows
+    /// the new photo immediately -- same shape as GoalBodyProgressView's
+    /// upload(kind:item:).
+    private func uploadAvatar(item: PhotosPickerItem?) async {
+        guard let item, let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
+        guard let compressed = ImageCompression.jpeg(image) else {
+            avatarErrorMessage = "Couldn't process that photo. Try another one."
+            return
+        }
+        isUploadingAvatar = true
+        avatarErrorMessage = nil
+        defer { isUploadingAvatar = false }
+        do {
+            try await SupabaseClient.shared.uploadAvatar(imageData: compressed)
+            avatarImage = image
+        } catch {
+            avatarErrorMessage = "Couldn't upload that photo. Try again."
+        }
+    }
+
+    private func removeAvatar() async {
+        guard let avatarPhotoPath else { return }
+        avatarErrorMessage = nil
+        do {
+            try await SupabaseClient.shared.deleteAvatar(path: avatarPhotoPath)
+            avatarImage = nil
+            self.avatarPhotoPath = nil
+        } catch {
+            avatarErrorMessage = "Couldn't remove that photo. Try again."
+        }
     }
 
     /// Best-effort, server-verified reconnect state -- distinct from
