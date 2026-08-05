@@ -36,6 +36,15 @@ struct AIWorkoutPlanView: View {
                 aiBlockSection(block)
             }
             aiPhaseSection(title: "Cool-down", exercises: plan.coolDown)
+
+            // Always-visible, no interaction needed -- users who don't
+            // already know what RPE means otherwise see "RPE 7/10" on
+            // every single exercise with zero context (real user
+            // feedback: "some users might not even know what RPE means").
+            Text("RPE = Rate of Perceived Exertion, how hard a set feels (1 = very easy, 10 = maximum effort).")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 10)
         }
         .sheet(item: $selectedExercise) { exercise in
             ExerciseDetailView(exercise: exercise)

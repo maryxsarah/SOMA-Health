@@ -33,6 +33,15 @@ struct ExerciseDetailView: View {
                         Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)")
                             .font(.subheadline)
                             .foregroundStyle(Theme.pillFill)
+                        // Always-visible, no interaction needed -- someone
+                        // opening this detail view directly (not having
+                        // seen the plan list's own footnote) shouldn't be
+                        // left guessing what "RPE 7/10" means.
+                        if exercise.intensity.localizedCaseInsensitiveContains("rpe") {
+                            Text("RPE = Rate of Perceived Exertion, how hard a set feels (1 = very easy, 10 = maximum effort).")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     if !exercise.instructions.isEmpty {

@@ -111,3 +111,96 @@ export function normalizeEquipment(input: string[]): Set<string> {
   }
   return out;
 }
+
+/// Scans a full free-text sentence for known vocabulary/alias PHRASES as
+/// substrings, rather than expecting each array element to already be a
+/// clean discrete term the way normalizeEquipment does (that function
+/// exists for the vision model's own already-itemized output). Built for
+/// UserRow.other_equipment_notes -- generate-workout-plan's onboarding
+/// "what else do you have access to?" free text, e.g. "dumbbells, a
+/// workout bench, a yoga mat and a treadmill" -- which was previously
+/// captured and saved but never read by any generation path at all, so
+/// specific gear the user actually typed out was silently ignored. Same
+/// coarse substring approach already used elsewhere in this codebase for
+/// keyword matching (e.g. contraindications.ts).
+export function parseFreeTextEquipment(text: string): Set<EquipmentItem> {
+  const canonicalText = ` ${canonical(text)} `;
+  const out = new Set<EquipmentItem>();
+  for (const item of EQUIPMENT_VOCABULARY) {
+    if (canonicalText.includes(` ${canonical(item)} `)) out.add(item);
+  }
+  for (const [alias, target] of Object.entries(ALIASES)) {
+    if (canonicalText.includes(` ${canonical(alias)} `)) out.add(target as EquipmentItem);
+  }
+  return out;
+}
+
+/// Maps the item-level EQUIPMENT_VOCABULARY (dumbbells, treadmill, yoga
+/// mat, ...) onto exercise_library's own equipment column values (barbell,
+/// dumbbell, kettlebells, cable, machine, medicine ball, bands, body
+/// only) -- two different closed vocabularies serving different purposes
+/// (one is what a user/vision-model names real-world gear, the other is
+/// what exercise_library actually filters on), so this is the bridge
+/// between them. Items with no real filtering equivalent (a weight bench
+/// is a supporting prop, not an exercise_library equipment value) are
+/// simply omitted -- they're still accepted input, they just don't
+/// narrow anything on their own.
+const VOCABULARY_TO_LIBRARY_EQUIPMENT: Partial<Record<EquipmentItem, string>> = {
+  "barbell": "barbell",
+  "weight plates": "barbell",
+  "squat rack": "barbell",
+  "dumbbells": "dumbbell",
+  "kettlebells": "kettlebells",
+  "cable machine": "cable",
+  "lat pulldown": "cable",
+  "smith machine": "machine",
+  "leg press": "machine",
+  "chest press machine": "machine",
+  "treadmill": "machine",
+  "stationary bike": "machine",
+  "rowing machine": "machine",
+  "elliptical": "machine",
+  "resistance bands": "bands",
+  "medicine ball": "medicine ball",
+  "pull-up bar": "body only",
+  "dip bars": "body only",
+  "suspension trainer": "body only",
+  "plyo box": "body only",
+  "jump rope": "body only",
+  "yoga mat": "body only",
+  "foam roller": "body only",
+};
+
+/// True for equipment items that unlock genuine cardio-category work
+/// (treadmill, bike, rower, elliptical, jump rope) -- see
+/// exerciseLibraryMatch.ts's cardio-candidate merge, which otherwise never
+/// runs for a non-cardio body-part day even when the user owns exactly
+/// this kind of equipment (the original gap behind "told Soma I have a
+/// treadmill, but warm-up never suggested one").
+const CARDIO_UNLOCKING_ITEMS: ReadonlySet<EquipmentItem> = new Set([
+  "treadmill", "stationary bike", "rowing machine", "elliptical", "jump rope",
+]);
+
+export interface FreeTextEquipmentResolution {
+  /// exercise_library.equipment values to union into the candidate filter.
+  libraryEquipment: string[];
+  /// True if anything parsed out of the free text should unlock cardio
+  /// candidates regardless of today's body-part focus.
+  unlocksCardio: boolean;
+}
+
+/// The single entry point generate-workout-plan actually calls: parses
+/// free text, maps to real exercise_library equipment values, and flags
+/// whether cardio should be unlocked -- all in one deterministic pass.
+export function resolveFreeTextEquipment(text: string | null | undefined): FreeTextEquipmentResolution {
+  if (!text || text.trim().length === 0) return { libraryEquipment: [], unlocksCardio: false };
+  const items = parseFreeTextEquipment(text);
+  const libraryEquipment = new Set<string>();
+  let unlocksCardio = false;
+  for (const item of items) {
+    const mapped = VOCABULARY_TO_LIBRARY_EQUIPMENT[item];
+    if (mapped) libraryEquipment.add(mapped);
+    if (CARDIO_UNLOCKING_ITEMS.has(item)) unlocksCardio = true;
+  }
+  return { libraryEquipment: Array.from(libraryEquipment), unlocksCardio };
+}
