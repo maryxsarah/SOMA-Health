@@ -591,18 +591,21 @@ final class SupabaseClient {
         return try JSONDecoder().decode([MealLogEntry].self, from: data)
     }
 
-    /// Manual entry -- source is always "manual" from this call site (the
-    /// column also accepts "photo" for a future real meal-scan feature).
-    /// carbs/fat are optional (protein and calories are the two numbers
-    /// most people actually know off-hand); calories/protein are required.
-    func logMeal(date: String, label: String?, calories: Int, proteinG: Int, carbsG: Int?, fatG: Int?) async throws {
+    /// `source` defaults to "manual" (typed numbers directly); pass
+    /// "text_ai" when the numbers came from a parseMealText(_:) estimate
+    /// the user reviewed/saved as-is or after editing -- both land in the
+    /// same table, "photo" is reserved for a future real meal-scan
+    /// feature. carbs/fat are optional (protein and calories are the two
+    /// numbers most people actually know off-hand); calories/protein are
+    /// required.
+    func logMeal(date: String, label: String?, calories: Int, proteinG: Int, carbsG: Int?, fatG: Int?, source: String = "manual") async throws {
         guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
         var body: [String: Any] = [
             "user_id": userId,
             "date": date,
             "calories": calories,
             "protein_g": proteinG,
-            "source": "manual",
+            "source": source,
         ]
         if let label, !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["label"] = label }
         if let carbsG { body["carbs_g"] = carbsG }
@@ -619,6 +622,19 @@ final class SupabaseClient {
         let request = try await authorizedRequest(path: "rest/v1/meal_log?id=eq.\(id)", method: "DELETE")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
+    }
+
+    /// Freeform "what did you eat" text -> an estimated calorie/macro
+    /// breakdown via Claude Haiku. Never writes anything itself -- the
+    /// caller shows the result back in LogMealView's normal editable
+    /// fields for review before saving via logMeal(...).
+    func parseMealText(_ text: String) async throws -> MealEstimate {
+        var request = try await authorizedRequest(path: "functions/v1/parse-meal-text", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode(MealEstimate.self, from: data)
     }
 
     // MARK: - daily_recommendation
