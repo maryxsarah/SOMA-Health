@@ -37,19 +37,21 @@ struct LogMealView: View {
                 Section {
                     TextField("What did you eat? e.g. \"2 eggs, toast, and coffee with milk\"", text: $label, axis: .vertical)
                         .lineLimit(1...3)
-                    Button {
-                        Task { await estimate() }
-                    } label: {
-                        if isEstimating {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                Text("Estimating…")
-                            }
-                        } else {
+                    if isEstimating {
+                        // Shuffled per appearance so back-to-back estimates
+                        // in one sitting don't always open on the same fact.
+                        SomaLoadingBar(messages: SomaLoadingBar.mealFunFacts.shuffled(), barWidth: 220)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .listRowBackground(Color.clear)
+                    } else {
+                        Button {
+                            Task { await estimate() }
+                        } label: {
                             Label("Estimate calories & macros with AI", systemImage: "sparkles")
                         }
+                        .disabled(!canEstimate)
                     }
-                    .disabled(!canEstimate)
                 } footer: {
                     Text("Describe your meal and Soma will fill in the fields below -- review and adjust anything before saving.")
                 }

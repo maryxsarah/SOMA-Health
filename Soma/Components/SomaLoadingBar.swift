@@ -82,6 +82,24 @@ extension SomaLoadingBar {
         "Showing up today is what changes tomorrow.",
         "Your future self is already proud of you.",
     ]
+
+    /// Rotates while parse-meal-text estimates a logged meal -- lighthearted
+    /// food trivia rather than motivational copy, since this wait is a
+    /// quick utility step, not a milestone moment. Callers should pass
+    /// `.shuffled()` so repeated estimates in one sitting don't always open
+    /// on the same line.
+    static let mealFunFacts = [
+        "Honey never spoils -- archaeologists have found 3,000-year-old honey that's still edible.",
+        "Bananas are berries. Strawberries, botanically, are not.",
+        "Carrots were originally purple before the Dutch bred the orange ones.",
+        "Peanuts aren't nuts -- they're legumes.",
+        "Avocados are technically a single-seeded berry.",
+        "Apples float because they're about 25% air.",
+        "Chocolate was once used as currency by the Aztecs.",
+        "An egg's shell color depends on the hen's breed, not its nutrition.",
+        "Chewing celery burns about as many calories as it contains -- close to a wash.",
+        "Crunching your food louder can genuinely make it taste better, per actual studies.",
+    ]
 }
 
 #Preview {
