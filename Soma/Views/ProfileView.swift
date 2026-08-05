@@ -98,8 +98,11 @@ struct ProfileView: View {
     @State private var avatarErrorMessage: String?
 
     // Streak badges + share card -- completedWorkoutStreak above is the
-    // real number; this just renders it as a shareable image once known.
-    @State private var streakShareImage: UIImage?
+    // real number. Today's steps are fetched purely for the optional
+    // share-card chip (best-effort, nil if HealthKit is unavailable/
+    // unauthorized -- never blocks anything else on this screen).
+    @State private var showStreakShareSheet = false
+    @State private var todaysSteps: Int?
 
     var body: some View {
         ScrollView {
@@ -148,6 +151,13 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showGoalBodyProgress) {
             GoalBodyProgressView()
+        }
+        .sheet(isPresented: $showStreakShareSheet) {
+            StreakShareSheet(
+                streakDays: completedWorkoutStreak,
+                category: appState.currentRecommendation?.category,
+                steps: todaysSteps
+            )
         }
         .onChange(of: avatarItem) { _, newItem in
             Task { await uploadAvatar(item: newItem) }
@@ -286,11 +296,10 @@ struct ProfileView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if completedWorkoutStreak > 0, let streakShareImage {
-                        ShareLink(
-                            item: Image(uiImage: streakShareImage),
-                            preview: SharePreview("My \(completedWorkoutStreak)-day Soma streak", image: Image(uiImage: streakShareImage))
-                        ) {
+                    if completedWorkoutStreak > 0 {
+                        Button {
+                            showStreakShareSheet = true
+                        } label: {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(SomaTokens.accent)
@@ -330,12 +339,18 @@ struct ProfileView: View {
         .frame(width: 54)
     }
 
-    /// A fixed-size branded card rendered off-screen to a real UIImage via
+    /// A branded card rendered off-screen to a real UIImage via
     /// ImageRenderer, then handed to ShareLink -- same idea as Oura's
-    /// streak-share card. Rebuilt whenever the streak count changes so a
-    /// stale number can never be shared.
+    /// streak-share card, but transparent outside the rounded card itself
+    /// (real alpha, not a white/neutral fill) so it can be dropped onto an
+    /// existing Instagram Story or post as an overlay, not just used as a
+    /// full-bleed background. The canvas is sized to exactly 1080x1920 at
+    /// 3x scale -- Instagram Stories' own native resolution -- so it never
+    /// gets stretched or cropped oddly regardless of how it's shared.
     private struct StreakShareCardView: View {
         let streakDays: Int
+        var category: RecommendationCategory? = nil
+        var steps: Int? = nil
 
         private var dateLine: String {
             let formatter = DateFormatter()
@@ -345,24 +360,20 @@ struct ProfileView: View {
 
         var body: some View {
             ZStack {
-                // A neutral backdrop so the gradient card reads as its own
-                // floating object -- Oura/Strava/Whoop's own share cards
-                // all use this "card on a plain surface" treatment rather
-                // than a full-bleed screenshot.
-                SomaTokens.surface2
+                Color.clear
 
-                RoundedRectangle(cornerRadius: 40, style: .continuous)
+                RoundedRectangle(cornerRadius: 36, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [SomaTokens.accentDeep, SomaTokens.accent, SomaTokens.accent.opacity(0.82)],
+                            colors: [SomaTokens.accentDeep, SomaTokens.accent, SomaTokens.accent.opacity(0.8)],
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         )
                     )
                     .overlay(
-                        // Soft spotlight glow centered behind the flame,
-                        // plus a faint ring for a bit of depth -- the card
-                        // reads as flat/basic without any of this.
-                        RadialGradient(colors: [.white.opacity(0.18), .clear], center: .center, startRadius: 4, endRadius: 260)
+                        // Soft spotlight glow, offset toward the flame badge,
+                        // for depth -- clipped to the card so it never spills
+                        // into the transparent margin around it.
+                        RadialGradient(colors: [.white.opacity(0.22), .clear], center: UnitPoint(x: 0.5, y: 0.32), startRadius: 4, endRadius: 220)
                     )
                     .overlay(
                         VStack(spacing: 0) {
@@ -371,60 +382,187 @@ struct ProfileView: View {
                                 .resizable()
                                 .scaledToFit()
                                 .foregroundStyle(.white)
-                                .frame(width: 118)
-                                .padding(.top, 52)
+                                .frame(width: 92)
+                                .padding(.top, 36)
 
                             Spacer()
 
                             ZStack {
-                                Circle()
-                                    .fill(.white.opacity(0.14))
-                                    .frame(width: 148, height: 148)
-                                Circle()
-                                    .strokeBorder(.white.opacity(0.35), lineWidth: 1.5)
-                                    .frame(width: 148, height: 148)
+                                Circle().fill(.white.opacity(0.15)).frame(width: 116, height: 116)
+                                Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1.5).frame(width: 116, height: 116)
                                 Image(systemName: "flame.fill")
-                                    .font(.system(size: 56))
+                                    .font(.system(size: 44))
                                     .foregroundStyle(.white)
                             }
 
                             Text("\(streakDays)")
-                                .font(.system(size: 96, weight: .black, design: .rounded))
+                                .font(.system(size: 76, weight: .black, design: .rounded))
                                 .foregroundStyle(.white)
-                                .padding(.top, 18)
+                                .padding(.top, 12)
                             Text(streakDays == 1 ? "DAY STREAK" : "DAY STREAK")
-                                .font(.system(size: 20, weight: .bold))
+                                .font(.system(size: 16, weight: .bold))
                                 .tracking(4)
                                 .foregroundStyle(.white.opacity(0.92))
+
+                            if category != nil || steps != nil {
+                                HStack(spacing: 8) {
+                                    if let category {
+                                        chip(icon: categoryIcon(category), text: category.displayTitle)
+                                    }
+                                    if let steps {
+                                        chip(icon: "figure.walk", text: "\(steps.formatted()) steps")
+                                    }
+                                }
+                                .padding(.top, 16)
+                            }
 
                             Spacer()
 
                             Text(dateLine)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.72))
-                                .padding(.bottom, 40)
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .padding(.bottom, 24)
                         }
+                        .padding(.horizontal, 18)
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 40, style: .continuous))
-                    .padding(24)
-                    .somaRaisedShadow()
+                    .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+                    .frame(width: 300, height: 470)
+                    .shadow(color: .black.opacity(0.28), radius: 24, x: 0, y: 14)
             }
-            .frame(width: 390, height: 844)
+            .frame(width: 360, height: 640)
+        }
+
+        private func chip(icon: String, text: String) -> some View {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 11.5, weight: .bold))
+                Text(text).font(.system(size: 12.5, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(.white.opacity(0.16)))
+            .overlay(Capsule().strokeBorder(.white.opacity(0.3), lineWidth: 1))
+        }
+
+        private func categoryIcon(_ category: RecommendationCategory) -> String {
+            switch category {
+            case .pushHard: "flame.fill"
+            case .moderate: "bolt.fill"
+            case .light: "leaf.fill"
+            case .rest: "moon.zzz.fill"
+            }
         }
     }
 
-    /// Synchronous on the main actor -- a static branded card renders in
-    /// well under a frame, so there's no need for a loading state around
-    /// this. nil (hides the Share button) whenever there's nothing to
-    /// share yet.
-    private func renderStreakShareImage() {
-        guard completedWorkoutStreak > 0 else {
-            streakShareImage = nil
-            return
+    /// Lets the user pick what to include before sharing -- today's effort
+    /// (push hard / moderate / light / rest, same category as the rest of
+    /// the app) and step count, both real and both optional, rather than
+    /// always baking them in. Live preview so toggling actually shows what
+    /// changes; the final image is only rendered once (here), not
+    /// speculatively on every Profile load.
+    private struct StreakShareSheet: View {
+        let streakDays: Int
+        let category: RecommendationCategory?
+        let steps: Int?
+        @Environment(\.dismiss) private var dismiss
+
+        @State private var includeEffort: Bool
+        @State private var includeSteps: Bool
+        @State private var shareImage: UIImage?
+
+        init(streakDays: Int, category: RecommendationCategory?, steps: Int?) {
+            self.streakDays = streakDays
+            self.category = category
+            self.steps = steps
+            _includeEffort = State(initialValue: category != nil)
+            _includeSteps = State(initialValue: (steps ?? 0) > 0)
         }
-        let renderer = ImageRenderer(content: StreakShareCardView(streakDays: completedWorkoutStreak))
-        renderer.scale = 3
-        streakShareImage = renderer.uiImage
+
+        var body: some View {
+            NavigationStack {
+                VStack(spacing: 20) {
+                    ScrollView {
+                        VStack(spacing: 20) {
+                            // Checkerboard-free "this is transparent" cue --
+                            // a plain neutral preview backdrop, purely for
+                            // on-screen preview; never part of the exported
+                            // image itself.
+                            StreakShareCardView(
+                                streakDays: streakDays,
+                                category: includeEffort ? category : nil,
+                                steps: includeSteps ? steps : nil
+                            )
+                            .scaleEffect(0.62)
+                            .frame(width: 360 * 0.62, height: 640 * 0.62)
+                            .padding(.top, 12)
+
+                            VStack(spacing: 10) {
+                                if let category {
+                                    Toggle(isOn: $includeEffort) {
+                                        Text("Today's effort — \(category.displayTitle)")
+                                            .font(.system(size: 14.5, weight: .semibold))
+                                    }
+                                    .tint(SomaTokens.accent)
+                                }
+                                if let steps, steps > 0 {
+                                    Toggle(isOn: $includeSteps) {
+                                        Text("Step count — \(steps.formatted()) steps")
+                                            .font(.system(size: 14.5, weight: .semibold))
+                                    }
+                                    .tint(SomaTokens.accent)
+                                }
+                            }
+                            .padding(14)
+                            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
+                        }
+                        .padding(20)
+                    }
+
+                    if let shareImage {
+                        ShareLink(
+                            item: Image(uiImage: shareImage),
+                            preview: SharePreview("My \(streakDays)-day Soma streak", image: Image(uiImage: shareImage))
+                        ) {
+                            Label("Share streak", systemImage: "square.and.arrow.up")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.accent))
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
+                    }
+                }
+                .somaBackground()
+                .navigationTitle("Share your streak")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                }
+            }
+            .onAppear { renderImage() }
+            .onChange(of: includeEffort) { renderImage() }
+            .onChange(of: includeSteps) { renderImage() }
+        }
+
+        /// Synchronous on the main actor -- a static branded card renders
+        /// in well under a frame, so no loading state is needed here.
+        /// isOpaque = false is what actually preserves the transparent
+        /// margin in the exported PNG (SwiftUI's default composites onto
+        /// an opaque backing otherwise).
+        private func renderImage() {
+            let renderer = ImageRenderer(content: StreakShareCardView(
+                streakDays: streakDays,
+                category: includeEffort ? category : nil,
+                steps: includeSteps ? steps : nil
+            ))
+            renderer.scale = 3
+            renderer.isOpaque = false
+            shareImage = renderer.uiImage
+        }
     }
 
     // MARK: - Completion notice
@@ -1068,7 +1206,7 @@ struct ProfileView: View {
 
         completedWorkoutStreak = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates())
             .map(Self.streak(from:)) ?? 0
-        renderStreakShareImage()
+        todaysSteps = await HealthKitManager.shared.fetchTodaysSteps().map { Int($0) }
         sessionsDoneThisWeek = await Self.workoutsThisWeek()
         await loadSportGoalState()
         await loadConnectionStatus()
