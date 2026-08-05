@@ -82,7 +82,7 @@ struct ExerciseDetailView: View {
             // A lightweight placeholder, not a full-sheet blocker -- the
             // rest of the sheet (name/sets/reps/coaching cue above) is
             // already visible and interactive while this resolves.
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous)
                 .fill(Color(.systemGray6))
                 .frame(height: 220)
                 .overlay(SomaLoadingBar())
@@ -99,8 +99,8 @@ struct ExerciseDetailView: View {
         }
         .tabViewStyle(.page)
         .frame(height: 260)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.systemGray6)))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
+        .clipShape(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous))
     }
 
     private var noMediaPlaceholder: some View {
@@ -113,7 +113,7 @@ struct ExerciseDetailView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 180)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.systemGray6)))
+        .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
     }
 
     private func tagsRow(_ entry: ExerciseLibraryEntry) -> some View {
@@ -179,6 +179,12 @@ private struct CachedExerciseImage<Placeholder: View>: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
+                    // The pager's own container is already clipped to
+                    // rounded corners, but scaledToFit can still leave the
+                    // photo's own square edges visible/near-flush inside
+                    // it -- clip the image itself too so it always reads
+                    // as rounded, matching the rest of the app's cards.
+                    .clipShape(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous))
             } else if failed {
                 placeholder
             } else {
