@@ -567,6 +567,60 @@ final class SupabaseClient {
         try Self.assertSuccess(response, data: data)
     }
 
+    // MARK: - nutrition_targets / meal_log
+
+    /// Plain read via RLS -- nil when never computed yet (e.g. the user
+    /// hasn't set a goal/current photo pair, so training_emphasis and
+    /// therefore this row don't exist). Never fabricated client-side.
+    func fetchNutritionTargets() async throws -> NutritionTargets? {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let path = "rest/v1/nutrition_targets?user_id=eq.\(userId)&select=daily_calories,daily_protein_g,daily_carbs_g,daily_fat_g,computed_at,basis&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([NutritionTargets].self, from: data)
+        return rows.first
+    }
+
+    /// Today's (or any date's) logged food entries, most recent first.
+    func fetchMealLogs(date: String) async throws -> [MealLogEntry] {
+        let path = "rest/v1/meal_log?date=eq.\(date)&select=id,date,label,calories,protein_g,carbs_g,fat_g,source,logged_at&order=logged_at.desc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([MealLogEntry].self, from: data)
+    }
+
+    /// Manual entry -- source is always "manual" from this call site (the
+    /// column also accepts "photo" for a future real meal-scan feature).
+    /// carbs/fat are optional (protein and calories are the two numbers
+    /// most people actually know off-hand); calories/protein are required.
+    func logMeal(date: String, label: String?, calories: Int, proteinG: Int, carbsG: Int?, fatG: Int?) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var body: [String: Any] = [
+            "user_id": userId,
+            "date": date,
+            "calories": calories,
+            "protein_g": proteinG,
+            "source": "manual",
+        ]
+        if let label, !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["label"] = label }
+        if let carbsG { body["carbs_g"] = carbsG }
+        if let fatG { body["fat_g"] = fatG }
+
+        var request = try await authorizedRequest(path: "rest/v1/meal_log", method: "POST")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    func deleteMealLog(id: String) async throws {
+        let request = try await authorizedRequest(path: "rest/v1/meal_log?id=eq.\(id)", method: "DELETE")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
     // MARK: - daily_recommendation
 
     /// Plain read via RLS -- used by HomeView on appear so opening the app

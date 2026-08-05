@@ -25,6 +25,12 @@ struct HomeView: View {
     @State private var hasCurrentBodyPhoto = false
     @State private var isConfirmedAdultForBodyPhotos = false
     @State private var showGoalBodyProgress = false
+    // Nutrition row -- nil target means never computed yet (no goal/
+    // current photo pair analyzed), handled the same "hidden CTA instead
+    // of a broken row" way the goal-progress row handles no photos yet.
+    @State private var nutritionTarget: NutritionTargets?
+    @State private var nutritionProgress: NutritionDayProgress?
+    @State private var showNutrition = false
     @State private var showSeededDetail = false
     @State private var pendingGymPlan: (AIWorkoutPlan, String, String)?
 
@@ -102,6 +108,8 @@ struct HomeView: View {
 
                 goalProgressRow
 
+                nutritionRow
+
                 if !timelineEntries.isEmpty {
                     timelineCard
                 }
@@ -121,6 +129,7 @@ struct HomeView: View {
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
             await loadGoalBodyPhotoState()
+            await loadNutritionState()
         }
         .refreshable {
             await checkNow()
@@ -130,6 +139,7 @@ struct HomeView: View {
             await loadTimeline()
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
+            await loadNutritionState()
         }
         .sheet(isPresented: $showDetail, onDismiss: {
             Task {
@@ -154,6 +164,11 @@ struct HomeView: View {
             Task { await loadGoalBodyPhotoState() }
         }) {
             GoalBodyProgressView()
+        }
+        .sheet(isPresented: $showNutrition, onDismiss: {
+            Task { await loadNutritionState() }
+        }) {
+            NutritionView()
         }
         .sheet(isPresented: $showHealthDashboard) {
             HealthDashboardView()
@@ -738,6 +753,41 @@ struct HomeView: View {
         }
     }
 
+    /// nil target (never computed -- no goal/current photo pair analyzed
+    /// yet) shows a CTA rather than hiding entirely, same as
+    /// goalProgressRow's own two-state pattern -- nutrition targets are a
+    /// direct downstream product of that same photo comparison, so
+    /// pointing here back at it is the honest "how do I get one" answer.
+    private var nutritionRow: some View {
+        Button {
+            AnalyticsManager.shared.featureUsed(name: "nutrition_home_card")
+            showNutrition = true
+        } label: {
+            if let nutritionTarget, let nutritionProgress {
+                scanRowBody(
+                    plate: SomaTokens.accentSoft, icon: "fork.knife", iconColor: SomaTokens.accent,
+                    title: "Nutrition",
+                    subtitle: "\(nutritionProgress.consumedCalories) / \(nutritionTarget.dailyCalories) kcal today"
+                ) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+            } else {
+                scanRowBody(
+                    plate: SomaTokens.accentSoft, icon: "fork.knife", iconColor: SomaTokens.accent,
+                    title: "Get your nutrition targets",
+                    subtitle: "A daily calorie and macro target built around your goal"
+                ) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     private func scanRowBody(plate: Color, icon: String, iconColor: Color, title: String, subtitle: String, @ViewBuilder trailing: () -> some View) -> some View {
         CardView {
             HStack(spacing: 12) {
@@ -937,6 +987,21 @@ struct HomeView: View {
         hasGoalBodyPhoto = profile.goalBodyPhotoPath != nil
         hasCurrentBodyPhoto = profile.currentBodyPhotoPath != nil
         isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
+    }
+
+    /// nil target (never computed -- no goal/current photo pair analyzed
+    /// yet) is a real, valid state, not an error -- the row below shows a
+    /// CTA instead of hiding entirely, same posture as goalProgressRow's
+    /// own "add your goal photo" state.
+    private func loadNutritionState() async {
+        guard let target = try? await SupabaseClient.shared.fetchNutritionTargets() else {
+            nutritionTarget = nil
+            nutritionProgress = nil
+            return
+        }
+        nutritionTarget = target
+        let entries = (try? await SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
+        nutritionProgress = NutritionDayProgress.compute(entries: entries, target: target)
     }
 
     /// Best-effort: no goal (or a failed fetch) simply means no goal row --
