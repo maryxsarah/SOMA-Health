@@ -337,28 +337,77 @@ struct ProfileView: View {
     private struct StreakShareCardView: View {
         let streakDays: Int
 
+        private var dateLine: String {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEEE, MMM d"
+            return formatter.string(from: Date())
+        }
+
         var body: some View {
             ZStack {
-                LinearGradient(colors: [SomaTokens.accentDeep, SomaTokens.accent], startPoint: .top, endPoint: .bottom)
-                VStack(spacing: 22) {
-                    Spacer()
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(.white)
-                    Text("\(streakDays)")
-                        .font(.system(size: 92, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text(streakDays == 1 ? "DAY STREAK" : "DAY STREAK")
-                        .font(.system(size: 22, weight: .bold))
-                        .tracking(3)
-                        .foregroundStyle(.white.opacity(0.9))
-                    Spacer()
-                    Text("SOMA")
-                        .font(.system(size: 20, weight: .heavy))
-                        .tracking(7)
-                        .foregroundStyle(.white)
-                        .padding(.bottom, 44)
-                }
+                // A neutral backdrop so the gradient card reads as its own
+                // floating object -- Oura/Strava/Whoop's own share cards
+                // all use this "card on a plain surface" treatment rather
+                // than a full-bleed screenshot.
+                SomaTokens.surface2
+
+                RoundedRectangle(cornerRadius: 40, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [SomaTokens.accentDeep, SomaTokens.accent, SomaTokens.accent.opacity(0.82)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        // Soft spotlight glow centered behind the flame,
+                        // plus a faint ring for a bit of depth -- the card
+                        // reads as flat/basic without any of this.
+                        RadialGradient(colors: [.white.opacity(0.18), .clear], center: .center, startRadius: 4, endRadius: 260)
+                    )
+                    .overlay(
+                        VStack(spacing: 0) {
+                            Image("SomaWordmark")
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                                .foregroundStyle(.white)
+                                .frame(width: 118)
+                                .padding(.top, 52)
+
+                            Spacer()
+
+                            ZStack {
+                                Circle()
+                                    .fill(.white.opacity(0.14))
+                                    .frame(width: 148, height: 148)
+                                Circle()
+                                    .strokeBorder(.white.opacity(0.35), lineWidth: 1.5)
+                                    .frame(width: 148, height: 148)
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 56))
+                                    .foregroundStyle(.white)
+                            }
+
+                            Text("\(streakDays)")
+                                .font(.system(size: 96, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                                .padding(.top, 18)
+                            Text(streakDays == 1 ? "DAY STREAK" : "DAY STREAK")
+                                .font(.system(size: 20, weight: .bold))
+                                .tracking(4)
+                                .foregroundStyle(.white.opacity(0.92))
+
+                            Spacer()
+
+                            Text(dateLine)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.72))
+                                .padding(.bottom, 40)
+                        }
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 40, style: .continuous))
+                    .padding(24)
+                    .somaRaisedShadow()
             }
             .frame(width: 390, height: 844)
         }
