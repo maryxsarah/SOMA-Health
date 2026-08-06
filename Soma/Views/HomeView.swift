@@ -14,6 +14,14 @@ struct HomeView: View {
     @State private var selectedDay: String?
     @State private var todaysWorkoutLog: WorkoutLogEntry?
     @State private var completedDates: Set<String> = []
+    // Manual activity logging (real feedback: users want to log a sport
+    // session -- soccer, volleyball, hot yoga -- outside the AI plan).
+    // showManualWorkoutDetail routes "see today's workout" to
+    // CompletedWorkoutView instead of RecommendationDetailView whenever
+    // todaysWorkoutLog.source == "manual", since that view has no
+    // suggestion titles to match a manually-logged activity against.
+    @State private var showLogManualWorkout = false
+    @State private var showManualWorkoutDetail = false
     @State private var timelineEntries: [WorkoutTimelineEntry] = []
 
     @State private var showGymPhotoFlow = false
@@ -170,6 +178,22 @@ struct HomeView: View {
         }) {
             NutritionView()
         }
+        .sheet(isPresented: $showLogManualWorkout, onDismiss: {
+            Task {
+                await loadTodaysWorkoutLog()
+                await loadCompletedDates()
+                await loadWeeklyProgressAndStreak()
+            }
+        }) {
+            LogManualWorkoutView()
+        }
+        .sheet(isPresented: $showManualWorkoutDetail) {
+            if let todaysWorkoutLog {
+                CompletedWorkoutView(log: todaysWorkoutLog, isBestReadinessDay: isBestReadinessDay) { updated in
+                    self.todaysWorkoutLog = updated
+                }
+            }
+        }
         .sheet(isPresented: $showHealthDashboard) {
             HealthDashboardView()
         }
@@ -266,6 +290,24 @@ struct HomeView: View {
             return
         }
         Superwall.shared.register(placement: "detail_access", feature: action)
+    }
+
+    /// Today's logged workout might be an AI-plan completion (has
+    /// suggestion titles to match against RecommendationDetailView's
+    /// "already logged" state) or a manually-logged activity (no such
+    /// titles -- CompletedWorkoutView is the generic detail screen that
+    /// already degrades gracefully with no plan_snapshot, see
+    /// DayDetailView's own use of it). Same paywall gate either way.
+    private func openTodaysWorkoutDetail() {
+        if todaysWorkoutLog?.source == "manual" {
+            requestDetailAccess { showManualWorkoutDetail = true }
+        } else {
+            requestDetailAccess { showDetail = true }
+        }
+    }
+
+    private var isBestReadinessDay: Bool {
+        CalendarStripView.bestReadinessDate(among: recentRecommendations) == Self.todayDateString()
     }
 
     /// guide 02: pill top-left (opposite the gear), badge top-right --
@@ -445,13 +487,26 @@ struct HomeView: View {
                 // Today's session is already logged -- reviewing it is the
                 // action now; the detail sheet shows the completed state.
                 SomaButton(title: "Check workout details", size: .lg, variant: .secondary) {
-                    requestDetailAccess { showDetail = true }
+                    openTodaysWorkoutDetail()
                 }
             } else {
                 SomaButton(title: "Start workout", size: .lg, variant: .primary) {
                     requestDetailAccess { showDetail = true }
                 }
             }
+
+            // Always available, regardless of whether today's AI workout
+            // is logged -- a user might do this INSTEAD of (or in
+            // addition to) the AI plan. Free, no paywall: this is basic
+            // tracking, same posture as manual meal logging.
+            Button {
+                showLogManualWorkout = true
+            } label: {
+                Text("Log a different activity")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(SomaTokens.accent)
+            }
+            .buttonStyle(.plain)
 
             restDayRequestControl(recommendation)
         }
@@ -813,12 +868,12 @@ struct HomeView: View {
     /// destination as the readiness card's "Check workout details" CTA.
     private func todaysWorkoutCard(_ log: WorkoutLogEntry) -> some View {
         Button {
-            requestDetailAccess { showDetail = true }
+            openTodaysWorkoutDetail()
         } label: {
             CardView {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Today's workout")
+                        Text(log.source == "manual" ? "Today's activity" : "Today's workout")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text(log.title)

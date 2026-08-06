@@ -28,9 +28,15 @@ struct WorkoutLogEntry: Codable, Identifiable {
     /// before this column existed, or never rated. UI/copy layer only: see
     /// `WorkoutFeelRating.consequence`.
     let feelRating: WorkoutFeelRating?
+    /// "ai_plan" (an AI-generated suggestion/plan, the default -- every
+    /// row created before this column existed really was this) or
+    /// "manual" (a sport/activity the user logged themselves, see
+    /// LogManualWorkoutView). Decides which detail screen HomeView routes
+    /// to when the user taps today's logged workout.
+    let source: String
 
     enum CodingKeys: String, CodingKey {
-        case id, date, title, category, feedback
+        case id, date, title, category, feedback, source
         case bodyPart = "body_part"
         case completedAt = "completed_at"
         case planSnapshot = "plan_snapshot"

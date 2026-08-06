@@ -338,7 +338,7 @@ struct CompletedWorkoutView: View {
         WorkoutLogEntry(
             id: log.id, date: log.date, title: log.title, bodyPart: log.bodyPart, category: log.category,
             completedAt: log.completedAt, feedback: log.feedback, planSnapshot: log.planSnapshot,
-            startedAt: log.startedAt, endedAt: log.endedAt, feelRating: rating
+            startedAt: log.startedAt, endedAt: log.endedAt, feelRating: rating, source: log.source
         )
     }
 
@@ -438,7 +438,8 @@ private struct EditWorkoutLogSheet: View {
             onSave(WorkoutLogEntry(
                 id: log.id, date: log.date, title: log.title, bodyPart: log.bodyPart, category: log.category,
                 completedAt: log.completedAt, feedback: feedbackText.isEmpty ? nil : feedbackText,
-                planSnapshot: log.planSnapshot, startedAt: log.startedAt, endedAt: log.endedAt, feelRating: feelRating
+                planSnapshot: log.planSnapshot, startedAt: log.startedAt, endedAt: log.endedAt, feelRating: feelRating,
+                source: log.source
             ))
             dismiss()
         } catch {

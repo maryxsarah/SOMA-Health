@@ -779,6 +779,10 @@ final class SupabaseClient {
     /// workout done (e.g. "I like a 5-10min incline treadmill warm-up") --
     /// generate-workout-plan folds recent feedback into future plans for a
     /// similar workout.
+    /// `source` defaults to "ai_plan" (every existing call site logs an
+    /// AI-generated suggestion/plan); pass "manual" for
+    /// LogManualWorkoutView's sport/activity entries -- see the
+    /// 20260806040000 migration's own comment for why this exists.
     func logWorkout(
         date: String,
         title: String,
@@ -788,7 +792,8 @@ final class SupabaseClient {
         feelRating: WorkoutFeelRating? = nil,
         planSnapshot: AIWorkoutPlan? = nil,
         startedAt: Date? = nil,
-        endedAt: Date? = nil
+        endedAt: Date? = nil,
+        source: String = "ai_plan"
     ) async throws {
         guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
         var body: [String: Any] = [
@@ -797,6 +802,7 @@ final class SupabaseClient {
             "title": title,
             "body_part": bodyPart,
             "category": category,
+            "source": source,
         ]
         if let feedback, !feedback.isEmpty {
             body["feedback"] = feedback
@@ -833,7 +839,7 @@ final class SupabaseClient {
     /// which of today's/yesterday's suggestions are already logged) and
     /// DayDetailView (calendar day drill-down).
     func fetchWorkoutLogs(date: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating&order=completed_at.asc"
+        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source&order=completed_at.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -844,7 +850,7 @@ final class SupabaseClient {
     /// TrainingHistoryView's 30-day list and RecommendationDetailView's
     /// 7-day body-part balancing.
     func fetchWorkoutLogs(fromDate: String, toDate: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating&order=date.desc"
+        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source&order=date.desc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
