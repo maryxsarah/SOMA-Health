@@ -39,4 +39,19 @@ struct WorkoutTimelineEntry: Identifiable {
         default: source.capitalized
         }
     }
+
+    /// Used by HomeView's auto-log-from-device-detection pass (see
+    /// autoLogDeviceDetectedWorkoutIfNeeded) to give an auto-created
+    /// workout_log row SOME category rather than none -- a rough proxy
+    /// only, since calorie burn rate correlates with intensity but isn't
+    /// a substitute for the AI plan's own category signal. Missing
+    /// calories (Oura's workout collection never reports them) falls
+    /// back to the safe middle default rather than guessing low or high.
+    var inferredCategory: String {
+        guard let calories, durationMinutes > 0 else { return "moderate" }
+        let caloriesPerMinute = Double(calories) / Double(durationMinutes)
+        if caloriesPerMinute >= 10 { return "push_hard" }
+        if caloriesPerMinute >= 6 { return "moderate" }
+        return "light"
+    }
 }

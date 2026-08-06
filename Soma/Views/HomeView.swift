@@ -134,6 +134,7 @@ struct HomeView: View {
             await loadTodaysWorkoutLog()
             await loadCompletedDates()
             await loadTimeline()
+            await autoLogDeviceDetectedWorkoutIfNeeded()
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
             await loadGoalBodyPhotoState()
@@ -145,6 +146,7 @@ struct HomeView: View {
             await loadTodaysWorkoutLog()
             await loadCompletedDates()
             await loadTimeline()
+            await autoLogDeviceDetectedWorkoutIfNeeded()
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
             await loadNutritionState()
@@ -294,15 +296,19 @@ struct HomeView: View {
 
     /// Today's logged workout might be an AI-plan completion (has
     /// suggestion titles to match against RecommendationDetailView's
-    /// "already logged" state) or a manually-logged activity (no such
-    /// titles -- CompletedWorkoutView is the generic detail screen that
-    /// already degrades gracefully with no plan_snapshot, see
-    /// DayDetailView's own use of it). Same paywall gate either way.
+    /// "already logged" state) or something else -- a manually-logged
+    /// activity, or one auto-logged from a device-detected session --
+    /// neither of which has suggestion titles to match. CompletedWorkoutView
+    /// is the generic detail screen for both (already degrades gracefully
+    /// with no plan_snapshot, see DayDetailView's own use of it). Only
+    /// "ai_plan" ever gets the AI-specific screen; every other/future
+    /// source value defaults to generic rather than needing its own
+    /// explicit case here. Same paywall gate either way.
     private func openTodaysWorkoutDetail() {
-        if todaysWorkoutLog?.source == "manual" {
-            requestDetailAccess { showManualWorkoutDetail = true }
-        } else {
+        if todaysWorkoutLog?.source == "ai_plan" {
             requestDetailAccess { showDetail = true }
+        } else {
+            requestDetailAccess { showManualWorkoutDetail = true }
         }
     }
 
@@ -873,7 +879,7 @@ struct HomeView: View {
             CardView {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(log.source == "manual" ? "Today's activity" : "Today's workout")
+                        Text(Self.todaysWorkoutCardEyebrow(for: log.source))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text(log.title)
@@ -886,6 +892,14 @@ struct HomeView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private static func todaysWorkoutCardEyebrow(for source: String) -> String {
+        switch source {
+        case "manual": "Today's activity"
+        case "device_detected": "Detected automatically"
+        default: "Today's workout"
+        }
     }
 
     /// Shown once a plan is added to today's plan but not yet completed --
@@ -1135,6 +1149,52 @@ struct HomeView: View {
 
         let merged = await (hkEntries + syncedOnly + providerEntries)
         timelineEntries = merged.sorted { $0.startTime < $1.startTime }
+    }
+
+    /// Closes a real gap: a workout captured passively by a connected
+    /// health source (Apple Health, Oura, Whoop) never marked today as
+    /// done unless the user ALSO tapped through and logged it explicitly
+    /// -- real feedback: "did a 2h workout, burned 1229 kcal, Soma didn't
+    /// confirm it," even though the timeline card was already showing it.
+    /// Runs after loadTodaysWorkoutLog/loadTimeline; auto-creates a
+    /// workout_log row from today's longest qualifying device-detected
+    /// session once nothing is logged yet, tagged source:
+    /// "device_detected" so it's clearly distinct from something the user
+    /// explicitly logged (openTodaysWorkoutDetail routes it to the
+    /// generic CompletedWorkoutView, same as a manual entry).
+    private func autoLogDeviceDetectedWorkoutIfNeeded() async {
+        guard todaysWorkoutLog == nil else { return }
+        // A trivial multi-minute entry (HealthKit logs even a short walk
+        // as its own "workout") shouldn't silently satisfy the whole day
+        // -- require a real minimum duration, and prefer the longest
+        // qualifying session over merely the chronologically-first one.
+        guard let entry = timelineEntries
+            .filter({ $0.durationMinutes >= 10 })
+            .max(by: { $0.durationMinutes < $1.durationMinutes })
+        else { return }
+
+        let endedAt = Calendar.current.date(byAdding: .minute, value: entry.durationMinutes, to: entry.startTime) ?? entry.startTime
+        let caloriesNote = entry.calories.map { " -- \($0) kcal burned" } ?? ""
+
+        do {
+            try await SupabaseClient.shared.logWorkout(
+                date: Self.todayDateString(),
+                title: entry.title,
+                bodyPart: "full_body",
+                category: entry.inferredCategory,
+                feedback: "Detected automatically from \(entry.sourceDisplayName)\(caloriesNote).",
+                startedAt: entry.startTime,
+                endedAt: endedAt,
+                source: "device_detected"
+            )
+            await loadTodaysWorkoutLog()
+            await loadCompletedDates()
+            await loadWeeklyProgressAndStreak()
+        } catch {
+            // Best-effort -- next app open or pull-to-refresh retries.
+            // Not surfaced as an error banner: the user did nothing wrong
+            // here, there's just nothing yet for them to act on.
+        }
     }
 
     /// Manual fallback ("Check now" / pull-to-refresh) -- calls the same
