@@ -43,6 +43,10 @@
 	<string>Soma reads your sleep, heart rate, HRV, and activity data to tell you how hard to train each day.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Soma does not write to Health, but iOS requires this description alongside read access.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Soma uses your microphone so you can dictate what you ate instead of typing it.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Soma transcribes your dictated meal description on-device so you don't have to type it.</string>
 	<key>OURA_CLIENT_ID</key>
 	<string>$(OURA_CLIENT_ID)</string>
 	<key>POSTHOG_API_KEY</key>
