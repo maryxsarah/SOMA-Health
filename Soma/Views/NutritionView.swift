@@ -13,6 +13,11 @@ struct NutritionView: View {
     @State private var errorMessage: String?
     @State private var showLogSheet = false
     @State private var showGoalBodyProgress = false
+    @State private var selectedEntry: MealLogEntry?
+    /// Guards against firing a second rate-meal call for the same entry
+    /// while one is already in flight (loadEntries() re-runs the
+    /// unrated-entry sweep every time it's called).
+    @State private var ratingInFlight: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -66,6 +71,13 @@ struct NutritionView: View {
             Task { await load() }
         }) {
             GoalBodyProgressView()
+        }
+        .sheet(item: $selectedEntry, onDismiss: {
+            // Picks up a score/rationale MealDetailView may have just
+            // computed lazily (an older, never-rated entry).
+            Task { await loadEntries() }
+        }) { entry in
+            MealDetailView(entry: entry)
         }
     }
 
@@ -170,17 +182,38 @@ struct NutritionView: View {
         }
     }
 
+    /// Tapping the row (its own tap target, separate from the trash
+    /// button) opens MealDetailView -- full macros, logged time, source,
+    /// and the goal-fit rating. The score badge here is the same stored
+    /// number MealDetailView shows, just a quick-glance version.
     private func logRow(_ entry: MealLogEntry) -> some View {
         CardView {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.label?.isEmpty == false ? entry.label! : "Logged food")
-                        .font(.system(size: 14.5, weight: .semibold))
-                    Text(macroSummary(entry))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 10) {
+                Button {
+                    selectedEntry = entry
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        if let score = entry.score, let verdict = entry.verdict {
+                            scoreBadge(score: score, color: verdict.color)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.label?.isEmpty == false ? entry.label! : "Logged food")
+                                .font(.system(size: 14.5, weight: .semibold))
+                                .foregroundStyle(SomaTokens.ink)
+                            Text(macroSummary(entry))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(SomaTokens.ink4)
+                            .padding(.top, 2)
+                    }
+                    .contentShape(Rectangle())
                 }
-                Spacer()
+                .buttonStyle(.plain)
+
                 Button {
                     Task { await delete(entry) }
                 } label: {
@@ -190,6 +223,14 @@ struct NutritionView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private func scoreBadge(score: Int, color: Color) -> some View {
+        Text("\(score)")
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(color)
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(color.opacity(0.15)))
     }
 
     private func macroSummary(_ entry: MealLogEntry) -> String {
@@ -213,6 +254,26 @@ struct NutritionView: View {
 
     private func loadEntries() async {
         entries = (try? await SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
+        autoRateUnratedEntries()
+    }
+
+    /// Fire-and-forget: rates any entry that doesn't have a score yet
+    /// (a just-logged meal, or an older one from before this feature
+    /// existed) so the badge appears without the user needing to tap in.
+    /// ratingInFlight guards against re-firing for the same id across
+    /// repeated loadEntries() calls while a rating is still in progress.
+    private func autoRateUnratedEntries() {
+        for entry in entries where entry.score == nil && !ratingInFlight.contains(entry.id) {
+            ratingInFlight.insert(entry.id)
+            Task {
+                if let result = try? await SupabaseClient.shared.rateMeal(id: entry.id),
+                   let index = entries.firstIndex(where: { $0.id == entry.id }) {
+                    entries[index].score = result.score
+                    entries[index].rationale = result.rationale
+                }
+                ratingInFlight.remove(entry.id)
+            }
+        }
     }
 
     private func delete(_ entry: MealLogEntry) async {

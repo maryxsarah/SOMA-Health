@@ -36,7 +36,7 @@ export async function logGeneration(
   supabase: SupabaseClient,
   userId: string,
   date: string,
-  source: "suggestion" | "gym_photo" | "addon_suggestion" | "meal_text_estimate",
+  source: "suggestion" | "gym_photo" | "addon_suggestion" | "meal_text_estimate" | "meal_rating",
 ): Promise<void> {
   await supabase.from("ai_generation_log").insert({ user_id: userId, date, source });
 }

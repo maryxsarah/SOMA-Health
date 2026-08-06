@@ -646,7 +646,7 @@ final class SupabaseClient {
 
     /// Today's (or any date's) logged food entries, most recent first.
     func fetchMealLogs(date: String) async throws -> [MealLogEntry] {
-        let path = "rest/v1/meal_log?date=eq.\(date)&select=id,date,label,calories,protein_g,carbs_g,fat_g,source,logged_at&order=logged_at.desc"
+        let path = "rest/v1/meal_log?date=eq.\(date)&select=id,date,label,calories,protein_g,carbs_g,fat_g,source,logged_at,score,rationale&order=logged_at.desc"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -697,6 +697,22 @@ final class SupabaseClient {
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
         return try JSONDecoder().decode(MealEstimate.self, from: data)
+    }
+
+    /// Scores an already-logged meal (rate-meal, Claude Haiku) against
+    /// the user's real nutrition targets/goal direction and writes the
+    /// result back onto the row server-side -- this call both rates AND
+    /// persists in one round trip, so the caller only needs the return
+    /// value to update its own local copy of the entry.
+    func rateMeal(id: String) async throws -> (score: Int, rationale: String) {
+        var request = try await authorizedRequest(path: "functions/v1/rate-meal", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["mealLogId": id])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Response: Decodable { let score: Int; let rationale: String }
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        return (decoded.score, decoded.rationale)
     }
 
     // MARK: - daily_recommendation
