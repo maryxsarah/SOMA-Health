@@ -71,8 +71,16 @@ enum Config {
     ///   5. Legal sign-off on the biometric-data-law question was the
     ///      product owner's own call to accept, not blocked on external
     ///      review -- see the epic's plan notes.
-    /// The result is never shown to the user (no "AI analyzed your photos"
-    /// screen) -- it's a silent input to workout-plan generation only.
+    ///
+    /// UPDATE (2026-08-05): originally "never shown to the user (no 'AI
+    /// analyzed your photos' screen)" -- reversed by a second product-owner
+    /// decision so the Progress screen (GoalBodyProgressView) can show the
+    /// result directly, e.g. "Your plan is shaped toward: leaner & toned."
+    /// Uses the same plain-language GoalTag/TrainingEmphasis copy already
+    /// shown as goal options elsewhere in the app, not a clinical score --
+    /// but this IS new user-facing exposure of prerequisite #3's output,
+    /// so a Privacy Policy language check is worth doing even though no
+    /// new data collection or vendor was added.
     static let enableBodyPhotoVisionAnalysis = true
 
     /// Sport goal programs -- compile-time safety net only. The operational

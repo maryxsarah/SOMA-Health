@@ -2,8 +2,8 @@ import SwiftUI
 
 private enum SurveyStep: Int, CaseIterable {
     case sex, workoutFrequency, dateOfBirth, referralSource, trustChart
-    case currentWeight, personalTrainer, goal, desiredWeight, weightDeltaReaction
-    case goalPace, comparisonBar, blockers, dietType, accomplishment
+    case currentWeight, heightEntry, personalTrainer, goal, desiredWeight, weightDeltaReaction
+    case goalPace, comparisonBar, journeyStage, blockers, blockersNotes, dietType, accomplishment
     case onTrack, celebration
 }
 
@@ -69,6 +69,16 @@ struct OnboardingSurveyView: View {
                     onBack: goBack,
                     onContinue: advance
                 )
+            case .heightEntry:
+                HeightQuestionView(
+                    progress: progress,
+                    heightCm: Binding(
+                        get: { answers.heightCm ?? 170 },
+                        set: { answers.heightCm = $0 }
+                    ),
+                    onBack: goBack,
+                    onContinue: advance
+                )
             case .personalTrainer:
                 BinaryYesNoQuestionView(
                     headline: "Do you currently work with a personal trainer?",
@@ -111,11 +121,29 @@ struct OnboardingSurveyView: View {
                 )
             case .comparisonBar:
                 ComparisonStepView(progress: progress, onBack: goBack, onContinue: advance)
+            case .journeyStage:
+                SingleSelectQuestionView(
+                    headline: "Where are you on your fitness journey?",
+                    progress: progress,
+                    selection: $answers.journeyStage,
+                    onBack: goBack,
+                    onContinue: advance
+                )
             case .blockers:
                 MultiSelectQuestionView(
                     headline: "What's blocking you from your current goal?",
                     progress: progress,
                     selection: $answers.blockers,
+                    onBack: goBack,
+                    onContinue: advance
+                )
+            case .blockersNotes:
+                BlockersNotesQuestionView(
+                    progress: progress,
+                    notes: Binding(
+                        get: { answers.blockersNotes ?? "" },
+                        set: { answers.blockersNotes = $0 }
+                    ),
                     onBack: goBack,
                     onContinue: advance
                 )

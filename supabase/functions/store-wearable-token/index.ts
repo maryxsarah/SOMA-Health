@@ -57,6 +57,12 @@ Deno.serve(async (req: Request) => {
         access_token: tokenResponse.access_token,
         refresh_token: tokenResponse.refresh_token ?? null,
         expires_at: expiresAt,
+        // A fresh authorization-code exchange always produces a brand new
+        // token pair -- clears any needs_reconnect left over from a prior
+        // dead refresh token (see generate-recommendation's
+        // ensureFreshWhoopToken/ensureFreshOuraToken), whether this is a
+        // first-time connect or the user tapping "Reconnect".
+        needs_reconnect: false,
       },
       { onConflict: "user_id,provider" },
     );

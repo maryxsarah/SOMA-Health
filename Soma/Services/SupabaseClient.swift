@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Thin URLSession wrapper over Supabase's Auth REST API, PostgREST, and
 /// Edge Functions. V1's needs are narrow enough (one Auth grant, a couple
@@ -236,11 +237,16 @@ final class SupabaseClient {
         }
         if let source = answers.referralSource { body["referral_source"] = source.rawValue }
         if let weight = answers.weightKg { body["weight_kg"] = weight }
+        if let height = answers.heightCm { body["height_cm"] = height }
         if let trainer = answers.worksWithTrainer { body["works_with_trainer"] = trainer }
         if !answers.goal.isEmpty { body["goals"] = answers.goal.map(\.rawValue) }
         if let desired = answers.desiredWeightKg { body["desired_weight_kg"] = desired }
         if let pace = answers.goalPace { body["goal_pace"] = pace.rawValue }
+        if let journeyStage = answers.journeyStage { body["journey_stage"] = journeyStage.rawValue }
         if !answers.blockers.isEmpty { body["blockers"] = answers.blockers.map(\.rawValue) }
+        if let blockersNotes = answers.blockersNotes, !blockersNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["blockers_notes"] = blockersNotes
+        }
         if let diet = answers.dietType { body["diet_type"] = diet.rawValue }
         if !answers.accomplishmentGoals.isEmpty { body["accomplishment_goals"] = answers.accomplishmentGoals.map(\.rawValue) }
         body["marketing_opt_in"] = answers.marketingOptIn
@@ -260,7 +266,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,weight_kg,desired_weight_kg,country,city&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -292,6 +298,9 @@ final class SupabaseClient {
         body["weekly_session_target"] = profile.weeklySessionTarget ?? NSNull()
         body["country"] = profile.country ?? NSNull()
         body["city"] = profile.city ?? NSNull()
+        body["height_cm"] = profile.heightCm ?? NSNull()
+        body["journey_stage"] = profile.journeyStage?.rawValue ?? NSNull()
+        body["blockers_notes"] = profile.blockersNotes ?? NSNull()
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
@@ -535,6 +544,16 @@ final class SupabaseClient {
         try Self.assertSuccess(r2, data: d2)
     }
 
+    /// Downloads and decodes a body photo via its signed URL -- shared by
+    /// every screen that renders one (ProfileView, GoalBodyProgressView).
+    /// Best-effort: nil on any failure (network, decode) since a missing
+    /// photo just means an empty slot, not an error worth surfacing.
+    func loadBodyPhotoImage(path: String) async -> UIImage? {
+        guard let url = try? await signedBodyPhotoURL(path: path),
+              let (data, _) = try? await urlSession.data(from: url) else { return nil }
+        return UIImage(data: data)
+    }
+
     /// Re-points the "latest" pointer column at an older history entry --
     /// used after deleting the pinned photo to promote the previous upload
     /// instead of leaving the slot empty while history still exists.
@@ -546,6 +565,154 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, column: path])
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
+    }
+
+    // MARK: - Profile picture (avatar)
+
+    /// Fixed path per user (unlike body photos, no history is kept for a
+    /// profile picture) -- x-upsert so re-uploading just overwrites the
+    /// prior image in place. Same private-bucket + binary-body pattern as
+    /// uploadBodyPhoto above.
+    func uploadAvatar(imageData: Data) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let path = "\(userId)/avatar.jpg"
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1/object/avatars/\(path)")!)
+        request.httpMethod = "POST"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("true", forHTTPHeaderField: "x-upsert")
+        request.httpBody = imageData
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        var upsertRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        upsertRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        upsertRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, "avatar_photo_path": path])
+        let (d2, r2) = try await urlSession.data(for: upsertRequest)
+        try Self.assertSuccess(r2, data: d2)
+    }
+
+    /// The bucket is private, same signed-URL requirement as body photos.
+    /// Best-effort, nil on any failure (network, decode) -- a missing
+    /// avatar just means the placeholder icon shows, not an error.
+    func loadAvatarImage(path: String) async -> UIImage? {
+        struct Response: Decodable { let signedURL: String }
+        guard var request = try? await authorizedRequest(path: "storage/v1/object/sign/avatars/\(path)", method: "POST") else { return nil }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["expiresIn": 3600])
+        guard let (data, response) = try? await urlSession.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let decoded = try? JSONDecoder().decode(Response.self, from: data),
+              let url = URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1\(decoded.signedURL)"),
+              let (imageData, _) = try? await urlSession.data(from: url) else { return nil }
+        return UIImage(data: imageData)
+    }
+
+    /// Removes the Storage object and clears the pointer column -- unlike
+    /// deleteBodyPhoto there's no history row to remove (avatars were
+    /// never versioned) and no re-analysis to trigger.
+    func deleteAvatar(path: String) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1/object/avatars/\(path)")!)
+        request.httpMethod = "DELETE"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        var clearRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        clearRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        clearRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, "avatar_photo_path": NSNull()])
+        let (d2, r2) = try await urlSession.data(for: clearRequest)
+        try Self.assertSuccess(r2, data: d2)
+    }
+
+    // MARK: - nutrition_targets / meal_log
+
+    /// Plain read via RLS -- nil when never computed yet (e.g. the user
+    /// hasn't set a goal/current photo pair, so training_emphasis and
+    /// therefore this row don't exist). Never fabricated client-side.
+    func fetchNutritionTargets() async throws -> NutritionTargets? {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        let path = "rest/v1/nutrition_targets?user_id=eq.\(userId)&select=daily_calories,daily_protein_g,daily_carbs_g,daily_fat_g,computed_at,basis&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([NutritionTargets].self, from: data)
+        return rows.first
+    }
+
+    /// Today's (or any date's) logged food entries, most recent first.
+    func fetchMealLogs(date: String) async throws -> [MealLogEntry] {
+        let path = "rest/v1/meal_log?date=eq.\(date)&select=id,date,label,calories,protein_g,carbs_g,fat_g,source,logged_at,score,rationale&order=logged_at.desc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([MealLogEntry].self, from: data)
+    }
+
+    /// `source` defaults to "manual" (typed numbers directly); pass
+    /// "text_ai" when the numbers came from a parseMealText(_:) estimate
+    /// the user reviewed/saved as-is or after editing -- both land in the
+    /// same table, "photo" is reserved for a future real meal-scan
+    /// feature. carbs/fat are optional (protein and calories are the two
+    /// numbers most people actually know off-hand); calories/protein are
+    /// required.
+    func logMeal(date: String, label: String?, calories: Int, proteinG: Int, carbsG: Int?, fatG: Int?, source: String = "manual") async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var body: [String: Any] = [
+            "user_id": userId,
+            "date": date,
+            "calories": calories,
+            "protein_g": proteinG,
+            "source": source,
+        ]
+        if let label, !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["label"] = label }
+        if let carbsG { body["carbs_g"] = carbsG }
+        if let fatG { body["fat_g"] = fatG }
+
+        var request = try await authorizedRequest(path: "rest/v1/meal_log", method: "POST")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    func deleteMealLog(id: String) async throws {
+        let request = try await authorizedRequest(path: "rest/v1/meal_log?id=eq.\(id)", method: "DELETE")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// Freeform "what did you eat" text -> an estimated calorie/macro
+    /// breakdown via Claude Haiku. Never writes anything itself -- the
+    /// caller shows the result back in LogMealView's normal editable
+    /// fields for review before saving via logMeal(...).
+    func parseMealText(_ text: String) async throws -> MealEstimate {
+        var request = try await authorizedRequest(path: "functions/v1/parse-meal-text", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode(MealEstimate.self, from: data)
+    }
+
+    /// Scores an already-logged meal (rate-meal, Claude Haiku) against
+    /// the user's real nutrition targets/goal direction and writes the
+    /// result back onto the row server-side -- this call both rates AND
+    /// persists in one round trip, so the caller only needs the return
+    /// value to update its own local copy of the entry.
+    func rateMeal(id: String) async throws -> (score: Int, rationale: String) {
+        var request = try await authorizedRequest(path: "functions/v1/rate-meal", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["mealLogId": id])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Response: Decodable { let score: Int; let rationale: String }
+        let decoded = try JSONDecoder().decode(Response.self, from: data)
+        return (decoded.score, decoded.rationale)
     }
 
     // MARK: - daily_recommendation
@@ -783,6 +950,11 @@ final class SupabaseClient {
     /// when neither is available or nothing matches -- an honest "no media"
     /// state, not a fuzzy best-effort match.
     func fetchExerciseLibraryEntry(libraryId: String?, name: String) async throws -> ExerciseLibraryEntry? {
+        let cacheKey = Self.exerciseLibraryCacheKey(libraryId: libraryId, name: name)
+        if let cached = await ExerciseLibraryCache.shared.cached(for: cacheKey) {
+            return cached
+        }
+
         let path: String
         if let libraryId, !libraryId.isEmpty {
             let encodedId = libraryId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? libraryId
@@ -795,6 +967,9 @@ final class SupabaseClient {
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([ExerciseLibraryEntry].self, from: data)
+        if let entry = rows.first {
+            await ExerciseLibraryCache.shared.store(entry, for: cacheKey)
+        }
         return rows.first
     }
 
@@ -1104,6 +1279,27 @@ final class SupabaseClient {
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
+    }
+
+    struct ConnectionStatus: Decodable {
+        struct Provider: Decodable {
+            let connected: Bool
+            let needsReconnect: Bool
+        }
+        let whoop: Provider
+        let oura: Provider
+    }
+
+    /// Server-verified Whoop/Oura connection health -- distinct from
+    /// AppState.connectedProviders, which is a local cache set once at
+    /// connect time and never re-verified. A refresh-token failure
+    /// server-side (revoked access, expired refresh token) has no other
+    /// way to reach the client; see fetch-connection-status.
+    func fetchConnectionStatus() async throws -> ConnectionStatus {
+        let request = try await authorizedRequest(path: "functions/v1/fetch-connection-status", method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode(ConnectionStatus.self, from: data)
     }
 
     /// Backfills the last N days right after a wearable is connected, so

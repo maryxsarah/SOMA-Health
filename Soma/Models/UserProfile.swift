@@ -137,10 +137,49 @@ struct UserProfile: Codable, Equatable {
     /// not through the general profile save() flow, hence the defaults.
     var goalBodyPhotoPath: String? = nil
     var currentBodyPhotoPath: String? = nil
+    /// Storage path (not the image itself) for the profile picture --
+    /// managed only via SupabaseClient's uploadAvatar/deleteAvatar, same
+    /// "not through the general save() flow" reasoning as the body-photo
+    /// paths above.
+    var avatarPhotoPath: String? = nil
     /// Read-only here (collected at onboarding; updateProfile never writes
     /// them) -- feeds the dashboard's Body section.
     var weightKg: Double? = nil
     var desiredWeightKg: Double? = nil
+    /// Editable via the general save() flow, unlike weightKg/desiredWeightKg
+    /// above -- height doesn't change often, but there's no reason to lock
+    /// it the way the dashboard's weight-progress fields are locked.
+    var heightCm: Double? = nil
+    var journeyStage: JourneyStage? = nil
+    var blockersNotes: String? = nil
+    /// Read-only (set at onboarding, never edited here) -- "yyyy-MM-dd".
+    /// Exists on this model ONLY for the Goal Body adult-only gate
+    /// (bodyPhotosEditor); every other date-of-birth use is server-side.
+    var dateOfBirth: String? = nil
+    /// Read-only -- written at onboarding (saveOnboardingSurvey), never
+    /// read back until the goal-progress bar needed it alongside
+    /// weightKg/desiredWeightKg to recompute GoalPace.estimatedMonths.
+    var goalPace: GoalPace? = nil
+    /// Read-only -- the AI's own comparison of the user's goal/current
+    /// photos (analyze-body-photo). Shown directly on the Progress screen
+    /// as of the product-owner decision reversing this feature's original
+    /// "never shown to the user" posture -- see
+    /// Config.enableBodyPhotoVisionAnalysis's doc comment for the history.
+    /// Nil = never analyzed (e.g. only one photo set so far); PostgREST
+    /// sends the column as JSON `null` in that case, not an absent key, so
+    /// this must be Optional -- a non-optional array default only covers
+    /// a missing KEY, not a present-but-null value (which is the common
+    /// case here for anyone not yet analyzed).
+    var bodyPhotoEmphasisTags: [GoalTag]? = nil
+    var trainingEmphasis: TrainingEmphasis? = nil
+    /// Read-only, server-assigned at account creation -- the journey
+    /// "start date" the goal-progress bar counts elapsed days from. Not a
+    /// plan-start date (there isn't a separate one), but close enough: for
+    /// the vast majority of users onboarding happens in one sitting.
+    /// Raw ISO8601 wire string, same reason as dateOfBirth above (this
+    /// model is decoded with a plain JSONDecoder that has no date
+    /// strategy configured -- parsed on demand where actually needed).
+    var createdAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
@@ -161,8 +200,17 @@ struct UserProfile: Codable, Equatable {
         case city
         case goalBodyPhotoPath = "goal_body_photo_path"
         case currentBodyPhotoPath = "current_body_photo_path"
+        case avatarPhotoPath = "avatar_photo_path"
         case weightKg = "weight_kg"
         case desiredWeightKg = "desired_weight_kg"
+        case heightCm = "height_cm"
+        case journeyStage = "journey_stage"
+        case blockersNotes = "blockers_notes"
+        case dateOfBirth = "date_of_birth"
+        case goalPace = "goal_pace"
+        case createdAt = "created_at"
+        case bodyPhotoEmphasisTags = "body_photo_emphasis_tags"
+        case trainingEmphasis = "training_emphasis"
     }
 
     /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.

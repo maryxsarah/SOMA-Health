@@ -80,6 +80,13 @@ final class BackgroundTaskManager {
                 message: recommendation.message
             )
             NotificationManager.shared.markSentToday()
+            // Best-effort: the movement/evening-reminder/progress-checkin
+            // trio for later today. Safe to attempt even if the recommendation
+            // call above is what actually failed in a partial-failure case --
+            // there's no dependency between them, so this still runs via the
+            // guard structure only when the recommendation succeeded, but
+            // failure here never rolls back what already succeeded above.
+            await NotificationManager.shared.scheduleTodaysEngagementNotifications()
         } catch {
             // Best-effort: tomorrow's fallback (or a manual "Check now" tap
             // on Home) will retry. Nothing to surface to the user here --

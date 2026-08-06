@@ -777,6 +777,11 @@ struct RecommendationDetailView: View {
                 endedAt: planStartedAt != nil ? Date() : nil
             )
             loggedTitlesToday.insert(selectedTitle)
+            // The evening reminder exists to nudge an UNlogged workout --
+            // once one's actually done, cancel today's (only today's, the
+            // identifier is day-stamped) pending request rather than
+            // nagging someone who already finished.
+            NotificationManager.shared.cancelEveningWorkoutReminder(for: recommendation.date)
             if !trimmedFeedback.isEmpty {
                 await fetchAddonSuggestions(feedback: trimmedFeedback, title: selectedTitle, bodyPart: selectedBodyPart)
             }

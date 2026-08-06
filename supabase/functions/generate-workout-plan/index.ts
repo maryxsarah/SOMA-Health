@@ -39,7 +39,11 @@ import { describeSexAwareConsiderations } from "./sexAwareGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
+import type { TrainingEmphasis } from "../_shared/nutritionTargets.ts";
+import { findDuplicateExerciseNames } from "./planValidation.ts";
+import { buildLoadGuidance } from "./loadGuidance.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
+import { resolveFreeTextEquipment } from "../_shared/equipment.ts";
 import { computeEtaShift, conceptFromRow, decideGoalWork, decideSafetyPause, deriveEtaInputs, derivePhase, type GoalBlockHistoryEntry, type GoalWorkBlock, type GoalWorkConcept } from "./goalWork.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
@@ -140,6 +144,9 @@ interface DurationRange {
 interface UserRow {
   goals: string[] | null;
   equipment: string[] | null;
+  /// Onboarding's "what else do you have access to?" free text -- see
+  /// resolveFreeTextEquipment for why this is now actually read.
+  other_equipment_notes: string | null;
   injury_tags: string[] | null;
   injury_notes: string | null;
   injury_severity: Record<string, string> | null;
@@ -158,6 +165,12 @@ interface UserRow {
   blockers: string[] | null;
   accomplishment_goals: string[] | null;
   desired_weight_kg: number | null;
+  /// Silent output of analyze-body-photo's goal/current comparison (same
+  /// source as body_photo_emphasis_tags above) -- a coarser directional
+  /// read (cut/recomp/bulk/maintain) than the tag set, used here to bias
+  /// finisher selection and to add one more prompt line. Kept separate
+  /// from `goals`, same reasoning as body_photo_emphasis_tags.
+  training_emphasis: TrainingEmphasis | null;
 }
 
 interface SnapshotRow {
@@ -334,7 +347,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg")
+      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -392,6 +405,7 @@ Deno.serve(async (req: Request) => {
       finisherExcludedKeywords,
       (recentLogs ?? []) as WorkoutLogRow[],
       addDays(date, -1),
+      (userRow as UserRow | null)?.training_emphasis ?? null,
     );
 
     // Same closed-vocabulary keyword exclusions used to keep the finisher
@@ -458,6 +472,19 @@ Deno.serve(async (req: Request) => {
     // Goal-mapped exercise ids join the closed vocabulary inside, under
     // the SAME equipment/level filters and BEFORE the exclusion drop --
     // a goal never smuggles in gear the user lacks or an unsafe name.
+    //
+    // Free-text equipment (BUG report: "dumbbells, a workout bench, a
+    // yoga mat and a treadmill" typed in onboarding's "what else do you
+    // have access to?" field was captured and saved, but never read by
+    // any generation path at all) -- now parsed and unioned into the
+    // structured EquipmentTag resolution, and specifically unlocks a
+    // small cardio slice (see WARMUP_CARDIO_LIMIT) so warm-up can
+    // actually name a real treadmill/bike/etc item when the user has one.
+    const freeTextEquipment = resolveFreeTextEquipment((userRow as UserRow | null)?.other_equipment_notes ?? null);
+    // Same suggestion title picked in the last 2 days -- BUG report: the
+    // same workout, day after day. Soft-excluded, see
+    // MIN_CANDIDATES_AFTER_FRESHNESS_EXCLUSION.
+    const recentExerciseNames = await fetchRecentExerciseNames(supabase, userId, selection.title, date);
     const candidateExerciseNames = await fetchCandidateExerciseNames(
       supabase,
       resolvedBodyPart,
@@ -465,6 +492,9 @@ Deno.serve(async (req: Request) => {
       goalExcludedKeywords,
       (userRow as UserRow | null)?.experience_level ?? null,
       goalDecision?.kind === "preset" ? goalExerciseIds : [],
+      freeTextEquipment.libraryEquipment,
+      freeTextEquipment.unlocksCardio,
+      recentExerciseNames,
     );
     const workoutSchema = buildWorkoutSchema(candidateExerciseNames);
 
@@ -495,6 +525,23 @@ Deno.serve(async (req: Request) => {
       if (Math.abs(retryDuration - targetMid) < Math.abs(actualDurationMinutes - targetMid)) {
         plan = retryPlan;
         actualDurationMinutes = retryDuration;
+      }
+    }
+
+    // One bounded retry when the same specific exercise was named more
+    // than once across the session (BUG report: "Barbell Squat" 4 times
+    // in one plan) -- the prompt already instructs against this, but a
+    // prompt instruction is a request, not a guarantee, so this is the
+    // deterministic backstop. If the retry doesn't fully fix it, keep
+    // whichever attempt had fewer duplicates rather than silently
+    // pretending the first (possibly worse) one was fine.
+    const duplicateNames = findDuplicateExerciseNames(plan);
+    if (duplicateNames.length > 0) {
+      const dedupPrompt = `${prompt}\n\nYour previous attempt used the exact same exercise more than once in this session: ${duplicateNames.join(", ")}. Every named exercise must appear AT MOST ONCE across the whole session (warm_up + every block + cool_down combined) -- replace each repeat with a different candidate exercise that targets a different specific muscle or movement pattern within the same body part, exactly as instructed above.`;
+      const dedupRetryPlan = await callClaude(dedupPrompt, workoutSchema);
+      if (findDuplicateExerciseNames(dedupRetryPlan).length < duplicateNames.length) {
+        plan = dedupRetryPlan;
+        actualDurationMinutes = computeTotalDuration(plan);
       }
     }
 
@@ -539,21 +586,6 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-// DRAFT -- NOT reviewed by a certified S&C professional. Rough NSCA/ACSM-
-// style working-set load bands (fraction of bodyweight) per major lift
-// pattern x experience level. Passed into the prompt as guideline RANGES
-// the model should stay within, not parsed/clamped from its free-text
-// weight_guidance after the fact (that parsing would be unreliable).
-// Needs expert sign-off before shipping, same as templates.ts's own
-// equipment-coverage disclaimer.
-const LOAD_FRACTION_OF_BODYWEIGHT: Record<string, Record<string, [number, number]>> = {
-  squat_pattern: { newbie: [0.3, 0.6], moderate: [0.5, 1.0], advanced: [0.75, 1.5] },
-  hinge_pattern: { newbie: [0.4, 0.7], moderate: [0.6, 1.2], advanced: [0.9, 1.75] },
-  overhead_press: { newbie: [0.15, 0.3], moderate: [0.25, 0.45], advanced: [0.35, 0.6] },
-  horizontal_press: { newbie: [0.25, 0.5], moderate: [0.4, 0.7], advanced: [0.55, 1.0] },
-  row_pull: { newbie: [0.2, 0.4], moderate: [0.35, 0.6], advanced: [0.5, 0.85] },
-};
-
 /// Simple year-diff -- good enough for the general caution language this
 /// feeds (age is passed as context, not a numeric load formula: there's no
 /// citable evidence-based age->load table to encode as fact here).
@@ -565,21 +597,6 @@ function ageFromDOB(dob: string): number {
     (now.getUTCMonth() === birth.getUTCMonth() && now.getUTCDate() >= birth.getUTCDate());
   if (!hasHadBirthdayThisYear) age -= 1;
   return age;
-}
-
-/// Guideline load ranges for today's experience level, as a prompt-ready
-/// paragraph -- omitted entirely when bodyweight is unknown rather than
-/// guessing a number.
-function buildLoadGuidance(weightKg: number | null, experience: string): string {
-  if (weightKg === null) {
-    return "The user's bodyweight isn't on file -- for any barbell/dumbbell/kettlebell working set, use conservative, experience-appropriate language ('start light and build') instead of a specific number.";
-  }
-  const level = LOAD_FRACTION_OF_BODYWEIGHT.squat_pattern[experience] ? experience : "moderate";
-  const range = (pattern: string) => {
-    const [low, high] = LOAD_FRACTION_OF_BODYWEIGHT[pattern][level];
-    return `${(low * weightKg).toFixed(0)}-${(high * weightKg).toFixed(0)}kg`;
-  };
-  return `The user weighs ${weightKg}kg, ${experience} experience. For any working set targeting these patterns, keep weight_guidance's suggested load within these guideline ranges once warmed up (not a strict per-rep ceiling, use professional judgment for warm-ups): squat pattern ${range("squat_pattern")}; hinge pattern (deadlift-style) ${range("hinge_pattern")}; overhead press ${range("overhead_press")}; horizontal press (bench/push-up-with-added-load) ${range("horizontal_press")}; row/pull ${range("row_pull")}.`;
 }
 
 /// Mirrors Soma/Models/OnboardingSurveyModels.swift's WorkoutFrequency enum.
@@ -671,6 +688,16 @@ function buildPrompt(
   // X". Only appended when non-empty.
   const bodyPhotoEmphasisLine = userRow?.body_photo_emphasis_tags?.length
     ? `\nA comparison of the user's current and goal-body photos additionally suggests emphasizing: ${userRow.body_photo_emphasis_tags.join(", ")}. Treat this as a secondary signal alongside -- not a replacement for -- the stated goals above.`
+    : "";
+  // Same source, coarser reading (see UserRow.training_emphasis) -- nudges
+  // exercise SELECTION/composition (e.g. more conditioning work on a cut,
+  // more heavy compound work on a bulk), same secondary-signal framing as
+  // bodyPhotoEmphasisLine above. The finisher's own modality is already
+  // handled deterministically before this prompt exists (see
+  // decideFinisher's trainingEmphasis param) -- this line is for the rest
+  // of the session's composition, not a duplicate instruction for that.
+  const trainingEmphasisLine = userRow?.training_emphasis
+    ? `\nThe same photo comparison also suggests an overall training direction of "${userRow.training_emphasis}" (cut = lean out/reduce fat, bulk = add size, recomp = both/composition change, maintain = little change wanted). Let this gently inform today's exercise mix alongside the goals and emphasis above -- e.g. a "cut" direction favors a bit more conditioning/metabolic work where the day's structure allows it; a "bulk" direction favors sticking with heavier compound work. Never let this override the day's intensity category, injury exclusions, or equipment above.`
     : "";
   const equipment = userRow?.equipment?.length
     ? userRow.equipment.join(", ")
@@ -770,7 +797,7 @@ The user has already chosen today's workout from the app's suggestion list: "${s
 
 Today's training intensity (already decided by the app's recovery-based rules -- do not override it): ${category}.
 Today's actual health data driving that intensity: ${healthLines}
-User's goals: ${goals}.${bodyPhotoEmphasisLine}
+User's goals: ${goals}.${bodyPhotoEmphasisLine}${trainingEmphasisLine}
 Training experience: ${experience}. ${experienceGuidance}
 Available equipment: ${equipment}.
 Noted injuries: ${injuries}.${injuryNotes}
@@ -793,8 +820,8 @@ ${
       : ""
   }
 Return the full session as:
-- warm_up: 2-3 items that specifically prepare the body for THIS workout and adjust to today's health data above (e.g. lighter/shorter if recovery or sleep was poor) -- concrete named items like "5 min incline treadmill walk", "2x10 arm circles", "shoulder rolls", not a generic "warm up" placeholder.
-- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). ${finisherInstruction}${goalInstruction}
+- warm_up: 2-3 items that specifically prepare the body for THIS workout and adjust to today's health data above (e.g. lighter/shorter if recovery or sleep was poor) -- concrete named items like "5 min incline treadmill walk", "2x10 arm circles", "shoulder rolls", not a generic "warm up" placeholder. If the user has cardio equipment (treadmill, bike, etc. -- see equipment above) and today's intensity allows it, a brief cardio warm-up item is a great choice, not just static stretches.
+- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). VARIETY IS REQUIRED: use each specific named exercise AT MOST ONCE across the ENTIRE session (warm_up + every block + cool_down combined) -- never repeat the same exercise in multiple blocks or rounds of a superset. Like a real strength coach programming a session, deliberately spread the work across different specific muscles within the target body part (e.g. a lower-body day should mix quad-, hamstring-, glute-, and calf-dominant movements, not four variations of the same squat pattern) and different movement patterns (push/pull/hinge/squat/carry/isolation as relevant), not near-duplicates of one exercise. ${finisherInstruction}${goalInstruction}
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
 For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, and instructions (2-3 sentences, plain and easy to follow, describing exact form/technique). Also give a one-line "focus" summarizing today's session.`;
@@ -1190,6 +1217,41 @@ async function fetchRecentGoalBlocks(supabase: any, userId: string, date: string
   if (error || !data) return [];
   const meta = (data.plan as { goal_block?: { text?: string } } | null)?.goal_block;
   return meta?.text ? [{ date: yesterday, text: meta.text }] : [];
+}
+
+/// Main-block exercise names from the last 2 days' plans for this SAME
+/// suggestion title (e.g. "Leg Day" again) -- soft-excluded from today's
+/// candidate pool so picking the same suggestion two days running doesn't
+/// hand back an identical (or near-identical) exercise list (BUG report:
+/// the same workout, day after day). Deliberately scoped to `selected_title`
+/// rather than a stored body-part column (ai_workout_plan doesn't have
+/// one) -- matching the exact suggestion the user picked is both simpler
+/// and a closer match to the actual reported symptom than trying to infer
+/// body-part equivalence some other way.
+///
+/// Deliberately warm_up/cool_down are NOT included -- repeating the same
+/// warm-up stretch or mobility drill day to day is normal and often
+/// correct, unlike repeating the same main lift.
+// deno-lint-ignore no-explicit-any
+async function fetchRecentExerciseNames(supabase: any, userId: string, title: string, date: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("ai_workout_plan")
+    .select("plan")
+    .eq("user_id", userId)
+    .eq("selected_title", title)
+    .gte("date", addDays(date, -2))
+    .lt("date", date)
+    .limit(3);
+  if (error || !data) return [];
+  const names = new Set<string>();
+  for (const row of data as { plan: { blocks?: { exercises?: { name?: string }[] }[] } | null }[]) {
+    for (const block of row.plan?.blocks ?? []) {
+      for (const exercise of block.exercises ?? []) {
+        if (exercise.name) names.add(exercise.name);
+      }
+    }
+  }
+  return Array.from(names);
 }
 
 /// The coach's session as a plan block. workout_text lands in instructions

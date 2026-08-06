@@ -23,6 +23,15 @@ final class AppState: ObservableObject {
     @Published var onboardingComplete: Bool
     @Published var currentRecommendation: DailyRecommendation?
 
+    /// Providers whose stored refresh token failed server-side (revoked,
+    /// expired) -- distinct from `connectedProviders`, which is a local
+    /// cache set once at connect time and has no way to learn this on its
+    /// own. Not persisted: always re-fetched fresh via
+    /// SupabaseClient.fetchConnectionStatus() (see ProfileView), so it
+    /// can never show a stale "needs reconnect" state after the user has
+    /// already fixed it.
+    @Published var providersNeedingReconnect: Set<Provider> = []
+
     /// Referral-code bonus expiry, if any -- additive to (not a substitute
     /// for) an active StoreKit subscription. `nil` or in the past means no
     /// bonus is active. Combined with SubscriptionManager.isSubscribed by
@@ -63,6 +72,10 @@ final class AppState: ObservableObject {
     func markProviderConnected(_ provider: Provider) {
         connectedProviders.insert(provider)
         UserDefaults.standard.set(connectedProviders.map(\.rawValue), forKey: Self.connectedProvidersKey)
+        // A fresh connect always clears any prior reconnect flag server-
+        // side (see store-wearable-token) -- mirror that immediately
+        // instead of waiting for the next fetchConnectionStatus() call.
+        providersNeedingReconnect.remove(provider)
     }
 
     func advanceToNotifications() {
