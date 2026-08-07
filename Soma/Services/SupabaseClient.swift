@@ -716,6 +716,49 @@ final class SupabaseClient {
         return (decoded.score, decoded.rationale)
     }
 
+    // MARK: - daily_mood
+
+    /// Plain read via RLS -- nil when the user hasn't checked in yet today.
+    func fetchTodaysMood(date: String) async throws -> DailyMoodEntry? {
+        let path = "rest/v1/daily_mood?date=eq.\(date)&select=date,rating,logged_at&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([DailyMoodEntry].self, from: data)
+        return rows.first
+    }
+
+    /// Feeds the Health Dashboard's mood trend -- ascending by date so
+    /// the chart draws left-to-right chronologically.
+    func fetchRecentMoods(days: Int = 30) async throws -> [DailyMoodEntry] {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        let end = Date()
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
+        let path = "rest/v1/daily_mood?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&select=date,rating,logged_at&order=date.asc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([DailyMoodEntry].self, from: data)
+    }
+
+    /// Upsert -- same "one row per day, re-tap to correct yourself"
+    /// posture as logging a workout is NOT (multiple workout_log rows
+    /// per day are fine), but a mood check-in is inherently a single
+    /// daily answer, so this replaces rather than adds.
+    func logMood(date: String, rating: Int) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/daily_mood", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId, "date": date, "rating": rating,
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
     // MARK: - daily_recommendation
 
     /// Plain read via RLS -- used by HomeView on appear so opening the app

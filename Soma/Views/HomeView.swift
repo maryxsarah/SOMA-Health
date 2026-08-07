@@ -22,6 +22,13 @@ struct HomeView: View {
     // suggestion titles to match a manually-logged activity against.
     @State private var showLogManualWorkout = false
     @State private var showManualWorkoutDetail = false
+
+    // Daily "how are you feeling?" check-in -- real feedback: "some
+    // human-level metric that the app optimizes ... showing that the
+    // metric improves with app usage." Trend view lives on the Health
+    // Dashboard's Overview tab; this card is just the daily capture.
+    @State private var todaysMood: DailyMoodEntry?
+    @State private var isSavingMood = false
     @State private var timelineEntries: [WorkoutTimelineEntry] = []
 
     @State private var showGymPhotoFlow = false
@@ -112,6 +119,8 @@ struct HomeView: View {
                     aiGeneratedWorkoutCard(todaysAIPlan)
                 }
 
+                moodCheckInRow
+
                 scanRow
 
                 goalProgressRow
@@ -139,6 +148,7 @@ struct HomeView: View {
             await loadWeeklyProgressAndStreak()
             await loadGoalBodyPhotoState()
             await loadNutritionState()
+            await loadTodaysMood()
         }
         .refreshable {
             await checkNow()
@@ -150,6 +160,7 @@ struct HomeView: View {
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
             await loadNutritionState()
+            await loadTodaysMood()
         }
         .sheet(isPresented: $showDetail, onDismiss: {
             Task {
@@ -714,6 +725,49 @@ struct HomeView: View {
         return .available
     }
 
+    /// Real feedback: "some human-level metric that the app optimizes ...
+    /// showing that the metric improves with app usage." Once answered,
+    /// collapses to a compact confirmation rather than staying an
+    /// always-visible 5-button row -- it's a one-tap daily habit, not a
+    /// permanent fixture competing with the actual workout content.
+    private var moodCheckInRow: some View {
+        CardView {
+            if let todaysMood, let rating = MoodRating(rawValue: todaysMood.rating) {
+                HStack(spacing: 10) {
+                    Text(rating.emoji)
+                        .font(.system(size: 22))
+                    Text("You're feeling \(rating.displayName.lowercased()) today")
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink2)
+                    Spacer()
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("How are you feeling today?")
+                        .font(.system(size: 14.5, weight: .semibold))
+                    HStack(spacing: 8) {
+                        ForEach(MoodRating.allCases) { rating in
+                            Button {
+                                Task { await logMood(rating) }
+                            } label: {
+                                VStack(spacing: 3) {
+                                    Text(rating.emoji)
+                                        .font(.system(size: 22))
+                                    Text(rating.displayName)
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .disabled(isSavingMood)
+            }
+        }
+    }
+
     @ViewBuilder
     private var scanRow: some View {
         switch scanState {
@@ -1071,6 +1125,22 @@ struct HomeView: View {
         nutritionTarget = target
         let entries = (try? await SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
         nutritionProgress = NutritionDayProgress.compute(entries: entries, target: target)
+    }
+
+    private func loadTodaysMood() async {
+        todaysMood = try? await SupabaseClient.shared.fetchTodaysMood(date: Self.todayDateString())
+    }
+
+    private func logMood(_ rating: MoodRating) async {
+        isSavingMood = true
+        defer { isSavingMood = false }
+        do {
+            try await SupabaseClient.shared.logMood(date: Self.todayDateString(), rating: rating.rawValue)
+            await loadTodaysMood()
+        } catch {
+            // Best-effort, silent -- the row of options just stays
+            // tappable so the user can try again.
+        }
     }
 
     /// Best-effort: no goal (or a failed fetch) simply means no goal row --
