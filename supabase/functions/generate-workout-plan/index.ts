@@ -35,7 +35,7 @@ import { describeContraindications, type InjurySeverityLevel } from "../_shared/
 import { describePregnancyGuidance } from "../_shared/pregnancyGuidance.ts";
 import { describeVolumeGuidance, type ExperienceLevel } from "../_shared/volumeLandmarks.ts";
 import { describeRirGuidance } from "./rirGuidance.ts";
-import { describeSexAwareConsiderations } from "./sexAwareGuidance.ts";
+import { describeSexAwareConsiderations, describeSexAwareGoalDoseConsideration } from "./sexAwareGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
@@ -495,6 +495,7 @@ Deno.serve(async (req: Request) => {
       freeTextEquipment.libraryEquipment,
       freeTextEquipment.unlocksCardio,
       recentExerciseNames,
+      freeTextEquipment.cardioLibraryEquipment,
     );
     const workoutSchema = buildWorkoutSchema(candidateExerciseNames);
 
@@ -539,9 +540,18 @@ Deno.serve(async (req: Request) => {
     if (duplicateNames.length > 0) {
       const dedupPrompt = `${prompt}\n\nYour previous attempt used the exact same exercise more than once in this session: ${duplicateNames.join(", ")}. Every named exercise must appear AT MOST ONCE across the whole session (warm_up + every block + cool_down combined) -- replace each repeat with a different candidate exercise that targets a different specific muscle or movement pattern within the same body part, exactly as instructed above.`;
       const dedupRetryPlan = await callClaude(dedupPrompt, workoutSchema);
-      if (findDuplicateExerciseNames(dedupRetryPlan).length < duplicateNames.length) {
+      const retryDuplicates = findDuplicateExerciseNames(dedupRetryPlan);
+      if (retryDuplicates.length < duplicateNames.length) {
         plan = dedupRetryPlan;
         actualDurationMinutes = computeTotalDuration(plan);
+      }
+      // Keep whichever attempt had fewer duplicates rather than silently
+      // pretending the first (possibly worse) one was fine -- log loud
+      // instead of failing the whole request, since an imperfect plan
+      // still beats no plan at all.
+      const remainingDuplicates = retryDuplicates.length < duplicateNames.length ? retryDuplicates : duplicateNames;
+      if (remainingDuplicates.length > 0) {
+        console.warn(`generate-workout-plan: plan still repeats exercises after retry: ${remainingDuplicates.join(", ")}`);
       }
     }
 
@@ -776,8 +786,9 @@ function buildPrompt(
 
   // Whether goal work appears, which concept, and its dose were already
   // decided deterministically (decideGoalWork) -- the model only words it.
+  const sexAwareGoalDoseLine = describeSexAwareGoalDoseConsideration(userRow?.sex ?? null);
   const goalDose = goalDecision !== null && goalDecision.kind === "preset"
-    ? `${goalDecision.concept.durationMinutesRange[0]}-${goalDecision.concept.durationMinutesRange[1]} min${goalDecision.concept.rpeTarget ? ` at ${goalDecision.concept.rpeTarget}` : ""}${goalDecision.concept.doseNotes ? `. Hard dose caps (never exceed): ${goalDecision.concept.doseNotes}` : ""}`
+    ? `${goalDecision.concept.durationMinutesRange[0]}-${goalDecision.concept.durationMinutesRange[1]} min${goalDecision.concept.rpeTarget ? ` at ${goalDecision.concept.rpeTarget}` : ""}${goalDecision.concept.doseNotes ? `. Hard dose caps (never exceed): ${goalDecision.concept.doseNotes}` : ""}${sexAwareGoalDoseLine ? ` ${sexAwareGoalDoseLine}` : ""}`
     : "";
   const goalInstruction = goalDecision === null
     ? ""

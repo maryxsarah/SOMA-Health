@@ -65,14 +65,54 @@ Deno.test("free-text parsing is punctuation/case-insensitive, same as normalizeE
   assert(items.has("kettlebells"));
   assert(items.has("resistance bands"));
   assert(items.has("pull-up bar"));
+  assertFalse(items.has("barbell"), "mentioning a pull-up bar must not also imply a barbell");
+});
+
+// REGRESSION: "chin up bar" is both an ALIASES key and on the
+// ambiguous-mask list (to stop bare "bar" matching "protein bar" etc.) --
+// a masking-order bug erased the phrase before its own alias lookup ran,
+// so it silently resolved to zero equipment.
+Deno.test("REGRESSION: 'chin up bar' resolves via its own alias, not masked away by itself", () => {
+  const items = parseFreeTextEquipment("I have a chin up bar at home");
+  assert(items.has("pull-up bar"));
+  assertFalse(items.has("barbell"), "mentioning a chin-up bar must not also imply a barbell");
 });
 
 Deno.test("resolveFreeTextEquipment maps to real exercise_library equipment values", () => {
   const result = resolveFreeTextEquipment("dumbbells, a workout bench, a yoga mat and a treadmill");
   assert(result.libraryEquipment.includes("dumbbell"));
   assert(result.libraryEquipment.includes("body only")); // from "yoga mat"
-  assert(result.libraryEquipment.includes("machine")); // from "treadmill"
   assertFalse(result.libraryEquipment.includes("barbell"));
+});
+
+Deno.test("REGRESSION: cardio-only equipment (treadmill) resolves separately, never into libraryEquipment", () => {
+  // "machine" also covers real strength machines (Leg Press) -- must stay
+  // out of the tier every exercise type draws from.
+  const result = resolveFreeTextEquipment("just a treadmill");
+  assertFalse(result.libraryEquipment.includes("machine"));
+  assert(result.cardioLibraryEquipment.includes("machine"));
+});
+
+// --- false-positive guards for bare single-word aliases (bar/rack/plates) ---
+// REGRESSION: unguarded substring matching falsely unlocked barbell exercises.
+
+Deno.test("REGRESSION: everyday food/kitchen words containing 'bar'/'rack'/'plates' never falsely unlock a barbell", () => {
+  const phrases = [
+    "just dumbbells and a protein bar for after",
+    "I keep a spice rack in the kitchen",
+    "we eat off paper plates most nights",
+    "grabbing a candy bar on the way home",
+    "granola bar in my gym bag",
+  ];
+  for (const text of phrases) {
+    const result = resolveFreeTextEquipment(text);
+    assertFalse(result.libraryEquipment.includes("barbell"), `"${text}" must not resolve to barbell`);
+  }
+});
+
+Deno.test("a bare 'bar' or 'rack' standing alone still resolves (not forbidden, just not assumed from unrelated phrases)", () => {
+  assert(resolveFreeTextEquipment("just a bar, nothing else").libraryEquipment.includes("barbell"));
+  assert(resolveFreeTextEquipment("I have a rack at home").libraryEquipment.includes("barbell"));
 });
 
 Deno.test("REGRESSION: treadmill/bike/rower/elliptical/jump-rope unlock cardio candidates; a bench alone does not", () => {

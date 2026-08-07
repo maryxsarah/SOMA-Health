@@ -164,6 +164,9 @@ export async function fetchCandidateExerciseNames(
   // so it's dropped entirely (see MIN_CANDIDATES_AFTER_FRESHNESS_EXCLUSION
   // below) rather than ever forcing a worse/unsafe fallback just for variety.
   recentlyUsedNames: string[] = [],
+  // Unioned only into the cardio-slice query below, never equipmentValues --
+  // these share the "machine" value real strength machines use.
+  extraCardioLibraryEquipment: string[] = [],
 ): Promise<string[]> {
   const muscles = BODY_PART_TO_MUSCLES[bodyPart] ?? [];
   const equipmentValues = Array.from(new Set([...resolveLibraryEquipment(equipment), ...extraLibraryEquipment]));
@@ -176,6 +179,10 @@ export async function fetchCandidateExerciseNames(
   // "skip the filter entirely" case.
   // deno-lint-ignore no-explicit-any
   const withEquipmentFilter = (query: any) => query.or(equipmentOrClause(equipmentValues));
+  // Cardio slice only -- see extraCardioLibraryEquipment param doc above.
+  const cardioEquipmentValues = Array.from(new Set([...equipmentValues, ...extraCardioLibraryEquipment]));
+  // deno-lint-ignore no-explicit-any
+  const withCardioEquipmentFilter = (query: any) => query.or(equipmentOrClause(cardioEquipmentValues));
   // Excluded from every tier below, same "assume the more restrictive
   // case by default" posture as equipment (assume you don't have gear you
   // didn't list) -- most users train alone, and a suggestion that needs a
@@ -294,7 +301,7 @@ export async function fetchCandidateExerciseNames(
   // would just be a smaller, redundant duplicate query.
   let cardioNames: string[] = [];
   if (unlockCardioCandidates && bodyPart !== "cardio" && bodyPart !== "recovery") {
-    const { data: cardioData } = await withEquipmentFilter(
+    const { data: cardioData } = await withCardioEquipmentFilter(
       withoutPartnerRequired(
         supabase
           .from("exercise_library")

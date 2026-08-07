@@ -112,6 +112,15 @@ export function normalizeEquipment(input: string[]): Set<string> {
   return out;
 }
 
+/// "bar"/"rack"/"plates" are real synonyms but also common everyday words
+/// (protein bar, spice rack) -- masked out before the single-word alias pass.
+const AMBIGUOUS_ALIAS_MASK_PHRASES = [
+  "pull up bar", "chin up bar", "dip bar",
+  "protein bar", "candy bar", "granola bar", "chocolate bar", "cereal bar", "snack bar", "energy bar",
+  "spice rack", "shoe rack", "coat rack", "towel rack", "wine rack", "drying rack", "bike rack", "roof rack",
+  "paper plate", "license plate", "hot plate", "number plate",
+];
+
 /// Scans a full free-text sentence for known vocabulary/alias PHRASES as
 /// substrings, rather than expecting each array element to already be a
 /// clean discrete term the way normalizeEquipment does (that function
@@ -129,8 +138,24 @@ export function parseFreeTextEquipment(text: string): Set<EquipmentItem> {
   for (const item of EQUIPMENT_VOCABULARY) {
     if (canonicalText.includes(` ${canonical(item)} `)) out.add(item);
   }
+  // Multi-word aliases are inherently unambiguous ("chin up bar" can't be
+  // mistaken for "protein bar") -- scan them against the real text, before
+  // masking, since some (like "chin up bar") are themselves on the
+  // ambiguous-mask list below and would otherwise be erased before their
+  // own lookup runs.
   for (const [alias, target] of Object.entries(ALIASES)) {
+    if (!canonical(alias).includes(" ")) continue;
     if (canonicalText.includes(` ${canonical(alias)} `)) out.add(target as EquipmentItem);
+  }
+  // Single-word aliases (bar/rack/plates/...) only scan the masked text --
+  // see AMBIGUOUS_ALIAS_MASK_PHRASES.
+  let maskedForAliases = canonicalText;
+  for (const phrase of AMBIGUOUS_ALIAS_MASK_PHRASES) {
+    maskedForAliases = maskedForAliases.split(` ${canonical(phrase)} `).join(" ");
+  }
+  for (const [alias, target] of Object.entries(ALIASES)) {
+    if (canonical(alias).includes(" ")) continue;
+    if (maskedForAliases.includes(` ${canonical(alias)} `)) out.add(target as EquipmentItem);
   }
   return out;
 }
@@ -182,8 +207,11 @@ const CARDIO_UNLOCKING_ITEMS: ReadonlySet<EquipmentItem> = new Set([
 ]);
 
 export interface FreeTextEquipmentResolution {
-  /// exercise_library.equipment values to union into the candidate filter.
+  /// Values to union into the candidate filter for every tier.
   libraryEquipment: string[];
+  /// Cardio-only items -- kept separate since they share the "machine" value
+  /// with strength machines; only apply to the cardio query tier.
+  cardioLibraryEquipment: string[];
   /// True if anything parsed out of the free text should unlock cardio
   /// candidates regardless of today's body-part focus.
   unlocksCardio: boolean;
@@ -193,14 +221,16 @@ export interface FreeTextEquipmentResolution {
 /// free text, maps to real exercise_library equipment values, and flags
 /// whether cardio should be unlocked -- all in one deterministic pass.
 export function resolveFreeTextEquipment(text: string | null | undefined): FreeTextEquipmentResolution {
-  if (!text || text.trim().length === 0) return { libraryEquipment: [], unlocksCardio: false };
+  if (!text || text.trim().length === 0) return { libraryEquipment: [], cardioLibraryEquipment: [], unlocksCardio: false };
   const items = parseFreeTextEquipment(text);
   const libraryEquipment = new Set<string>();
+  const cardioLibraryEquipment = new Set<string>();
   let unlocksCardio = false;
   for (const item of items) {
     const mapped = VOCABULARY_TO_LIBRARY_EQUIPMENT[item];
-    if (mapped) libraryEquipment.add(mapped);
-    if (CARDIO_UNLOCKING_ITEMS.has(item)) unlocksCardio = true;
+    const isCardioOnly = CARDIO_UNLOCKING_ITEMS.has(item);
+    if (mapped) (isCardioOnly ? cardioLibraryEquipment : libraryEquipment).add(mapped);
+    if (isCardioOnly) unlocksCardio = true;
   }
-  return { libraryEquipment: Array.from(libraryEquipment), unlocksCardio };
+  return { libraryEquipment: Array.from(libraryEquipment), cardioLibraryEquipment: Array.from(cardioLibraryEquipment), unlocksCardio };
 }

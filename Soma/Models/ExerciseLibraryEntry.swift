@@ -18,6 +18,11 @@ struct ExerciseLibraryEntry: Decodable, Identifiable {
     let instructions: [String]
     let category: String?
     let imagePaths: [String]
+    /// Non-nil only for the handful of rows sourced under an attribution-
+    /// required license (e.g. CC BY) instead of the bulk Free Exercise DB
+    /// import (public domain, no credit needed) -- shown near the photo
+    /// when present, per the license's own terms.
+    let imageCredit: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, force, level, mechanic, equipment, category
@@ -25,6 +30,7 @@ struct ExerciseLibraryEntry: Decodable, Identifiable {
         case secondaryMuscles = "secondary_muscles"
         case instructions = "instructions"
         case imagePaths = "image_paths"
+        case imageCredit = "image_credit"
     }
 
     /// Public storage URLs (exercise-media is a public bucket -- generic

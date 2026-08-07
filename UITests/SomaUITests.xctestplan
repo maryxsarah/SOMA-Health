@@ -1,0 +1,26 @@
+{
+  "configurations" : [
+    {
+      "id" : "6E1F2A34-9C55-4A8B-B1D0-3A7E52C90001",
+      "name" : "Default",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "preferredScreenCaptureFormat" : "screenshots",
+    "systemAttachmentLifetime" : "deleteOnSuccess",
+    "uiTestingScreenshotsLifetime" : "deleteOnSuccess"
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:Soma.xcodeproj",
+        "identifier" : "SomaUITests",
+        "name" : "SomaUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

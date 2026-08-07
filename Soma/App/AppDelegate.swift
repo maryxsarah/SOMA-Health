@@ -52,7 +52,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
         // Re-arm Trigger A (HealthKit observer) on every launch if the
         // user previously connected Apple Health and is still signed in.
-        if HealthKitManager.isAvailable, SupabaseClient.shared.isSignedIn {
+        // Not under UI-test fixtures: the observer's wake path fires real
+        // HealthKit work the stubbed journeys never need.
+        if HealthKitManager.isAvailable, SupabaseClient.shared.isSignedIn, !UITestSupport.isActive {
             HealthKitManager.shared.startObserving {
                 Task {
                     await Self.handleWakeTrigger()

@@ -50,7 +50,7 @@ struct BodyPhotosStepView: View {
 
             Spacer()
 
-            PillButton(title: "Continue", action: onContinue)
+            PillButton(title: goalPhoto == nil && currentPhoto == nil ? "Skip" : "Continue", action: onContinue)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }

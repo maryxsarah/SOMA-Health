@@ -44,6 +44,9 @@ enum SportGoalKind: String, Codable {
 /// mapped to an honest gain range and horizon. All fields lenient.
 struct SportGoalTargetBand: Codable, Hashable {
     var label: String?
+    /// Presentational identity for this band (e.g. "Foundation Jump Block") --
+    /// distinct from `label`, which is the machine band-key lookup value.
+    var programName: String?
     var min: Double?
     var max: Double?
     var sessionsMin: Int?
@@ -55,6 +58,7 @@ struct SportGoalTargetBand: Codable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case label, min, max
+        case programName = "program_name"
         case sessionsMin = "sessions_min"
         case sessionsMax = "sessions_max"
         case gainLow = "gain_low"
@@ -68,6 +72,7 @@ struct SportGoalTargetBand: Codable, Hashable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         label = try? c.decodeIfPresent(String.self, forKey: .label)
+        programName = try? c.decodeIfPresent(String.self, forKey: .programName)
         min = try? c.decodeIfPresent(Double.self, forKey: .min)
         max = try? c.decodeIfPresent(Double.self, forKey: .max)
         sessionsMin = try? c.decodeIfPresent(Int.self, forKey: .sessionsMin)
@@ -83,6 +88,7 @@ struct SportGoalTargetBand: Codable, Hashable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(label, forKey: .label)
+        try c.encodeIfPresent(programName, forKey: .programName)
         try c.encodeIfPresent(min, forKey: .min)
         try c.encodeIfPresent(max, forKey: .max)
         try c.encodeIfPresent(sessionsMin, forKey: .sessionsMin)
@@ -353,6 +359,9 @@ struct UserGoal: Codable, Identifiable, Hashable {
     let targetText: String?
     let targetLow: Double?
     let targetHigh: Double?
+    /// Snapshotted at creation from the matched band's program_name --
+    /// never re-read from the live catalog after that (see targetLow/High).
+    let programName: String?
     let etaStart: String?
     let etaEnd: String?
     let phase: String?
@@ -386,6 +395,7 @@ struct UserGoal: Codable, Identifiable, Hashable {
         case targetText = "target_text"
         case targetLow = "target_low"
         case targetHigh = "target_high"
+        case programName = "program_name"
         case etaStart = "eta_start"
         case etaEnd = "eta_end"
         case pauseReason = "pause_reason"
@@ -420,6 +430,7 @@ struct UserGoal: Codable, Identifiable, Hashable {
         targetText = try? c.decodeIfPresent(String.self, forKey: .targetText)
         targetLow = try? c.decodeIfPresent(Double.self, forKey: .targetLow)
         targetHigh = try? c.decodeIfPresent(Double.self, forKey: .targetHigh)
+        programName = try? c.decodeIfPresent(String.self, forKey: .programName)
         etaStart = try? c.decodeIfPresent(String.self, forKey: .etaStart)
         etaEnd = try? c.decodeIfPresent(String.self, forKey: .etaEnd)
         phase = try? c.decodeIfPresent(String.self, forKey: .phase)
@@ -666,6 +677,13 @@ enum SportGoalFormat {
     static func shortDate(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "MMM d"
+        return f.string(from: date)
+    }
+
+    /// "Mon 12" -- for a short list of upcoming dates.
+    static func weekdayShort(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEE d"
         return f.string(from: date)
     }
 

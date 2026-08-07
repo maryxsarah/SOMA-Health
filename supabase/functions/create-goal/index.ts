@@ -158,6 +158,7 @@ Deno.serve(async (req: Request) => {
           target_high: targetKind === "metric" ? num("gain_high") : null,
           eta_start: weeksLow !== null ? addDays(today, weeksLow * 7) : null,
           eta_end: weeksHigh !== null ? addDays(today, weeksHigh * 7) : null,
+          program_name: typeof band["program_name"] === "string" ? band["program_name"] as string : null,
         };
       }
     } else {

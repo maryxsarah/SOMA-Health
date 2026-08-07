@@ -266,7 +266,7 @@ struct NutritionView: View {
         for entry in entries where entry.score == nil && !ratingInFlight.contains(entry.id) {
             ratingInFlight.insert(entry.id)
             Task {
-                if let result = try? await SupabaseClient.shared.rateMeal(id: entry.id),
+                if let result = try? await MealRatingCoordinator.shared.rate(id: entry.id),
                    let index = entries.firstIndex(where: { $0.id == entry.id }) {
                     entries[index].score = result.score
                     entries[index].rationale = result.rationale

@@ -200,17 +200,28 @@ struct GoalBodyProgressView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Day \(progress.daysElapsed + 1) of your journey")
                     .font(.subheadline.bold())
-                ProgressView(value: progress.fraction)
-                    .tint(SomaTokens.accent)
-                Text(
-                    progress.fraction >= 1.0
-                        ? "Past your estimated ~\(progress.estimatedTotalDays / 30)-month timeline -- steady progress still counts."
-                        : "Roughly \(progress.estimatedTotalDays / 30) months to your goal at your chosen pace."
-                )
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                if progress.hasReliableEstimate {
+                    ProgressView(value: progress.fraction)
+                        .tint(SomaTokens.accent)
+                }
+                Text(estimateLine(progress))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// A weight target barely different from today's can't honestly promise
+    /// a timeline for a goal photo showing a much bigger change.
+    private func estimateLine(_ progress: GoalJourneyProgress) -> String {
+        guard progress.hasReliableEstimate else {
+            return "Your target weight doesn't match your goal photo yet -- update it in Settings for a real estimate."
+        }
+        let months = progress.estimatedTotalDays / 30
+        let monthsText = months == 1 ? "1 month" : "\(months) months"
+        return progress.fraction >= 1.0
+            ? "Past your estimated ~\(monthsText) timeline -- steady progress still counts."
+            : "Roughly \(monthsText) to your goal at your chosen pace."
     }
 
     // MARK: - Insights (AI photo comparison, shown directly per product decision)

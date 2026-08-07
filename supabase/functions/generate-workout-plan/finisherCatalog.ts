@@ -116,15 +116,14 @@ function isFinisherSafeGivenInjuries(finisher: FinisherDefinition, excludedKeywo
   return !excludedKeywords.some((kw) => haystack.includes(kw.toLowerCase()));
 }
 
-/// True if yesterday's logged workout was itself a push_hard day targeting
-/// the SAME focus area as this finisher -- avoids stacking two max-effort
-/// sessions on the same muscle group back to back.
+/// True if yesterday's push_hard day targeted the same muscle group as today.
+/// Takes the real body part, not the finisher's own (possibly cut-redirected) focusArea.
 function conflictsWithRecentSplit(
-  finisher: FinisherDefinition,
+  bodyPart: string,
   recentLogs: { date: string; body_part: string; category: string }[],
   yesterday: string,
 ): boolean {
-  return recentLogs.some((l) => l.date === yesterday && l.category === "push_hard" && l.body_part === finisher.focusArea);
+  return recentLogs.some((l) => l.date === yesterday && l.category === "push_hard" && l.body_part === bodyPart);
 }
 
 export interface FinisherDecision {
@@ -158,7 +157,7 @@ export function decideFinisher(
 
   const candidate = selectFinisher(bodyPart, trainingEmphasis);
   const safeFromInjury = isFinisherSafeGivenInjuries(candidate, excludedKeywords);
-  const safeFromSplit = !conflictsWithRecentSplit(candidate, recentLogs, yesterday);
+  const safeFromSplit = !conflictsWithRecentSplit(bodyPart, recentLogs, yesterday);
   return {
     include: true,
     exceptional: exceptionalReadiness && safeFromInjury && safeFromSplit,

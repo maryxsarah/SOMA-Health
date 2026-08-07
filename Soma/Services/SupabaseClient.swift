@@ -909,6 +909,32 @@ final class SupabaseClient {
         return Set(rows.map(\.date))
     }
 
+    /// Which of the last N days had a real sport-goal training session --
+    /// feeds the calendar strip's star badge. Same signal (ai_workout_plan's
+    /// goal_block marker) generate-workout-plan's own ETA-slip recompute uses.
+    func fetchGoalTrainingDates(days: Int = 7) async throws -> Set<String> {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+
+        let end = Date()
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
+        // PostgREST path-select: pulls just the nested goal_block marker,
+        // not the whole plan document (focus, warm_up, every block's
+        // exercises, cool_down) that this only ever checked for non-nil.
+        let path = "rest/v1/ai_workout_plan?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&select=date,goal_block:plan->goal_block"
+        var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct Row: Decodable { let date: String; let goalBlock: AIGoalBlockMarker?
+            enum CodingKeys: String, CodingKey { case date; case goalBlock = "goal_block" }
+        }
+        let rows = try JSONDecoder().decode([Row].self, from: data)
+        return Set(rows.filter { $0.goalBlock != nil }.map(\.date))
+    }
+
     /// Real dates the user scanned their gym setup (a gym_photo generation
     /// actually happened, per ai_generation_log) -- feeds Home's "Scan
     /// today's setup" streak, distinct from workout completion.
@@ -1170,6 +1196,27 @@ final class SupabaseClient {
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
         return try JSONDecoder().decode(GymPhotoEquipmentResult.self, from: data)
+    }
+
+    /// Reads a coach's workout assignment out of text or a photo of text,
+    /// for CustomGoalFormView's auto-fill. Send exactly one of the two
+    /// params. Never writes anything -- the caller merges `parsed` into
+    /// its own editable form fields for review before create(...) submits.
+    func parseGoalAssignment(text: String? = nil, imageData: Data? = nil) async throws -> GoalAssignmentParseResult {
+        var request = try await authorizedRequest(path: "functions/v1/parse-goal-assignment", method: "POST", timeout: 120)
+        // Minutes east of UTC (matches TimeZone.secondsFromGMT's sign) so
+        // the server's daily quota resets on the user's local midnight,
+        // not the server's UTC day.
+        let timezoneOffsetMinutes = TimeZone.current.secondsFromGMT() / 60
+        if let text {
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "timezoneOffsetMinutes": timezoneOffsetMinutes])
+        } else if let imageData {
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["imageBase64": imageData.base64EncodedString(), "timezoneOffsetMinutes": timezoneOffsetMinutes])
+        }
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode(GoalAssignmentParseResult.self, from: data)
     }
 
     /// Steps 3+4 of the gym-photo-workout flow, combined -- deterministic
