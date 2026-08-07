@@ -1,0 +1,64 @@
+name: TestFlight on merge to main
+
+# Every merge/push to main builds a new archive and uploads it to TestFlight,
+# then commits the incremented build number back to main. Runs on a
+# self-hosted macOS runner (this Mac) so it has Xcode 26 and the signing
+# keychain locally. See scripts/README-testflight.md for one-time setup.
+
+on:
+  push:
+    branches: [main]
+
+# Serialize runs: build numbers must not race, and an in-flight upload must
+# never be cancelled by a newer push.
+concurrency:
+  group: testflight-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write # to push the build-number bump back to main
+
+jobs:
+  testflight:
+    runs-on: [self-hosted, macOS]
+    env:
+      # Pin Xcode 26 without needing an interactive `sudo xcode-select`.
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      # Homebrew (xcodegen) is often absent from the runner service PATH.
+      PATH: /opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore gitignored secrets from local stash
+        run: |
+          set -euo pipefail
+          STASH="$HOME/.soma-ci"
+          if [[ ! -d "$STASH" ]]; then
+            echo "::error::$STASH not found. Run scripts/ci-stash-secrets.sh once (see scripts/README-testflight.md)."
+            exit 1
+          fi
+          cp "$STASH/Config-Debug.xcconfig"    Config/Config-Debug.xcconfig
+          cp "$STASH/Config-Release.xcconfig"  Config/Config-Release.xcconfig
+          cp "$STASH/asc-api.env"              scripts/asc-api.env
+          # Optional: AppDelegate guards Firebase on this file's presence.
+          if [[ -f "$STASH/GoogleService-Info.plist" ]]; then
+            cp "$STASH/GoogleService-Info.plist" Soma/Resources/GoogleService-Info.plist
+          fi
+
+      - name: Build and upload to TestFlight
+        run: scripts/testflight.sh
+
+      - name: Commit build-number bump back to main
+        run: |
+          set -euo pipefail
+          NEXT="$(grep -E '^[[:space:]]*CFBundleVersion:' project.yml | grep -oE '[0-9]+' | head -1)"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add project.yml
+          if git diff --cached --quiet; then
+            echo "No build-number change to commit."
+          else
+            # [skip ci] stops this bump commit from re-triggering the workflow.
+            git commit -m "Bump build number to $NEXT for TestFlight upload [skip ci]"
+            git push origin HEAD:main
+          fi
