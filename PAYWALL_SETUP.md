@@ -1,18 +1,21 @@
 # Paywall / Subscription Setup
 
-Soma Premium: two plans, **Annual $39.99/yr** (7-day free trial) and
-**Monthly $4.99/mo** (no trial), or a referral code that grants bonus free
-days independent of either. Gates only the recommendation **detail**
+Soma Premium: two plans, **Annual $119.99/yr** (3-day free trial) and
+**Monthly $14.99/mo** (no trial), or a referral code that grants bonus free
+days independent of either. Gates the recommendation **detail**
 view (step target, workout suggestions, "why" explanation) — the Home
-card (today's category + message) always stays free. Also shown
-proactively once, as the last step of onboarding.
+card (today's category + message) always stays free. Also shown as a
+**hard** paywall (no skip) at the end of onboarding -- see §5 below.
+
+Premium (Annual only) also raises the daily AI-workout-generation limit
+from 1/day (free and Monthly) to 3/day -- see `generationLimits.ts`.
 
 ## 1. Test it right now -- no App Store Connect needed
 
 Xcode can simulate the entire purchase flow locally using
 [`Soma/Soma.storekit`](Soma/Soma.storekit), a StoreKit test configuration
 already checked into this project with both products and the annual
-plan's 7-day free trial pre-configured.
+plan's 3-day free trial pre-configured.
 
 **One-time step (Xcode UI, can't be scripted):**
 1. Product menu (or the scheme selector) → **Edit Scheme...**
@@ -41,14 +44,14 @@ Nothing in step 1 needs this, but a real purchase from a real user does.
    - Reference name: `Soma Premium Annual`
    - **Product ID: `com.skollnitzer.soma.premium.annual`** -- must match
      exactly, it's hardcoded in `SubscriptionManager.annualProductID`.
-   - Duration: 1 year, Price: $39.99
+   - Duration: 1 year, Price: $119.99
    - **Subscription Prices** → add an **Introductory Offer** → Free →
-     Duration: 1 week → applies once per subscriber.
+     Duration: 3 days → applies once per subscriber.
 4. **Create the monthly subscription** in the same group:
    - Reference name: `Soma Premium Monthly`
    - **Product ID: `com.skollnitzer.soma.premium.monthly`** -- matches
      `SubscriptionManager.monthlyProductID`.
-   - Duration: 1 month, Price: $4.99, **no** introductory offer.
+   - Duration: 1 month, Price: $14.99, **no** introductory offer.
 5. Set the annual plan's rank/priority above the monthly plan in the
    group (so App Store surfaces it as the default/"upgrade" tier).
 6. Add localization (display name, description) for at least English on
@@ -89,6 +92,18 @@ step) -- both unlimited redemptions.
   `PaywallView`.
 - The onboarding flow (`PostSetupFlowView`) shows the same `PaywallView`
   once, right before Home, after two soft reassurance screens ("try free"
-  / "trial reminder") -- declining ("Not now") still proceeds to Home,
-  since the Home card itself is always free regardless of subscription
-  status.
+  / "trial reminder"). This one presentation passes `allowsDismissal:
+  false` -- there is no "Not now" here, and `markOnboardingComplete()`
+  only fires after a real purchase succeeds (or a referral code is
+  redeemed, or Restore Purchases recovers an existing one). Every other
+  `PaywallView` presentation in the app (Home's locked-detail sheet,
+  Profile's) keeps the default `allowsDismissal: true`.
+
+## 5. Onboarding's hard paywall
+
+Deliberately different from every other paywall presentation in the app:
+no skip. A user finishing onboarding must either start the Annual trial,
+subscribe Monthly, redeem a referral code, or (on a reinstall/new device)
+Restore Purchases to reach Home at all. This is intentional product
+behavior, not a bug -- confirm with product/legal before loosening it, the
+same way any other paywall-gating change in this app gets flagged.

@@ -26,6 +26,13 @@ export interface TemplateExercise {
   // not LLM-guessed (anatomy is a fact, not a generation task), shown on
   // the gym-photo result screen for the "what's targeted and why" copy.
   target_area: string;
+  // exercise_library.id, hand-verified against the actual Free Exercise DB
+  // record (name AND equipment both consistent -- see
+  // add_library_ids.js's curation comment for the cases deliberately left
+  // unmatched). Omitted entirely, not guessed, when no confident match
+  // exists -- the client falls back to no image rather than a
+  // wrong-equipment photo.
+  library_id?: string;
 }
 
 export interface TemplateBlock {
@@ -74,7 +81,7 @@ export interface GymWorkoutTemplate {
 
 const WARM_UP_LIGHT: TemplateExercise[] = [
   { name: "Brisk walk in place", sets: 1, reps: "3 min", weight_guidance: "N/A", intensity: "easy", duration_minutes: 3, target_area: "Full body -- raises heart rate and core temperature" },
-  { name: "Arm circles", sets: 1, reps: "20 total", weight_guidance: "N/A", intensity: "easy", duration_minutes: 1, target_area: "Shoulders" },
+  { name: "Arm circles", library_id: "Arm_Circles", sets: 1, reps: "20 total", weight_guidance: "N/A", intensity: "easy", duration_minutes: 1, target_area: "Shoulders" },
 ];
 
 // Equipment-free by necessity: this warm-up is shared by every moderate and
@@ -85,7 +92,7 @@ const WARM_UP_LIGHT: TemplateExercise[] = [
 // do not require.
 const WARM_UP_MODERATE: TemplateExercise[] = [
   { name: "Brisk march in place", sets: 1, reps: "5 min", weight_guidance: "N/A", intensity: "easy", duration_minutes: 5, target_area: "Full body -- raises heart rate and core temperature" },
-  { name: "Bodyweight squats", sets: 1, reps: "10", weight_guidance: "N/A", intensity: "easy", duration_minutes: 2, target_area: "Quads, glutes" },
+  { name: "Bodyweight squats", library_id: "Bodyweight_Squat", sets: 1, reps: "10", weight_guidance: "N/A", intensity: "easy", duration_minutes: 2, target_area: "Quads, glutes" },
   { name: "Shoulder rolls", sets: 1, reps: "10 each direction", weight_guidance: "N/A", intensity: "easy", duration_minutes: 1, target_area: "Shoulders" },
 ];
 
@@ -115,7 +122,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         exercises: [
           { name: "Cat-cow stretch", sets: 1, reps: "10", weight_guidance: "N/A", intensity: "easy", duration_minutes: 3, target_area: "Spine, core" },
           { name: "Hip circles", sets: 1, reps: "10 each direction", weight_guidance: "N/A", intensity: "easy", duration_minutes: 2, target_area: "Hips" },
-          { name: "Walking lunge with reach", sets: 1, reps: "8 each leg", weight_guidance: "bodyweight", intensity: "easy", duration_minutes: 4, target_area: "Quads, glutes, hip flexors" },
+          { name: "Walking lunge with reach", library_id: "Bodyweight_Walking_Lunge", sets: 1, reps: "8 each leg", weight_guidance: "bodyweight", intensity: "easy", duration_minutes: 4, target_area: "Quads, glutes, hip flexors" },
         ],
       },
       {
@@ -123,7 +130,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 1,
         rest_between_rounds: "N/A",
         exercises: [
-          { name: "Supported child's pose with deep breathing", sets: 1, reps: "90 sec", weight_guidance: "N/A", intensity: "RPE 2/10", duration_minutes: 2, target_area: "Nervous system, lower back -- brings heart rate down" },
+          { name: "Supported child's pose with deep breathing", library_id: "Childs_Pose", sets: 1, reps: "90 sec", weight_guidance: "N/A", intensity: "RPE 2/10", duration_minutes: 2, target_area: "Nervous system, lower back -- brings heart rate down" },
         ],
       },
     ],
@@ -147,8 +154,8 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 2,
         rest_between_rounds: "60 sec",
         exercises: [
-          { name: "Bodyweight squat", sets: 1, reps: "12", weight_guidance: "bodyweight", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Quads, glutes" },
-          { name: "Incline push-up", sets: 1, reps: "10", weight_guidance: "bodyweight", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Chest, shoulders, triceps" },
+          { name: "Bodyweight squat", library_id: "Bodyweight_Squat", sets: 1, reps: "12", weight_guidance: "bodyweight", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Quads, glutes" },
+          { name: "Incline push-up", library_id: "Incline_Push-Up", sets: 1, reps: "10", weight_guidance: "bodyweight", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Chest, shoulders, triceps" },
           { name: "Glute bridge", sets: 1, reps: "15", weight_guidance: "bodyweight", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Glutes, hamstrings" },
         ],
       },
@@ -157,7 +164,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 1,
         rest_between_rounds: "N/A",
         exercises: [
-          { name: "Plank hold", sets: 1, reps: "30-45 sec", weight_guidance: "bodyweight", intensity: "RPE 5/10", duration_minutes: 1, target_area: "Core" },
+          { name: "Plank hold", library_id: "Plank", sets: 1, reps: "30-45 sec", weight_guidance: "bodyweight", intensity: "RPE 5/10", duration_minutes: 1, target_area: "Core" },
         ],
       },
     ],
@@ -180,8 +187,8 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rest_between_rounds: "60 sec",
         exercises: [
           { name: "Dumbbell goblet squat", sets: 1, reps: "12", weight_guidance: "light, 2x8-12kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Quads, glutes, core" },
-          { name: "Dumbbell shoulder press", sets: 1, reps: "10", weight_guidance: "light, 2x5-8kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Shoulders, triceps" },
-          { name: "Dumbbell row", sets: 1, reps: "12 each side", weight_guidance: "light, 1x8-12kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Back, biceps" },
+          { name: "Dumbbell shoulder press", library_id: "Dumbbell_Shoulder_Press", sets: 1, reps: "10", weight_guidance: "light, 2x5-8kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Shoulders, triceps" },
+          { name: "Dumbbell row", library_id: "One-Arm_Dumbbell_Row", sets: 1, reps: "12 each side", weight_guidance: "light, 1x8-12kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Back, biceps" },
         ],
       },
       {
@@ -213,9 +220,9 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 3,
         rest_between_rounds: "45 sec",
         exercises: [
-          { name: "Jump squat", sets: 1, reps: "10", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Quads, glutes, calves" },
-          { name: "Push-up", sets: 1, reps: "12", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Chest, shoulders, triceps" },
-          { name: "Mountain climber", sets: 1, reps: "20 total", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Core, hip flexors" },
+          { name: "Jump squat", library_id: "Freehand_Jump_Squat", sets: 1, reps: "10", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Quads, glutes, calves" },
+          { name: "Push-up", library_id: "Pushups", sets: 1, reps: "12", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Chest, shoulders, triceps" },
+          { name: "Mountain climber", library_id: "Mountain_Climbers", sets: 1, reps: "20 total", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Core, hip flexors" },
         ],
       },
       {
@@ -223,7 +230,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 1,
         rest_between_rounds: "N/A",
         exercises: [
-          { name: "Plank hold", sets: 1, reps: "45 sec", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Core" },
+          { name: "Plank hold", library_id: "Plank", sets: 1, reps: "45 sec", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Core" },
         ],
       },
     ],
@@ -245,7 +252,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 1,
         rest_between_rounds: "90 sec",
         exercises: [
-          { name: "Barbell back squat", sets: 4, reps: "8", weight_guidance: "moderate -- last rep should feel like RPE 7", intensity: "RPE 7/10", duration_minutes: 12, target_area: "Quads, glutes, core" },
+          { name: "Barbell back squat", library_id: "Barbell_Squat", sets: 4, reps: "8", weight_guidance: "moderate -- last rep should feel like RPE 7", intensity: "RPE 7/10", duration_minutes: 12, target_area: "Quads, glutes, core" },
         ],
       },
       {
@@ -253,7 +260,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 1,
         rest_between_rounds: "90 sec",
         exercises: [
-          { name: "Barbell bench press", sets: 3, reps: "8", weight_guidance: "moderate -- last rep should feel like RPE 7", intensity: "RPE 7/10", duration_minutes: 10, target_area: "Chest, shoulders, triceps" },
+          { name: "Barbell bench press", library_id: "Barbell_Bench_Press_-_Medium_Grip", sets: 3, reps: "8", weight_guidance: "moderate -- last rep should feel like RPE 7", intensity: "RPE 7/10", duration_minutes: 10, target_area: "Chest, shoulders, triceps" },
         ],
       },
       {
@@ -286,7 +293,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rest_between_rounds: "30 sec",
         exercises: [
           { name: "Burpee", sets: 1, reps: "12", weight_guidance: "bodyweight", intensity: "RPE 9/10", duration_minutes: 2, target_area: "Full body, cardio" },
-          { name: "Jump lunge", sets: 1, reps: "16 total", weight_guidance: "bodyweight", intensity: "RPE 9/10", duration_minutes: 2, target_area: "Quads, glutes, calves" },
+          { name: "Jump lunge", library_id: "Split_Jump", sets: 1, reps: "16 total", weight_guidance: "bodyweight", intensity: "RPE 9/10", duration_minutes: 2, target_area: "Quads, glutes, calves" },
         ],
       },
       {
@@ -316,7 +323,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 1,
         rest_between_rounds: "2 min",
         exercises: [
-          { name: "Barbell deadlift", sets: 4, reps: "5", weight_guidance: "heavy -- last rep should feel like RPE 8", intensity: "RPE 8/10", duration_minutes: 15, target_area: "Hamstrings, glutes, back" },
+          { name: "Barbell deadlift", library_id: "Barbell_Deadlift", sets: 4, reps: "5", weight_guidance: "heavy -- last rep should feel like RPE 8", intensity: "RPE 8/10", duration_minutes: 15, target_area: "Hamstrings, glutes, back" },
         ],
       },
       {
@@ -324,13 +331,13 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 3,
         rest_between_rounds: "60 sec",
         exercises: [
-          { name: "Barbell overhead press", sets: 1, reps: "6", weight_guidance: "moderate-heavy", intensity: "RPE 8/10", duration_minutes: 3, target_area: "Shoulders, triceps" },
+          { name: "Barbell overhead press", library_id: "Standing_Military_Press", sets: 1, reps: "6", weight_guidance: "moderate-heavy", intensity: "RPE 8/10", duration_minutes: 3, target_area: "Shoulders, triceps" },
           // Was a pull-up, and the finisher below was a dumbbell farmer's
           // carry -- both needed equipment this template does not require,
           // so a user with only a barbell and rack was prescribed movements
           // they had no way to perform. Every exercise here now uses only
           // what requiredEquipment guarantees.
-          { name: "Barbell bent-over row", sets: 1, reps: "8", weight_guidance: "moderate", intensity: "RPE 8/10", duration_minutes: 3, target_area: "Back, biceps" },
+          { name: "Barbell bent-over row", library_id: "Bent_Over_Barbell_Row", sets: 1, reps: "8", weight_guidance: "moderate", intensity: "RPE 8/10", duration_minutes: 3, target_area: "Back, biceps" },
         ],
       },
       {
@@ -409,7 +416,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         exercises: [
           { name: "Kettlebell deadlift", sets: 1, reps: "12", weight_guidance: "light, 1x12-16kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Hamstrings, glutes, lower back" },
           { name: "Kettlebell halo", sets: 1, reps: "8 each direction", weight_guidance: "light, 1x8-12kg", intensity: "RPE 4/10", duration_minutes: 3, target_area: "Shoulders, upper back" },
-          { name: "Kettlebell goblet squat", sets: 1, reps: "10", weight_guidance: "light, 1x12-16kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Quads, glutes, core" },
+          { name: "Kettlebell goblet squat", library_id: "Goblet_Squat", sets: 1, reps: "10", weight_guidance: "light, 1x12-16kg", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Quads, glutes, core" },
         ],
       },
       {
@@ -439,7 +446,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 2,
         rest_between_rounds: "45 sec",
         exercises: [
-          { name: "Band pull-apart", sets: 1, reps: "15", weight_guidance: "light band", intensity: "RPE 4/10", duration_minutes: 2, target_area: "Rear delts, upper back" },
+          { name: "Band pull-apart", library_id: "Band_Pull_Apart", sets: 1, reps: "15", weight_guidance: "light band", intensity: "RPE 4/10", duration_minutes: 2, target_area: "Rear delts, upper back" },
           { name: "Banded squat", sets: 1, reps: "15", weight_guidance: "light band", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Quads, glutes" },
           { name: "Banded row", sets: 1, reps: "15", weight_guidance: "medium band", intensity: "RPE 5/10", duration_minutes: 3, target_area: "Back, biceps" },
         ],
@@ -471,7 +478,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 1,
         rest_between_rounds: "N/A",
         exercises: [
-          { name: "Steady-state cycling", sets: 1, reps: "20 min", weight_guidance: "light resistance -- you should be able to hold a conversation", intensity: "RPE 4/10", duration_minutes: 20, target_area: "Legs, cardiovascular system" },
+          { name: "Steady-state cycling", library_id: "Bicycling_Stationary", sets: 1, reps: "20 min", weight_guidance: "light resistance -- you should be able to hold a conversation", intensity: "RPE 4/10", duration_minutes: 20, target_area: "Legs, cardiovascular system" },
         ],
       },
       {
@@ -504,7 +511,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rest_between_rounds: "75 sec",
         exercises: [
           { name: "Dumbbell Romanian deadlift", sets: 3, reps: "10", weight_guidance: "moderate, 2x12-20kg", intensity: "RPE 7/10", duration_minutes: 9, target_area: "Hamstrings, glutes" },
-          { name: "Dumbbell floor press", sets: 3, reps: "10", weight_guidance: "moderate, 2x10-16kg", intensity: "RPE 7/10", duration_minutes: 9, target_area: "Chest, triceps" },
+          { name: "Dumbbell floor press", library_id: "Dumbbell_Floor_Press", sets: 3, reps: "10", weight_guidance: "moderate, 2x10-16kg", intensity: "RPE 7/10", duration_minutes: 9, target_area: "Chest, triceps" },
         ],
       },
       {
@@ -512,8 +519,8 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 2,
         rest_between_rounds: "60 sec",
         exercises: [
-          { name: "Dumbbell split squat", sets: 1, reps: "10 each leg", weight_guidance: "moderate, 2x8-14kg", intensity: "RPE 7/10", duration_minutes: 4, target_area: "Quads, glutes" },
-          { name: "Dumbbell lateral raise", sets: 1, reps: "12", weight_guidance: "light, 2x4-8kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Side delts" },
+          { name: "Dumbbell split squat", library_id: "Split_Squat_with_Dumbbells", sets: 1, reps: "10 each leg", weight_guidance: "moderate, 2x8-14kg", intensity: "RPE 7/10", duration_minutes: 4, target_area: "Quads, glutes" },
+          { name: "Dumbbell lateral raise", library_id: "Side_Lateral_Raise", sets: 1, reps: "12", weight_guidance: "light, 2x4-8kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Side delts" },
         ],
       },
       {
@@ -544,8 +551,8 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rest_between_rounds: "60 sec",
         exercises: [
           { name: "Kettlebell swing", sets: 1, reps: "15", weight_guidance: "moderate, 1x16-24kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Glutes, hamstrings, core" },
-          { name: "Kettlebell front squat", sets: 1, reps: "10", weight_guidance: "moderate, 1x16-20kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Quads, glutes, core" },
-          { name: "Kettlebell single-arm row", sets: 1, reps: "10 each side", weight_guidance: "moderate, 1x16-24kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Back, biceps" },
+          { name: "Kettlebell front squat", library_id: "Front_Squats_With_Two_Kettlebells", sets: 1, reps: "10", weight_guidance: "moderate, 1x16-20kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Quads, glutes, core" },
+          { name: "Kettlebell single-arm row", library_id: "One-Arm_Kettlebell_Row", sets: 1, reps: "10 each side", weight_guidance: "moderate, 1x16-24kg", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Back, biceps" },
         ],
       },
       {
@@ -575,9 +582,9 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 3,
         rest_between_rounds: "60 sec",
         exercises: [
-          { name: "Cable row", sets: 1, reps: "12", weight_guidance: "moderate -- last rep should feel like RPE 7", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Back, biceps" },
-          { name: "Cable chest press", sets: 1, reps: "12", weight_guidance: "moderate", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Chest, triceps" },
-          { name: "Cable woodchop", sets: 1, reps: "10 each side", weight_guidance: "light-moderate", intensity: "RPE 6/10", duration_minutes: 3, target_area: "Obliques, core" },
+          { name: "Cable row", library_id: "Seated_Cable_Rows", sets: 1, reps: "12", weight_guidance: "moderate -- last rep should feel like RPE 7", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Back, biceps" },
+          { name: "Cable chest press", library_id: "Cable_Chest_Press", sets: 1, reps: "12", weight_guidance: "moderate", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Chest, triceps" },
+          { name: "Cable woodchop", library_id: "Standing_Cable_Wood_Chop", sets: 1, reps: "10 each side", weight_guidance: "light-moderate", intensity: "RPE 6/10", duration_minutes: 3, target_area: "Obliques, core" },
         ],
       },
       {
@@ -585,7 +592,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 1,
         rest_between_rounds: "N/A",
         exercises: [
-          { name: "Cable anti-rotation hold", sets: 1, reps: "45 sec each side", weight_guidance: "light", intensity: "RPE 6/10", duration_minutes: 2, target_area: "Core, obliques" },
+          { name: "Cable anti-rotation hold", library_id: "Pallof_Press", sets: 1, reps: "45 sec each side", weight_guidance: "light", intensity: "RPE 6/10", duration_minutes: 2, target_area: "Core, obliques" },
         ],
       },
     ],
@@ -607,9 +614,9 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 3,
         rest_between_rounds: "90 sec",
         exercises: [
-          { name: "Pull-up or assisted pull-up", sets: 1, reps: "5-8", weight_guidance: "bodyweight -- use a band or your feet on the floor if needed", intensity: "RPE 7/10", duration_minutes: 4, target_area: "Back, biceps" },
+          { name: "Pull-up or assisted pull-up", library_id: "Pullups", sets: 1, reps: "5-8", weight_guidance: "bodyweight -- use a band or your feet on the floor if needed", intensity: "RPE 7/10", duration_minutes: 4, target_area: "Back, biceps" },
           { name: "Hanging knee raise", sets: 1, reps: "10", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Lower abs, hip flexors" },
-          { name: "Push-up", sets: 1, reps: "12", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Chest, shoulders, triceps" },
+          { name: "Push-up", library_id: "Pushups", sets: 1, reps: "12", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Chest, shoulders, triceps" },
         ],
       },
       {
@@ -681,7 +688,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rest_between_rounds: "45 sec",
         exercises: [
           { name: "Kettlebell swing", sets: 1, reps: "20", weight_guidance: "moderate-heavy, 1x20-28kg", intensity: "RPE 9/10", duration_minutes: 2, target_area: "Glutes, hamstrings, core" },
-          { name: "Kettlebell goblet squat", sets: 1, reps: "12", weight_guidance: "moderate, 1x16-24kg", intensity: "RPE 8/10", duration_minutes: 2, target_area: "Quads, glutes, core" },
+          { name: "Kettlebell goblet squat", library_id: "Goblet_Squat", sets: 1, reps: "12", weight_guidance: "moderate, 1x16-24kg", intensity: "RPE 8/10", duration_minutes: 2, target_area: "Quads, glutes, core" },
         ],
       },
       {
@@ -711,7 +718,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 6,
         rest_between_rounds: "90 sec easy paddle",
         exercises: [
-          { name: "Rowing interval", sets: 1, reps: "250m hard", weight_guidance: "damper 5-6 -- pace you can just hold for all 6 rounds", intensity: "RPE 9/10", duration_minutes: 3, target_area: "Full body -- legs, back, cardiovascular system" },
+          { name: "Rowing interval", library_id: "Rowing_Stationary", sets: 1, reps: "250m hard", weight_guidance: "damper 5-6 -- pace you can just hold for all 6 rounds", intensity: "RPE 9/10", duration_minutes: 3, target_area: "Full body -- legs, back, cardiovascular system" },
         ],
       },
       {
@@ -748,8 +755,8 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rounds: 3,
         rest_between_rounds: "60 sec",
         exercises: [
-          { name: "Tempo bodyweight squat", sets: 1, reps: "12 (3 sec down, 1 sec up)", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Quads, glutes" },
-          { name: "Push-up", sets: 1, reps: "10", weight_guidance: "bodyweight -- hands elevated if needed", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Chest, shoulders, triceps" },
+          { name: "Tempo bodyweight squat", library_id: "Bodyweight_Squat", sets: 1, reps: "12 (3 sec down, 1 sec up)", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Quads, glutes" },
+          { name: "Push-up", library_id: "Pushups", sets: 1, reps: "10", weight_guidance: "bodyweight -- hands elevated if needed", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Chest, shoulders, triceps" },
           { name: "Reverse lunge", sets: 1, reps: "10 each leg", weight_guidance: "bodyweight -- step back, no jumping", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Quads, glutes" },
         ],
       },
@@ -781,7 +788,7 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
         rest_between_rounds: "45 sec",
         exercises: [
           { name: "Bulgarian split squat", sets: 1, reps: "10 each leg", weight_guidance: "bodyweight -- rear foot on a chair or step", intensity: "RPE 8/10", duration_minutes: 4, target_area: "Quads, glutes" },
-          { name: "Tempo push-up", sets: 1, reps: "8 (3 sec down)", weight_guidance: "bodyweight", intensity: "RPE 8/10", duration_minutes: 3, target_area: "Chest, triceps, shoulders" },
+          { name: "Tempo push-up", library_id: "Pushups", sets: 1, reps: "8 (3 sec down)", weight_guidance: "bodyweight", intensity: "RPE 8/10", duration_minutes: 3, target_area: "Chest, triceps, shoulders" },
         ],
       },
       {

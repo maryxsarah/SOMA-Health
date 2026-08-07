@@ -18,6 +18,7 @@ import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { assessHealthKit } from "./healthkitBand.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
+import { type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -76,6 +77,19 @@ Deno.serve(async (req: Request) => {
 
     const supabase = serviceRoleClient();
 
+    // A prior "request a rest/active-recovery day" call for this date, if
+    // any -- read up front so it survives this run's upsert (explicitly
+    // written back below) and wins outright over every computed cap, since
+    // it's the user's own direct request, not a health signal to be
+    // weighed against others. Set via set-recommendation-override.
+    const { data: existingRec } = await supabase
+      .from("daily_recommendation")
+      .select("user_requested_category")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .maybeSingle();
+    const userRequestedCategory = (existingRec?.user_requested_category as Category | null) ?? null;
+
     const { data: tokens } = await supabase
       .from("wearable_tokens")
       .select("id, provider, access_token, refresh_token, expires_at")
@@ -90,9 +104,9 @@ Deno.serve(async (req: Request) => {
 
     const whoopToken = (tokens ?? []).find((t: WearableTokenRow) => t.provider === "whoop");
     if (whoopToken) {
-      const [recovery, whoopSleepHours, whoopLoad] = await Promise.all([
+      const [recovery, whoopSleep, whoopLoad] = await Promise.all([
         safely("whoop recovery", null, () => fetchWhoopRecovery(supabase, whoopToken, date)),
-        safely("whoop sleep", null, () => fetchWhoopSleepHours(supabase, whoopToken, date)),
+        safely("whoop sleep", EMPTY_SLEEP_STAGES, () => fetchWhoopSleepHours(supabase, whoopToken, date)),
         safely(
           "whoop training load",
           { strainScore: null, recentHighStrain: false },
@@ -101,20 +115,32 @@ Deno.serve(async (req: Request) => {
       ]);
       whoopRecovery = recovery;
       if (whoopLoad.recentHighStrain) recentHighStrain = true;
-      if (recovery || whoopSleepHours !== null || whoopLoad.strainScore !== null) {
+      if (recovery || whoopSleep.totalHours !== null || whoopLoad.strainScore !== null) {
         await upsertSnapshot(supabase, userId, date, "whoop", {
           recovery_score: recovery?.recoveryScore,
           hrv_ms: recovery?.hrvMs,
           resting_hr: recovery?.restingHr,
-          sleep_hours: whoopSleepHours ?? undefined,
+          sleep_hours: whoopSleep.totalHours ?? undefined,
           strain_score: whoopLoad.strainScore ?? undefined,
+          sleep_light_hours: whoopSleep.lightHours ?? undefined,
+          sleep_deep_hours: whoopSleep.deepHours ?? undefined,
+          sleep_rem_hours: whoopSleep.remHours ?? undefined,
+          sleep_awake_hours: whoopSleep.awakeHours ?? undefined,
         });
       }
     }
 
     const ouraToken = (tokens ?? []).find((t: WearableTokenRow) => t.provider === "oura");
     if (ouraToken) {
-      const emptySleepData = { sleepHours: null, hrvMs: null, restingHr: null };
+      const emptySleepData = {
+        sleepHours: null,
+        hrvMs: null,
+        restingHr: null,
+        lightHours: null,
+        deepHours: null,
+        remHours: null,
+        awakeHours: null,
+      };
       const [readiness, ouraSleep, ouraLoad, ouraStress] = await Promise.all([
         safely("oura readiness", null, () => fetchOuraReadiness(supabase, ouraToken, date)),
         safely("oura sleep", emptySleepData, () => fetchOuraSleepData(supabase, ouraToken, date)),
@@ -138,6 +164,10 @@ Deno.serve(async (req: Request) => {
           resting_hr: ouraSleep.restingHr ?? undefined,
           strain_score: ouraLoad.strainScore ?? undefined,
           stress_score: ouraStress ?? undefined,
+          sleep_light_hours: ouraSleep.lightHours ?? undefined,
+          sleep_deep_hours: ouraSleep.deepHours ?? undefined,
+          sleep_rem_hours: ouraSleep.remHours ?? undefined,
+          sleep_awake_hours: ouraSleep.awakeHours ?? undefined,
         });
       }
     }
@@ -147,27 +177,38 @@ Deno.serve(async (req: Request) => {
         sleep_hours: healthkit.sleepHours,
         hrv_ms: healthkit.hrvMs,
         resting_hr: healthkit.restingHr,
+        sleep_light_hours: healthkit.sleepLightHours,
+        sleep_deep_hours: healthkit.sleepDeepHours,
+        sleep_rem_hours: healthkit.sleepRemHours,
+        sleep_awake_hours: healthkit.sleepAwakeHours,
       });
     }
 
-    // Sleep hours for the safety cap / rest-vs-light split: prefer
-    // whichever connected source actually reported it today.
+    // Sleep hours for the rest-vs-light split, plus HRV/stress for the caps
+    // below -- prefer whichever connected source actually reported each
+    // today, same merge shape as sleep already used.
     const { data: todaysRows } = await supabase
       .from("daily_snapshot")
-      .select("source, sleep_hours")
+      .select("source, sleep_hours, hrv_ms, stress_score")
       .eq("user_id", userId)
       .eq("date", date);
 
     const sleepHours = pickSleepHours(todaysRows ?? [], healthkit);
+    const todaysHrv = pickTodaysMetric(todaysRows ?? [], "hrv_ms", healthkit?.hrvMs);
+    // Oura-only signal (see fetchOuraStress) -- no Whoop/HealthKit source
+    // reports one today, so this naturally resolves to null for them.
+    const todaysStress = pickTodaysMetric(todaysRows ?? [], "stress_score", undefined);
 
     // Injury-based intensity cap: any noted injury caps the category at
     // moderate max for the day, same safety-first pattern as the sleep cap.
     const { data: userRow } = await supabase
       .from("users")
-      .select("injury_tags")
+      .select("injury_tags, pregnancy, experience_level")
       .eq("id", userId)
       .maybeSingle();
     const hasInjury = ((userRow?.injury_tags as string[] | null) ?? []).length > 0;
+    const hasPregnancy = userRow?.pregnancy === true;
+    const experienceLevel = ((userRow?.experience_level as ExperienceLevel | null) ?? "moderate");
 
     // Any moderate/severe-tier injury protocol currently active/recovering
     // -- a soft cap (product decision), not a hard block like pregnancy:
@@ -265,13 +306,49 @@ Deno.serve(async (req: Request) => {
     // label instead of "healthkit_medium" -- category/message stay the same
     // cautious "moderate", only the presented reason differs.
     const reason = insufficientData ? "insufficient_data" : `${source}_${band}`;
-    const { category: bandCategory, sleepCapApplied, injuryCapApplied, loadCapApplied } = mapBandToCategory(
-      band,
-      sleepHours,
-      clearlyPoorRecovery,
-      hasInjury,
-      recentHighStrain,
-    );
+    const { category: bandCategory, injuryCapApplied, loadCapApplied, pregnancyCapApplied } =
+      mapBandToCategory(
+        band,
+        sleepHours,
+        clearlyPoorRecovery,
+        hasInjury,
+        recentHighStrain,
+        hasPregnancy,
+      );
+
+    // Sleep cap: same post-category mechanism as consecutive-days/injury-
+    // protocol/volume below, rather than the old pre-category, high-band-
+    // only, <5.5h-only check (which could never fire on a "moderate" day).
+    // A short-sleep night is a real risk factor on its own, independent of
+    // what the wearable's own recovery/readiness score says today. SOMA has
+    // no ingested sleep-QUALITY score from any provider (Oura's own 0-100
+    // Sleep Score is a separate endpoint SOMA doesn't call) -- this can
+    // only ever react to raw duration, not how restful/fragmented that
+    // sleep actually was. DRAFTED, NOT EXPERT-REVIEWED threshold.
+    const SHORT_SLEEP_HOURS = 6.5;
+    const sleepCapApplied = sleepHours !== null && sleepHours < SHORT_SLEEP_HOURS &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
+
+    // HRV cap: hrv_ms is stored in daily_snapshot per source but was never
+    // read back for capping before today. HRV is highly individual, so
+    // this compares against the user's OWN trailing baseline (same median-
+    // of-trailing-window shape as fetchMetricBaseline, generalized to any
+    // connected source rather than healthkit-only) rather than a fixed
+    // absolute number. DRAFTED, NOT EXPERT-REVIEWED threshold.
+    const HRV_DROP_RATIO = 0.85;
+    const hrvBaselineForCap = await fetchGeneralMetricBaseline(supabase, userId, date, "hrv_ms");
+    const hrvCapApplied = hrvBaselineForCap !== null && todaysHrv !== null &&
+      todaysHrv < hrvBaselineForCap * HRV_DROP_RATIO &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
+
+    // Stress cap: stress_score (Oura-only -- minutes spent in a high-stress
+    // state today, see fetchOuraStress) is stored but was never read back
+    // for capping before today. Already a same-units-every-day absolute
+    // number (minutes), unlike HRV, so a flat threshold is used instead of
+    // a personal baseline. DRAFTED, NOT EXPERT-REVIEWED threshold.
+    const HIGH_STRESS_MINUTES = 180;
+    const stressCapApplied = todaysStress !== null && todaysStress >= HIGH_STRESS_MINUTES &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
 
     // Consecutive-training-days cap: unlike the three caps above (which act
     // on the recovery band before the category is chosen), this acts on the
@@ -298,6 +375,19 @@ Deno.serve(async (req: Request) => {
     const consecutiveDaysRestEscalated = consecutiveDaysCapApplied &&
       consecutiveDays >= REST_ESCALATION_THRESHOLD;
     // Same post-processing-on-final-category mechanism as the consecutive-
+    // days cap above, and independent of it -- catches a DIFFERENT pattern:
+    // hard training on most days of a rolling week even with gaps breaking
+    // any consecutive streak (e.g. hard-hard-hard-rest-hard-hard-hard is
+    // only a 3-day streak but 6 of the last 7 days). Reuses
+    // VOLUME_LANDMARKS.full_body's MRV (session-count-shaped, unlike the
+    // sets/week landmarks for upper/lower body) as the threshold, since
+    // workout_log only has session-level data, not per-set volume --
+    // an honest proxy, not true per-muscle-group volume tracking.
+    const recentTrainingDays = await countRecentTrainingDays(supabase, userId, date);
+    const volumeCapApplied = recentTrainingDays >= VOLUME_LANDMARKS.full_body[experienceLevel].mrv &&
+      !exceptionalReadinessToday &&
+      (bandCategory === "moderate" || bandCategory === "push_hard");
+    // Same post-processing-on-final-category mechanism as the consecutive-
     // days cap just above, and independent of it -- either or both can fire.
     const injuryProtocolCapApplied = hasSevereInjuryProtocol &&
       (bandCategory === "moderate" || bandCategory === "push_hard");
@@ -309,13 +399,18 @@ Deno.serve(async (req: Request) => {
     // moderate and one severe injury simultaneously -- severe wins.
     const injuryProtocolModerateCapApplied = !hasSevereInjuryProtocol &&
       hasModerateInjuryProtocol && bandCategory === "push_hard";
-    const category: Category = consecutiveDaysRestEscalated
+    const computedCategory: Category = consecutiveDaysRestEscalated
       ? "rest"
-      : (consecutiveDaysCapApplied || injuryProtocolCapApplied)
+      : (consecutiveDaysCapApplied || injuryProtocolCapApplied || volumeCapApplied ||
+          sleepCapApplied || hrvCapApplied || stressCapApplied)
       ? "light"
       : injuryProtocolModerateCapApplied
       ? "moderate"
       : bandCategory;
+    // The user's own rest/active-recovery request wins outright over every
+    // computed cap above -- see the comment where userRequestedCategory is
+    // read, near the top of this handler.
+    const category: Category = userRequestedCategory ?? computedCategory;
     const message = MESSAGES[category];
 
     await supabase
@@ -330,9 +425,13 @@ Deno.serve(async (req: Request) => {
           sleep_cap_applied: sleepCapApplied,
           injury_cap_applied: injuryCapApplied,
           load_cap_applied: loadCapApplied,
+          pregnancy_cap_applied: pregnancyCapApplied,
+          volume_cap_applied: volumeCapApplied,
           consecutive_days_cap_applied: consecutiveDaysCapApplied,
           injury_protocol_cap_applied: injuryProtocolCapApplied,
           injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+          hrv_cap_applied: hrvCapApplied,
+          stress_cap_applied: stressCapApplied,
           // The uncapped category, so a later client re-fetch (after any
           // cap has been applied) still has access to what the
           // recommendation would have been -- the override affordance in
@@ -340,6 +439,10 @@ Deno.serve(async (req: Request) => {
           // workout anyway" without re-deriving the recovery band client-side.
           pre_cap_category: bandCategory,
           data_confidence: dataConfidence,
+          // Written back explicitly (not just left alone) so this upsert
+          // never silently clears an active rest-day request just because
+          // this particular call site didn't set one.
+          user_requested_category: userRequestedCategory,
         },
         { onConflict: "user_id,date" },
       );
@@ -355,11 +458,16 @@ Deno.serve(async (req: Request) => {
       sleep_cap_applied: sleepCapApplied,
       injury_cap_applied: injuryCapApplied,
       load_cap_applied: loadCapApplied,
+      pregnancy_cap_applied: pregnancyCapApplied,
+      volume_cap_applied: volumeCapApplied,
       consecutive_days_cap_applied: consecutiveDaysCapApplied,
       injury_protocol_cap_applied: injuryProtocolCapApplied,
       injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+      hrv_cap_applied: hrvCapApplied,
+      stress_cap_applied: stressCapApplied,
       pre_cap_category: bandCategory,
       data_confidence: dataConfidence,
+      user_requested_category: userRequestedCategory,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -389,20 +497,19 @@ function mapBandToCategory(
   clearlyPoorRecovery: boolean,
   hasInjury: boolean,
   recentHighStrain: boolean,
-): { category: Category; sleepCapApplied: boolean; injuryCapApplied: boolean; loadCapApplied: boolean } {
+  hasPregnancy: boolean,
+): {
+  category: Category;
+  injuryCapApplied: boolean;
+  loadCapApplied: boolean;
+  pregnancyCapApplied: boolean;
+} {
   let effectiveBand = band;
-  let sleepCapApplied = false;
   let injuryCapApplied = false;
   let loadCapApplied = false;
+  let pregnancyCapApplied = false;
 
-  // Sleep safety cap: never push_hard on severe sleep deprivation.
-  if (effectiveBand === "high" && sleepHours !== null && sleepHours < 5.5) {
-    effectiveBand = "medium";
-    sleepCapApplied = true;
-  }
-
-  // Injury safety cap: never push_hard with an active injury noted,
-  // same pattern as the sleep cap. Independent of it -- both can apply.
+  // Injury safety cap: never push_hard with an active injury noted.
   if (effectiveBand === "high" && hasInjury) {
     effectiveBand = "medium";
     injuryCapApplied = true;
@@ -411,23 +518,32 @@ function mapBandToCategory(
   // Recent training load cap: never push_hard the day right after a
   // strenuous Whoop workout or an Oura "hard"-intensity session, even if
   // this morning's recovery/readiness looks strong -- avoids stacking two
-  // max-effort days back to back. Independent of the other two caps.
+  // max-effort days back to back. Independent of the other cap.
   if (effectiveBand === "high" && recentHighStrain) {
     effectiveBand = "medium";
     loadCapApplied = true;
   }
 
+  // Pregnancy safety cap: never push_hard while pregnant, regardless of
+  // trimester -- same independent-cap shape as the others above. This
+  // replaces the old hard block (see safetyFlags.ts): generation still
+  // proceeds, just never at max intensity.
+  if (effectiveBand === "high" && hasPregnancy) {
+    effectiveBand = "medium";
+    pregnancyCapApplied = true;
+  }
+
   if (effectiveBand === "high") {
-    return { category: "push_hard", sleepCapApplied, injuryCapApplied, loadCapApplied };
+    return { category: "push_hard", injuryCapApplied, loadCapApplied, pregnancyCapApplied };
   }
   if (effectiveBand === "medium_high" || effectiveBand === "medium") {
-    return { category: "moderate", sleepCapApplied, injuryCapApplied, loadCapApplied };
+    return { category: "moderate", injuryCapApplied, loadCapApplied, pregnancyCapApplied };
   }
 
   // effectiveBand === "low": split into light vs rest.
   const severelyShortSleep = sleepHours !== null && sleepHours < 5.5;
   const category = severelyShortSleep || clearlyPoorRecovery ? "rest" : "light";
-  return { category, sleepCapApplied, injuryCapApplied, loadCapApplied };
+  return { category, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
 }
 
 /// Consecutive prior days with a logged TRAINING workout (moderate or
@@ -472,6 +588,29 @@ async function countConsecutiveTrainingDays(
   return count;
 }
 
+/// Rolling count of moderate/push_hard training days in the trailing 7
+/// days, gaps allowed -- distinct from countConsecutiveTrainingDays above
+/// (which stops at the first gap). A user who trains hard 6 of the last 7
+/// days with one rest day in the middle has a LOW consecutive-streak count
+/// but a real accumulated-fatigue signal this rolling count catches
+/// instead. Reuses the same query as countConsecutiveTrainingDays (same
+/// window, same category filter) -- only the aggregation differs.
+async function countRecentTrainingDays(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  userId: string,
+  date: string,
+): Promise<number> {
+  const { data } = await supabase
+    .from("workout_log")
+    .select("date")
+    .eq("user_id", userId)
+    .in("category", ["moderate", "push_hard"])
+    .gte("date", addDays(date, -7))
+    .lt("date", date);
+  return new Set((data ?? []).map((r: { date: string }) => r.date)).size;
+}
+
 function pickSleepHours(
   rows: { source: string; sleep_hours: number | null }[],
   healthkit: HealthKitPayload | undefined,
@@ -483,6 +622,23 @@ function pickSleepHours(
     bySource("oura") ??
     bySource("healthkit") ??
     healthkit?.sleepHours ??
+    null
+  );
+}
+
+/// Same merge shape as pickSleepHours, generalized to any daily_snapshot
+/// numeric column -- used for today's HRV/stress cap inputs.
+function pickTodaysMetric(
+  rows: { source: string; hrv_ms?: number | null; stress_score?: number | null }[],
+  column: "hrv_ms" | "stress_score",
+  healthkitValue: number | null | undefined,
+): number | null {
+  const bySource = (source: string) => rows.find((r) => r.source === source)?.[column] ?? null;
+  return (
+    bySource("whoop") ??
+    bySource("oura") ??
+    bySource("healthkit") ??
+    healthkitValue ??
     null
   );
 }
@@ -522,6 +678,50 @@ async function fetchMetricBaseline(
     .select(column)
     .eq("user_id", userId)
     .eq("source", "healthkit")
+    .gte("date", startStr)
+    .lte("date", endStr)
+    .not(column, "is", null);
+
+  if (!data || data.length < minDays) return null;
+
+  const values = (data as Record<string, number>[])
+    .map((r) => r[column])
+    .filter((v): v is number => typeof v === "number")
+    .sort((a, b) => a - b);
+  if (values.length < minDays) return null;
+
+  const mid = Math.floor(values.length / 2);
+  return values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
+}
+
+/// Same median-of-trailing-window shape as fetchMetricBaseline, generalized
+/// across whatever connected source reported the metric each day --
+/// fetchMetricBaseline is locked to source="healthkit", written for the
+/// healthkit-only assessment path specifically, but Whoop/Oura users have
+/// hrv_ms in daily_snapshot too and HRV is highly individual, so the HRV
+/// cap needs the user's OWN trailing baseline regardless of which wearable
+/// they use. Note: if a user has more than one source reporting hrv_ms on
+/// the same day, each source's row contributes its own point to the
+/// median rather than being merged into one per-day value first -- a minor
+/// imprecision, acceptable for a single connected wearable in practice.
+async function fetchGeneralMetricBaseline(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  userId: string,
+  date: string,
+  column: "hrv_ms",
+  minDays: number = MIN_BASELINE_DAYS,
+): Promise<number | null> {
+  const end = new Date(date);
+  const start = new Date(end);
+  start.setDate(start.getDate() - BASELINE_WINDOW_DAYS);
+  const startStr = start.toISOString().slice(0, 10);
+  const endStr = new Date(end.getTime() - 86400000).toISOString().slice(0, 10);
+
+  const { data } = await supabase
+    .from("daily_snapshot")
+    .select(column)
+    .eq("user_id", userId)
     .gte("date", startStr)
     .lte("date", endStr)
     .not(column, "is", null);
@@ -610,14 +810,30 @@ async function fetchWhoopRecovery(
 /// Real sleep hours from Whoop's own sleep data, used instead of relying
 /// on an on-device HealthKit reading for Whoop users -- feeds the same
 /// sleep safety cap as HealthKit/Oura sleep does.
+interface SleepStageHours {
+  totalHours: number | null;
+  lightHours: number | null;
+  deepHours: number | null;
+  remHours: number | null;
+  awakeHours: number | null;
+}
+
+const EMPTY_SLEEP_STAGES: SleepStageHours = {
+  totalHours: null,
+  lightHours: null,
+  deepHours: null,
+  remHours: null,
+  awakeHours: null,
+};
+
 async function fetchWhoopSleepHours(
   // deno-lint-ignore no-explicit-any
   supabase: any,
   token: WearableTokenRow,
   date: string,
-): Promise<number | null> {
+): Promise<SleepStageHours> {
   const accessToken = await ensureFreshWhoopToken(supabase, token);
-  if (!accessToken) return null;
+  if (!accessToken) return EMPTY_SLEEP_STAGES;
 
   const start = `${addDays(date, -1)}T00:00:00.000Z`;
   const end = `${date}T23:59:59.999Z`;
@@ -625,16 +841,29 @@ async function fetchWhoopSleepHours(
     `${WHOOP_SLEEP_URL}?start=${start}&end=${end}&limit=5`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
-  if (!res.ok) return null;
+  if (!res.ok) return EMPTY_SLEEP_STAGES;
   const json = await res.json();
   const record = (json?.records ?? json ?? [])[0];
   const stages = record?.score?.stage_summary;
-  if (!stages) return null;
+  if (!stages) return EMPTY_SLEEP_STAGES;
 
-  const totalMs = (stages.total_light_sleep_time_milli ?? 0) +
-    (stages.total_slow_wave_sleep_time_milli ?? 0) +
-    (stages.total_rem_sleep_time_milli ?? 0);
-  return totalMs > 0 ? totalMs / 3_600_000 : null;
+  // Previously only the total (light+SWS+REM, no awake time) was kept --
+  // the per-stage split was computed and immediately discarded. NOTE:
+  // verify these exact field names against Whoop's current docs at deploy
+  // time, same standing caveat this file already applies to its own URLs.
+  const lightMs = stages.total_light_sleep_time_milli ?? 0;
+  const deepMs = stages.total_slow_wave_sleep_time_milli ?? 0;
+  const remMs = stages.total_rem_sleep_time_milli ?? 0;
+  const awakeMs = stages.total_awake_time_milli ?? 0;
+  const totalMs = lightMs + deepMs + remMs;
+  const toHours = (ms: number) => ms > 0 ? ms / 3_600_000 : null;
+  return {
+    totalHours: totalMs > 0 ? totalMs / 3_600_000 : null,
+    lightHours: toHours(lightMs),
+    deepHours: toHours(deepMs),
+    remHours: toHours(remMs),
+    awakeHours: toHours(awakeMs),
+  };
 }
 
 /// Yesterday's Whoop day strain (from the cycle endpoint) plus whether any
@@ -679,6 +908,19 @@ async function fetchWhoopTrainingLoad(
   return { strainScore, recentHighStrain };
 }
 
+/// 400/401 means the refresh grant itself is dead (RFC 6749 5.2 invalid_grant).
+/// 403 is also included -- not RFC-standard for invalid_grant, but a common
+/// real-world status providers use for a revoked/disabled authorization
+/// (as opposed to a scope or rate-limit 403, which this endpoint can't
+/// distinguish from here either way, so treating it as dead is the safer
+/// default: a wrongly-flagged reconnect prompt is recoverable, a silently
+/// stale connection that never re-prompts is not).
+/// A 5xx/timeout says nothing about token validity and must not trigger
+/// reconnect -- that distinction is the one this function exists to protect.
+function isDeadRefreshTokenStatus(status: number): boolean {
+  return status === 400 || status === 401 || status === 403;
+}
+
 async function ensureFreshWhoopToken(
   // deno-lint-ignore no-explicit-any
   supabase: any,
@@ -703,7 +945,18 @@ async function ensureFreshWhoopToken(
       client_secret: clientSecret,
     }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    if (isDeadRefreshTokenStatus(res.status)) {
+      // Surface the dead token to the client; a failure here shouldn't
+      // break this request (best-effort).
+      await supabase
+        .from("wearable_tokens")
+        .update({ needs_reconnect: true })
+        .eq("id", token.id)
+        .then(null, () => {});
+    }
+    return null;
+  }
   const json = await res.json();
 
   const expiresAt = new Date(Date.now() + json.expires_in * 1000).toISOString();
@@ -713,6 +966,9 @@ async function ensureFreshWhoopToken(
       access_token: json.access_token,
       refresh_token: json.refresh_token ?? token.refresh_token,
       expires_at: expiresAt,
+      // A later successful refresh after a transient failure (network
+      // blip, provider outage) should clear any stale flag from before.
+      needs_reconnect: false,
     })
     .eq("id", token.id);
 
@@ -748,8 +1004,26 @@ async function fetchOuraSleepData(
   supabase: any,
   token: WearableTokenRow,
   date: string,
-): Promise<{ sleepHours: number | null; hrvMs: number | null; restingHr: number | null }> {
-  const empty = { sleepHours: null, hrvMs: null, restingHr: null };
+): Promise<
+  {
+    sleepHours: number | null;
+    hrvMs: number | null;
+    restingHr: number | null;
+    lightHours: number | null;
+    deepHours: number | null;
+    remHours: number | null;
+    awakeHours: number | null;
+  }
+> {
+  const empty = {
+    sleepHours: null,
+    hrvMs: null,
+    restingHr: null,
+    lightHours: null,
+    deepHours: null,
+    remHours: null,
+    awakeHours: null,
+  };
   const accessToken = await ensureFreshOuraToken(supabase, token);
   if (!accessToken) return empty;
 
@@ -767,12 +1041,22 @@ async function fetchOuraSleepData(
   const longest = records.reduce((a: any, b: any) =>
     (b.total_sleep_duration ?? 0) > (a.total_sleep_duration ?? 0) ? b : a
   );
+  // Per-stage fields already exist on the same record -- previously only
+  // total_sleep_duration/average_hrv/lowest_heart_rate were read, the rest
+  // of the payload discarded. NOTE: verify these exact field names against
+  // Oura's current API docs at deploy time, same standing caveat this file
+  // already applies to its own URLs.
+  const toHours = (seconds: number | null | undefined) => seconds ? seconds / 3600 : null;
   return {
     sleepHours: longest.total_sleep_duration ? longest.total_sleep_duration / 3600 : null,
     hrvMs: longest.average_hrv ?? null,
     // Lowest overnight HR is the standard resting-HR proxy; Oura's sleep
     // endpoint doesn't expose a separately-labeled "resting_heart_rate".
     restingHr: longest.lowest_heart_rate ?? null,
+    lightHours: toHours(longest.light_sleep_duration),
+    deepHours: toHours(longest.deep_sleep_duration),
+    remHours: toHours(longest.rem_sleep_duration),
+    awakeHours: toHours(longest.awake_time),
   };
 }
 
@@ -850,7 +1134,18 @@ async function ensureFreshOuraToken(
       client_secret: clientSecret,
     }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    // Same signal (and same 400/401-only classification) as
+    // ensureFreshWhoopToken -- see its comment.
+    if (isDeadRefreshTokenStatus(res.status)) {
+      await supabase
+        .from("wearable_tokens")
+        .update({ needs_reconnect: true })
+        .eq("id", token.id)
+        .then(null, () => {});
+    }
+    return null;
+  }
   const json = await res.json();
 
   const expiresAt = new Date(Date.now() + json.expires_in * 1000).toISOString();
@@ -860,6 +1155,7 @@ async function ensureFreshOuraToken(
       access_token: json.access_token,
       refresh_token: json.refresh_token ?? token.refresh_token,
       expires_at: expiresAt,
+      needs_reconnect: false,
     })
     .eq("id", token.id);
 

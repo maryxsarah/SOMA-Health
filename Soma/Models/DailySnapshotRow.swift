@@ -16,6 +16,15 @@ struct DailySnapshotRow: Codable {
     let restingHr: Double?
     let strainScore: Double?
     let stressScore: Double?
+    /// Per-stage breakdown of the same night sleepHours covers -- nil for
+    /// any stage the source didn't report. See HealthKitManager's
+    /// fetchSleepStageBreakdown / generate-recommendation's Whoop/Oura
+    /// fetch functions for why these can undercount sleepHours for a
+    /// mixed-source night (an honest gap, not a bug).
+    let sleepLightHours: Double?
+    let sleepDeepHours: Double?
+    let sleepRemHours: Double?
+    let sleepAwakeHours: Double?
 
     enum CodingKeys: String, CodingKey {
         case date, source
@@ -26,5 +35,9 @@ struct DailySnapshotRow: Codable {
         case restingHr = "resting_hr"
         case strainScore = "strain_score"
         case stressScore = "stress_score"
+        case sleepLightHours = "sleep_light_hours"
+        case sleepDeepHours = "sleep_deep_hours"
+        case sleepRemHours = "sleep_rem_hours"
+        case sleepAwakeHours = "sleep_awake_hours"
     }
 }

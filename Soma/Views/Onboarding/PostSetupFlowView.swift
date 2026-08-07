@@ -1,3 +1,4 @@
+import SuperwallKit
 import SwiftUI
 
 private enum PostSetupStep: Int {
@@ -20,6 +21,10 @@ struct PostSetupFlowView: View {
     @EnvironmentObject private var appState: AppState
 
     @State private var step: PostSetupStep = .referralCode
+    /// Fails closed (false) until the profile fetch below actually confirms
+    /// an 18+ date_of_birth -- an in-flight fetch or a fetch failure must
+    /// never show the photo-comparison step to an unconfirmed user.
+    @State private var isConfirmedAdultForBodyPhotos = false
 
     var body: some View {
         Group {
@@ -50,7 +55,15 @@ struct PostSetupFlowView: View {
             case .trialReminder:
                 TrialReminderStepView(onContinue: advance)
             case .paywall:
-                PaywallView(onFinished: { appState.markOnboardingComplete() })
+                // Superwall presents its own paywall modally -- there's
+                // nothing to render inline here beyond a brief background
+                // while that happens. The onboarding paywall assigned to
+                // this placement must be configured non-dismissible (no
+                // close button) in the Superwall dashboard paywall editor
+                // -- that's what used to be `allowsDismissal: false`.
+                Color.clear
+                    .somaBackground()
+                    .task { presentOnboardingPaywall() }
             }
         }
         .transition(.opacity)
@@ -64,19 +77,51 @@ struct PostSetupFlowView: View {
         // nothing else loads it before Home.
         .task {
             await appState.refreshReferralBonus()
+            await loadAdultConfirmation()
         }
+    }
+
+    /// Reads the date_of_birth this same onboarding pass just wrote (via
+    /// OnboardingSurveyView.finish -> saveOnboardingSurvey) back from the
+    /// server -- there's no in-memory answers to reuse here since this is a
+    /// separate view further down the flow. UX-only gate; analyze-body-photo
+    /// re-checks server-side regardless of what this reads.
+    private func loadAdultConfirmation() async {
+        guard let userId = SupabaseClient.shared.currentUserID else { return }
+        guard let profile = try? await SupabaseClient.shared.fetchProfile(id: userId) else { return }
+        isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
     }
 
     private func advance() {
         var nextRaw = step.rawValue + 1
-        // Skipped entirely while the feature flag is off, so behavior stays
-        // byte-for-byte identical to before this step existed.
-        if PostSetupStep(rawValue: nextRaw) == .bodyPhotos, !Config.enableBodyPhotoUpload {
+        // Skipped entirely while the feature flag is off, or for a user not
+        // confirmed 18+ (App Store 4+ rating -- no minors handling for this
+        // feature exists, so it simply doesn't appear rather than being
+        // shown a softened version) -- behavior stays byte-for-byte
+        // identical to before this step existed in either case.
+        if PostSetupStep(rawValue: nextRaw) == .bodyPhotos, !Config.enableBodyPhotoUpload || !isConfirmedAdultForBodyPhotos {
             nextRaw += 1
         }
         if let next = PostSetupStep(rawValue: nextRaw) {
             step = next
         } else {
+            appState.markOnboardingComplete()
+        }
+    }
+
+    /// Mirrors the old PaywallView(autoDismissIfBonusActive: true) behavior:
+    /// someone who already has free access via a redeemed referral bonus
+    /// skips the paywall entirely rather than being asked to pay.
+    /// Otherwise, registers the hard-gated onboarding placement -- there is
+    /// no "Not now" here; `markOnboardingComplete()` only fires once the
+    /// paywall's feature closure runs (a purchase, a restore, or -- if the
+    /// dashboard paywall is ever set to Non Gated -- any dismissal).
+    private func presentOnboardingPaywall() {
+        if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
+            appState.markOnboardingComplete()
+            return
+        }
+        Superwall.shared.register(placement: "onboarding_paywall") {
             appState.markOnboardingComplete()
         }
     }

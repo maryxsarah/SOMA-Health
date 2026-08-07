@@ -51,3 +51,7 @@ docs/*
 
 # macOS
 .DS_Store
+
+# Snapshot-test reference images are machine-local (record with
+# scripts/test.sh snapshot --record); never committed by decision 2026-08-04.
+SnapshotTests/__Snapshots__/

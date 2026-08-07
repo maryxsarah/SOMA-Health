@@ -143,6 +143,13 @@ xcconfig treats `//` as a comment, see the file's own comment),
 `SUPABASE_ANON_KEY`, `WHOOP_CLIENT_ID`, `OURA_CLIENT_ID`, `POSTHOG_API_KEY`
 (step 6c below), `POSTHOG_HOST` (bare host, same `//` reason).
 
+**Analytics only reports from Release builds** (TestFlight / App Store).
+Local Debug runs from Xcode initialize neither Firebase nor PostHog and
+send no events (`#if !DEBUG` in `AppDelegate` + `AnalyticsManager`) -- so
+dev sessions never pollute the dashboards. To verify analytics locally
+(e.g. Firebase DebugView), run the Release configuration: Edit Scheme →
+Run → Info → Build Configuration → Release.
+
 ## 6b. Google Analytics for Firebase (GA4)
 
 1. Place your downloaded `GoogleService-Info.plist` at
@@ -367,3 +374,60 @@ Once you're ready to go live (not just TestFlight):
 - HealthKit's authorization API never reports back which individual read
   types were granted vs. denied. "Connected" on Screen 2 means "the
   permission sheet was completed," not "every type was granted."
+
+## 10. Sport Goal Programs — enabling, disabling, beta rollout
+
+The feature ships **dark**: the seed migration creates all four sports with
+`status='internal'`, so after `supabase db push` + function deploys nothing
+is visible to any user. Visibility is controlled entirely server-side — no
+App Store release is ever needed to turn it on, off, or partially on.
+
+### The status ladder (per sport)
+
+`sports.status` ∈ `seeded → internal → beta → live`, applied in the
+Supabase Dashboard → SQL Editor:
+
+```sql
+-- Staff testing only (the shipped default):
+update sports set status = 'internal';
+
+-- Opt-in beta: visible to users who flipped the "Sport goals (beta)"
+-- toggle in Profile → Account → Early access (self-service, beta_optins):
+update sports set status = 'beta';
+
+-- Everyone:
+update sports set status = 'live';
+
+-- Per sport (e.g. only padel):
+update sports set status = 'live' where id = 'padel';
+```
+
+Effective on the next client fetch. Entry points (Profile row, Home chip,
+goal picker) derive from the visible catalog, so "off" looks like the
+feature was never there — not broken. A user holding an active goal on a
+sport that went dark keeps their data: the goal screen shows "Temporarily
+unavailable", daily plans generate goal-free, re-tests lock.
+
+### Access rosters
+
+- `internal_testers` — service-role only (deliberately NOT a users column
+  and NOT client-writable; a self-grant would bypass the gate):
+  ```sql
+  insert into internal_testers (user_id)
+  values ((select id from auth.users where email = 'you@example.com'));
+  ```
+  Testers see `internal` AND `beta` sports.
+- `beta_optins` — self-service; the app writes it when the user turns on
+  the Early-access toggle. No SQL needed.
+
+### Emergency client kill
+
+`Config.enableSportGoals = false` (Soma/App/Config.swift) hides every
+client code path. Requires a release — it is the safety net for shipping a
+build with unfinished UI, not the operational switch.
+
+### Guarded by tests
+
+`supabase/functions/_shared/sportGoalSeed_test.ts` (run with
+`deno test --allow-read supabase/functions/`) pins that the seed ships all
+sports as `internal` — a future seed can't accidentally launch enabled.

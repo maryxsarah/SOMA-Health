@@ -24,9 +24,14 @@ struct OnboardingTopBar: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color(.systemGray5))
+                    // A real fraction (e.g. ~0.29 on an early step) reads
+                    // as "basically empty" at this bar's 6pt height/thin
+                    // Capsule shape -- clamp to a visible minimum so the
+                    // very first steps still show a legible sliver of
+                    // progress, never a bar that looks broken/reset.
                     Capsule()
                         .fill(Theme.pillFill)
-                        .frame(width: geo.size.width * max(0, min(1, progress)))
+                        .frame(width: max(geo.size.width * 0.06, geo.size.width * max(0, min(1, progress))))
                         .animation(.easeInOut(duration: 0.3), value: progress)
                 }
             }

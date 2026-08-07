@@ -111,3 +111,126 @@ export function normalizeEquipment(input: string[]): Set<string> {
   }
   return out;
 }
+
+/// "bar"/"rack"/"plates" are real synonyms but also common everyday words
+/// (protein bar, spice rack) -- masked out before the single-word alias pass.
+const AMBIGUOUS_ALIAS_MASK_PHRASES = [
+  "pull up bar", "chin up bar", "dip bar",
+  "protein bar", "candy bar", "granola bar", "chocolate bar", "cereal bar", "snack bar", "energy bar",
+  "spice rack", "shoe rack", "coat rack", "towel rack", "wine rack", "drying rack", "bike rack", "roof rack",
+  "paper plate", "license plate", "hot plate", "number plate",
+];
+
+/// Scans a full free-text sentence for known vocabulary/alias PHRASES as
+/// substrings, rather than expecting each array element to already be a
+/// clean discrete term the way normalizeEquipment does (that function
+/// exists for the vision model's own already-itemized output). Built for
+/// UserRow.other_equipment_notes -- generate-workout-plan's onboarding
+/// "what else do you have access to?" free text, e.g. "dumbbells, a
+/// workout bench, a yoga mat and a treadmill" -- which was previously
+/// captured and saved but never read by any generation path at all, so
+/// specific gear the user actually typed out was silently ignored. Same
+/// coarse substring approach already used elsewhere in this codebase for
+/// keyword matching (e.g. contraindications.ts).
+export function parseFreeTextEquipment(text: string): Set<EquipmentItem> {
+  const canonicalText = ` ${canonical(text)} `;
+  const out = new Set<EquipmentItem>();
+  for (const item of EQUIPMENT_VOCABULARY) {
+    if (canonicalText.includes(` ${canonical(item)} `)) out.add(item);
+  }
+  // Multi-word aliases are inherently unambiguous ("chin up bar" can't be
+  // mistaken for "protein bar") -- scan them against the real text, before
+  // masking, since some (like "chin up bar") are themselves on the
+  // ambiguous-mask list below and would otherwise be erased before their
+  // own lookup runs.
+  for (const [alias, target] of Object.entries(ALIASES)) {
+    if (!canonical(alias).includes(" ")) continue;
+    if (canonicalText.includes(` ${canonical(alias)} `)) out.add(target as EquipmentItem);
+  }
+  // Single-word aliases (bar/rack/plates/...) only scan the masked text --
+  // see AMBIGUOUS_ALIAS_MASK_PHRASES.
+  let maskedForAliases = canonicalText;
+  for (const phrase of AMBIGUOUS_ALIAS_MASK_PHRASES) {
+    maskedForAliases = maskedForAliases.split(` ${canonical(phrase)} `).join(" ");
+  }
+  for (const [alias, target] of Object.entries(ALIASES)) {
+    if (canonical(alias).includes(" ")) continue;
+    if (maskedForAliases.includes(` ${canonical(alias)} `)) out.add(target as EquipmentItem);
+  }
+  return out;
+}
+
+/// Maps the item-level EQUIPMENT_VOCABULARY (dumbbells, treadmill, yoga
+/// mat, ...) onto exercise_library's own equipment column values (barbell,
+/// dumbbell, kettlebells, cable, machine, medicine ball, bands, body
+/// only) -- two different closed vocabularies serving different purposes
+/// (one is what a user/vision-model names real-world gear, the other is
+/// what exercise_library actually filters on), so this is the bridge
+/// between them. Items with no real filtering equivalent (a weight bench
+/// is a supporting prop, not an exercise_library equipment value) are
+/// simply omitted -- they're still accepted input, they just don't
+/// narrow anything on their own.
+const VOCABULARY_TO_LIBRARY_EQUIPMENT: Partial<Record<EquipmentItem, string>> = {
+  "barbell": "barbell",
+  "weight plates": "barbell",
+  "squat rack": "barbell",
+  "dumbbells": "dumbbell",
+  "kettlebells": "kettlebells",
+  "cable machine": "cable",
+  "lat pulldown": "cable",
+  "smith machine": "machine",
+  "leg press": "machine",
+  "chest press machine": "machine",
+  "treadmill": "machine",
+  "stationary bike": "machine",
+  "rowing machine": "machine",
+  "elliptical": "machine",
+  "resistance bands": "bands",
+  "medicine ball": "medicine ball",
+  "pull-up bar": "body only",
+  "dip bars": "body only",
+  "suspension trainer": "body only",
+  "plyo box": "body only",
+  "jump rope": "body only",
+  "yoga mat": "body only",
+  "foam roller": "body only",
+};
+
+/// True for equipment items that unlock genuine cardio-category work
+/// (treadmill, bike, rower, elliptical, jump rope) -- see
+/// exerciseLibraryMatch.ts's cardio-candidate merge, which otherwise never
+/// runs for a non-cardio body-part day even when the user owns exactly
+/// this kind of equipment (the original gap behind "told Soma I have a
+/// treadmill, but warm-up never suggested one").
+const CARDIO_UNLOCKING_ITEMS: ReadonlySet<EquipmentItem> = new Set([
+  "treadmill", "stationary bike", "rowing machine", "elliptical", "jump rope",
+]);
+
+export interface FreeTextEquipmentResolution {
+  /// Values to union into the candidate filter for every tier.
+  libraryEquipment: string[];
+  /// Cardio-only items -- kept separate since they share the "machine" value
+  /// with strength machines; only apply to the cardio query tier.
+  cardioLibraryEquipment: string[];
+  /// True if anything parsed out of the free text should unlock cardio
+  /// candidates regardless of today's body-part focus.
+  unlocksCardio: boolean;
+}
+
+/// The single entry point generate-workout-plan actually calls: parses
+/// free text, maps to real exercise_library equipment values, and flags
+/// whether cardio should be unlocked -- all in one deterministic pass.
+export function resolveFreeTextEquipment(text: string | null | undefined): FreeTextEquipmentResolution {
+  if (!text || text.trim().length === 0) return { libraryEquipment: [], cardioLibraryEquipment: [], unlocksCardio: false };
+  const items = parseFreeTextEquipment(text);
+  const libraryEquipment = new Set<string>();
+  const cardioLibraryEquipment = new Set<string>();
+  let unlocksCardio = false;
+  for (const item of items) {
+    const mapped = VOCABULARY_TO_LIBRARY_EQUIPMENT[item];
+    const isCardioOnly = CARDIO_UNLOCKING_ITEMS.has(item);
+    if (mapped) (isCardioOnly ? cardioLibraryEquipment : libraryEquipment).add(mapped);
+    if (isCardioOnly) unlocksCardio = true;
+  }
+  return { libraryEquipment: Array.from(libraryEquipment), cardioLibraryEquipment: Array.from(cardioLibraryEquipment), unlocksCardio };
+}

@@ -6,13 +6,27 @@ struct PlanSummaryStepView: View {
     @EnvironmentObject private var appState: AppState
     let onContinue: () -> Void
 
+    /// Same real number OnTrackStepView showed earlier in the survey
+    /// (stashed via UserDefaults at that point) -- falls back to a plain
+    /// "Now"/"Ahead" pair if it's somehow missing rather than a fabricated
+    /// "1 Month/3 Months" guess.
+    private var estimatedMonths: Int? {
+        let stored = UserDefaults.standard.integer(forKey: OnboardingSurveyView.estimatedGoalMonthsKey)
+        return stored > 0 ? stored : nil
+    }
+
+    private var chartLabels: [String] {
+        guard let estimatedMonths else { return ["Now", "Ahead"] }
+        return ["Now", "Halfway", "\(estimatedMonths) month\(estimatedMonths == 1 ? "" : "s")"]
+    }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 14) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 40))
+                    .font(.system(size: 32))
                     .foregroundStyle(Theme.pillFill)
-                    .padding(.top, 24)
+                    .padding(.top, 12)
 
                 Text("Your plan is ready")
                     .font(Theme.display)
@@ -20,7 +34,7 @@ struct PlanSummaryStepView: View {
                 CardView {
                     Text("Estimated progress")
                         .font(.body.bold())
-                    UpwardTrendChartView(xAxisLabels: ["Now", "1 Month", "3 Months"])
+                    UpwardTrendChartView(xAxisLabels: chartLabels, chartHeight: 110)
                 }
 
                 CardView {
@@ -45,7 +59,7 @@ struct PlanSummaryStepView: View {
                         Text(recommendation.category.displayTitle)
                             .font(Theme.display)
                         Text(recommendation.message)
-                            .font(.body)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     } else {
                         Text("Your first recommendation will be ready shortly.")
@@ -55,8 +69,8 @@ struct PlanSummaryStepView: View {
                 }
 
                 PillButton(title: "Let's get started!", action: onContinue)
-                    .padding(.top, 8)
-                    .padding(.bottom, 32)
+                    .padding(.top, 4)
+                    .padding(.bottom, 20)
             }
             .padding(.horizontal, 24)
         }

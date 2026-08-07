@@ -19,7 +19,9 @@
 
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
+import { classifyGenerationError } from "../_shared/anthropicErrors.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
+import { checkGenerationLimit, GENERATION_LIMIT_MESSAGE, logGeneration, type SubscriptionTier } from "../_shared/generationLimits.ts";
 import { extractOutputText } from "../_shared/openai.ts";
 import { GymWorkoutTemplate, selectTemplate } from "./templates.ts";
 import { normalizeEquipment } from "../_shared/equipment.ts";
@@ -92,10 +94,11 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow } = await supabase
       .from("users")
-      .select("goals")
+      .select("goals, subscription_tier")
       .eq("id", userId)
       .maybeSingle();
     const goals = (userRow?.goals as string[] | null) ?? [];
+    const subscriptionTier = ((userRow?.subscription_tier as SubscriptionTier | null) ?? "free");
 
     const { data: snapshots } = await supabase
       .from("daily_snapshot")
@@ -146,10 +149,13 @@ Deno.serve(async (req: Request) => {
             category: cached.category,
             plan: cached.plan,
             selected_title: cached.plan.title,
+            source: "gym_photo",
+            added_to_plan: false,
+            added_at: null,
           },
           { onConflict: "user_id,date" },
         );
-      return jsonResponse({ date, category: cached.category, safety_flag: false, ...cached.plan });
+      return jsonResponse({ date, category: cached.category, safety_flag: false, source: "gym_photo", ...cached.plan });
     }
 
     // Reaching here means this equipment setup wasn't already generated
@@ -178,6 +184,13 @@ Deno.serve(async (req: Request) => {
         locked: true,
         message: "Today's workout is already logged. Generating a different plan won't undo that — pick tomorrow's workout instead.",
       });
+    }
+
+    // Only a genuinely new generation reaches here (a cache hit already
+    // returned above) -- check the daily cap before paying for one.
+    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier);
+    if (!limitCheck.allowed) {
+      return jsonResponse({ date, generation_limit_reached: true, message: GENERATION_LIMIT_MESSAGE });
     }
 
     const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact, safety.excludedKeywords);
@@ -219,21 +232,26 @@ Deno.serve(async (req: Request) => {
         { user_id: userId, date, equipment_signature: equipmentSignature, category, plan },
         { onConflict: "user_id,date,equipment_signature" },
       );
+    // A freshly generated plan always starts unconfirmed -- added_to_plan is
+    // reset explicitly (not just left to the INSERT default) so regenerating
+    // after an earlier same-day plan requires a fresh "Add to today's plan"
+    // confirmation for the NEW content, rather than inheriting an old
+    // confirmation that was never about this plan.
     await supabase
       .from("ai_workout_plan")
       .upsert(
-        { user_id: userId, date, category, plan, selected_title: template.title },
+        { user_id: userId, date, category, plan, selected_title: template.title, source: "gym_photo", added_to_plan: false, added_at: null },
         { onConflict: "user_id,date" },
       );
+    await logGeneration(supabase, userId, date, "gym_photo");
 
     // title/bodyPart arrive via ...plan -- they are stored inside the
     // cached object so the cache-hit path returns them too, without having
     // to re-run selection just to recover two strings.
-    return jsonResponse({ date, category, safety_flag: false, ...plan });
+    return jsonResponse({ date, category, safety_flag: false, source: "gym_photo", ...plan });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const status = msg === "unauthorized" ? 401 : 500;
-    return jsonResponse({ error: msg }, status);
+    const { status, body } = classifyGenerationError(err);
+    return jsonResponse(body, status);
   }
 });
 

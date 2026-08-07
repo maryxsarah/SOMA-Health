@@ -27,6 +27,10 @@ enum Config {
         URL(string: "https://\(string(for: "POSTHOG_HOST"))")!
     }
 
+    static var superwallAPIKey: String {
+        string(for: "SUPERWALL_API_KEY")
+    }
+
     /// Fixed by convention (matches CFBundleURLTypes in Info.plist), not
     /// per-environment config -- these never need to change per deployment.
     static let oauthURLScheme = "soma"
@@ -40,41 +44,48 @@ enum Config {
 
     static let backgroundTaskIdentifier = "com.soma.app.refresh"
 
-    /// Gated pending legal review of body-photo storage/consent copy.
-    /// Flipping this to true is the entire "ship it" step -- no other code
-    /// changes needed; onboarding and Profile show zero trace of the
-    /// feature while it's false.
-    static let enableBodyPhotoUpload = false
+    /// Goal/current body photo upload, history, and comparison slider.
+    /// Live -- the Privacy Policy discloses this (see LegalContent.swift's
+    /// "Photographs you choose to add of your current body and goal body"
+    /// bullet).
+    static let enableBodyPhotoUpload = true
 
-    /// Separate flag for AI vision analysis of goal/current body photos --
-    /// deliberately independent of `enableBodyPhotoUpload` above, so the
-    /// already-working upload/history/comparison feature is never held
-    /// hostage to this materially riskier addition.
+    /// AI vision analysis comparing the user's goal/current body photos --
+    /// deliberately independent of `enableBodyPhotoUpload` above, so that
+    /// feature was never held hostage to this materially riskier addition.
     ///
-    /// UNBUILT. No vision-analysis code exists yet -- this flag is a
-    /// placeholder documenting what flipping it would require, not
-    /// something safe to flip on its own:
-    ///   1. A new `analyze-body-photo` Edge Function (would reuse
-    ///      _shared/openai.ts's existing Responses-API pattern from
-    ///      analyze-gym-photo, but MUST be its own function -- body photos
-    ///      are a different, more sensitive data category than gym-
-    ///      equipment photos, with their own consent/retention/vendor-
-    ///      disclosure requirements).
-    ///   2. Server-side enforcement of this flag (an env var the function
-    ///      checks itself) -- never trust a client-side check alone for a
-    ///      feature this sensitive.
-    ///   3. Structured (categorical, non-clinical) output only -- map to
-    ///      the existing GoalTag set rather than inventing new categories
-    ///      or numeric/clinical-sounding scores.
-    ///   4. Explicit disclosure of the vision-model vendor in the Privacy
-    ///      Policy (LegalContent.swift + docs/privacy.html), and a bumped
-    ///      LegalContent.currentVersion so existing users re-acknowledge.
-    ///   5. Legal sign-off specifically on the biometric-data-law question
-    ///      (e.g. BIPA-style statutes) BEFORE this ships -- a separate,
-    ///      narrower review than the general privacy/liability pass that
-    ///      already covers plain photo storage.
-    /// Do not flip this to true without all five in place.
-    static let enableBodyPhotoVisionAnalysis = false
+    /// Live as of 2026-07-31. What shipped, matching the five prerequisites
+    /// this flag used to gate:
+    ///   1. `analyze-body-photo` Edge Function (its own function, not
+    ///      folded into analyze-gym-photo -- body photos are a different,
+    ///      more sensitive, already-stored data category).
+    ///   2. Server-side enforcement via `ENABLE_BODY_PHOTO_VISION_ANALYSIS`
+    ///      (a Supabase secret/env var the function checks itself) --
+    ///      this client-side flag is never trusted alone.
+    ///   3. Structured, categorical output only -- mapped to the existing
+    ///      `GoalTag` set (`_shared/goalTags.ts`), no numeric or
+    ///      clinical-sounding score anywhere in the schema.
+    ///   4. Privacy Policy discloses both the photo storage itself and the
+    ///      OpenAI vendor use specifically for this comparison (two new
+    ///      bullets, `LegalContent.currentVersion` bumped).
+    ///   5. Legal sign-off on the biometric-data-law question was the
+    ///      product owner's own call to accept, not blocked on external
+    ///      review -- see the epic's plan notes.
+    ///
+    /// UPDATE (2026-08-05): originally "never shown to the user (no 'AI
+    /// analyzed your photos' screen)" -- reversed by a second product-owner
+    /// decision so the Progress screen (GoalBodyProgressView) can show the
+    /// result directly, e.g. "Your plan is shaped toward: leaner & toned."
+    /// Uses the same plain-language GoalTag/TrainingEmphasis copy already
+    /// shown as goal options elsewhere in the app, not a clinical score --
+    /// but this IS new user-facing exposure of prerequisite #3's output,
+    /// so a Privacy Policy language check is worth doing even though no
+    /// new data collection or vendor was added.
+    static let enableBodyPhotoVisionAnalysis = true
+
+    /// Sport goal programs -- compile-time safety net only. The operational
+    /// switch is server-side (`sports.status` via RLS): empty catalog = off.
+    static let enableSportGoals = true
 
     private static func string(for key: String) -> String {
         Bundle.main.object(forInfoDictionaryKey: key) as? String ?? ""

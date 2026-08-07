@@ -1,0 +1,205 @@
+import SwiftUI
+import UIKit
+
+/// "What does this exercise actually look like" detail sheet -- tapped from
+/// any AIExercise row (AIWorkoutPlanSections.swift). Looks the real
+/// exercise_library entry up server-side (by id when generate-gym-workout
+/// supplied one, otherwise by exact name) rather than trusting anything
+/// pre-fetched, since the same exercise name can appear in many plans.
+struct ExerciseDetailView: View {
+    let exercise: AIExercise
+
+    @State private var entry: ExerciseLibraryEntry?
+    @State private var isLoading = true
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                // Everything the user picked/was told to do (name, sets,
+                // reps, weight, intensity, the AI's own coaching cue) comes
+                // straight from `exercise` -- already in memory, no fetch
+                // needed -- so it renders on the very first frame. Only the
+                // media/tags/library-instructions area (which DOES need a
+                // network round trip) shows its own small loading state,
+                // instead of the whole sheet blocking behind one spinner
+                // until that round trip finishes.
+                VStack(alignment: .leading, spacing: 16) {
+                    mediaArea
+                    if let credit = entry?.imageCredit, !credit.isEmpty {
+                        Text(credit)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(exercise.name)
+                            .font(.title3.bold())
+                        Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.pillFill)
+                        // Always-visible, no interaction needed -- someone
+                        // opening this detail view directly (not having
+                        // seen the plan list's own footnote) shouldn't be
+                        // left guessing what "RPE 7/10" means.
+                        if exercise.intensity.localizedCaseInsensitiveContains("rpe") {
+                            Text("RPE = Rate of Perceived Exertion, how hard a set feels (1 = very easy, 10 = maximum effort).")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if !exercise.instructions.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Coaching cue")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            Text(exercise.instructions)
+                                .font(.subheadline)
+                        }
+                    }
+
+                    if let entry {
+                        tagsRow(entry)
+                        if !entry.instructions.isEmpty {
+                            instructionsSection(entry)
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .navigationTitle("Exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    @ViewBuilder
+    private var mediaArea: some View {
+        if let entry, !entry.imagePaths.isEmpty {
+            imagePager(entry)
+        } else if isLoading {
+            // A lightweight placeholder, not a full-sheet blocker -- the
+            // rest of the sheet (name/sets/reps/coaching cue above) is
+            // already visible and interactive while this resolves.
+            RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous)
+                .fill(Color(.systemGray6))
+                .frame(height: 220)
+                .overlay(SomaLoadingBar())
+        } else {
+            noMediaPlaceholder
+        }
+    }
+
+    private func imagePager(_ entry: ExerciseLibraryEntry) -> some View {
+        TabView {
+            ForEach(entry.imageURLs, id: \.absoluteString) { url in
+                CachedExerciseImage(url: url, placeholder: noMediaPlaceholder)
+            }
+        }
+        .tabViewStyle(.page)
+        .frame(height: 260)
+        .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
+        .clipShape(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous))
+    }
+
+    private var noMediaPlaceholder: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "figure.strengthtraining.traditional")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+            Text("No reference photo for this exercise")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 180)
+        .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
+    }
+
+    private func tagsRow(_ entry: ExerciseLibraryEntry) -> some View {
+        let tags = ([entry.equipment] + entry.primaryMuscles).compactMap { $0 }.filter { !$0.isEmpty }
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(tags, id: \.self) { tag in
+                    Text(tag.capitalized)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Theme.pillFill.opacity(0.12)))
+                        .foregroundStyle(Theme.pillFill)
+                }
+            }
+        }
+    }
+
+    private func instructionsSection(_ entry: ExerciseLibraryEntry) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("How to perform it")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            ForEach(Array(entry.instructions.enumerated()), id: \.offset) { index, step in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("\(index + 1).")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.secondary)
+                    Text(step)
+                        .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        // A failed lookup collapses to the same "no reference photo" state
+        // as a genuine no-match -- there's no useful distinct error UI for
+        // a background media lookup that isn't blocking the actual workout.
+        entry = try? await SupabaseClient.shared.fetchExerciseLibraryEntry(
+            libraryId: exercise.libraryId,
+            name: exercise.name
+        )
+        isLoading = false
+    }
+}
+
+/// Checks ExerciseLibraryCache first -- if AIWorkoutPlanView's own-plan
+/// prefetch already ran (the common case: this view only opens from a
+/// plan already on screen), this renders instantly with no network round
+/// trip and no loading state at all. Falls back to a real fetch + the
+/// shared SomaLoadingBar otherwise, same as before this cache existed.
+private struct CachedExerciseImage<Placeholder: View>: View {
+    let url: URL
+    let placeholder: Placeholder
+
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    // The pager's own container is already clipped to
+                    // rounded corners, but scaledToFit can still leave the
+                    // photo's own square edges visible/near-flush inside
+                    // it -- clip the image itself too so it always reads
+                    // as rounded, matching the rest of the app's cards.
+                    .clipShape(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous))
+            } else if failed {
+                placeholder
+            } else {
+                SomaLoadingBar()
+                    .frame(maxWidth: .infinity, minHeight: 220)
+            }
+        }
+        .task(id: url) {
+            image = await ExerciseLibraryCache.shared.image(for: url)
+            failed = image == nil
+        }
+    }
+}

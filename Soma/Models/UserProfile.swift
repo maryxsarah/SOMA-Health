@@ -117,14 +117,69 @@ struct UserProfile: Codable, Equatable {
     /// Self-reported pain level, 1-10. Also purely informational.
     var injuryPainLevel: [String: Int] = [:]
     var experienceLevel: ExperienceLevel?
-    /// Self-reported only, never assumed -- one of the deterministic
-    /// safety-guardrail triggers for the gym-photo-workout feature.
+    /// Self-reported only, never assumed -- adjusts (never withholds)
+    /// generated workouts, and caps the day's category at moderate.
     var pregnancy: Bool?
+    /// Optional, only meaningful when `pregnancy == true`. Drives
+    /// trimester-scaled guidance -- see pregnancyGuidance.ts.
+    var pregnancyWeek: Int?
+    /// Real, user-set weekly session-count goal, shown against actual
+    /// progress (workouts logged this week) on the Profile screen. Purely
+    /// a personal-tracking display -- not read by any recommendation logic.
+    var weeklySessionTarget: Int?
+    /// ISO region code (e.g. "US") -- with `city`, powers future nearby
+    /// gym/partner suggestions. Optional, display/settings-only today.
+    var country: String? = nil
+    /// Free-text city name, same purpose as `country`.
+    var city: String? = nil
     /// Storage paths (not the image itself), behind Config.enableBodyPhotoUpload
     /// -- managed only via SupabaseClient's uploadBodyPhoto/deleteBodyPhoto,
     /// not through the general profile save() flow, hence the defaults.
     var goalBodyPhotoPath: String? = nil
     var currentBodyPhotoPath: String? = nil
+    /// Storage path (not the image itself) for the profile picture --
+    /// managed only via SupabaseClient's uploadAvatar/deleteAvatar, same
+    /// "not through the general save() flow" reasoning as the body-photo
+    /// paths above.
+    var avatarPhotoPath: String? = nil
+    /// Read-only here (collected at onboarding; updateProfile never writes
+    /// them) -- feeds the dashboard's Body section.
+    var weightKg: Double? = nil
+    var desiredWeightKg: Double? = nil
+    /// Editable via the general save() flow, unlike weightKg/desiredWeightKg
+    /// above -- height doesn't change often, but there's no reason to lock
+    /// it the way the dashboard's weight-progress fields are locked.
+    var heightCm: Double? = nil
+    var journeyStage: JourneyStage? = nil
+    var blockersNotes: String? = nil
+    /// Read-only (set at onboarding, never edited here) -- "yyyy-MM-dd".
+    /// Exists on this model ONLY for the Goal Body adult-only gate
+    /// (bodyPhotosEditor); every other date-of-birth use is server-side.
+    var dateOfBirth: String? = nil
+    /// Read-only -- written at onboarding (saveOnboardingSurvey), never
+    /// read back until the goal-progress bar needed it alongside
+    /// weightKg/desiredWeightKg to recompute GoalPace.estimatedMonths.
+    var goalPace: GoalPace? = nil
+    /// Read-only -- the AI's own comparison of the user's goal/current
+    /// photos (analyze-body-photo). Shown directly on the Progress screen
+    /// as of the product-owner decision reversing this feature's original
+    /// "never shown to the user" posture -- see
+    /// Config.enableBodyPhotoVisionAnalysis's doc comment for the history.
+    /// Nil = never analyzed (e.g. only one photo set so far); PostgREST
+    /// sends the column as JSON `null` in that case, not an absent key, so
+    /// this must be Optional -- a non-optional array default only covers
+    /// a missing KEY, not a present-but-null value (which is the common
+    /// case here for anyone not yet analyzed).
+    var bodyPhotoEmphasisTags: [GoalTag]? = nil
+    var trainingEmphasis: TrainingEmphasis? = nil
+    /// Read-only, server-assigned at account creation -- the journey
+    /// "start date" the goal-progress bar counts elapsed days from. Not a
+    /// plan-start date (there isn't a separate one), but close enough: for
+    /// the vast majority of users onboarding happens in one sitting.
+    /// Raw ISO8601 wire string, same reason as dateOfBirth above (this
+    /// model is decoded with a plain JSONDecoder that has no date
+    /// strategy configured -- parsed on demand where actually needed).
+    var createdAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case contactEmail = "contact_email"
@@ -139,8 +194,31 @@ struct UserProfile: Codable, Equatable {
         case injuryPainLevel = "injury_pain_level"
         case experienceLevel = "experience_level"
         case pregnancy
+        case pregnancyWeek = "pregnancy_week"
+        case weeklySessionTarget = "weekly_session_target"
+        case country
+        case city
         case goalBodyPhotoPath = "goal_body_photo_path"
         case currentBodyPhotoPath = "current_body_photo_path"
+        case avatarPhotoPath = "avatar_photo_path"
+        case weightKg = "weight_kg"
+        case desiredWeightKg = "desired_weight_kg"
+        case heightCm = "height_cm"
+        case journeyStage = "journey_stage"
+        case blockersNotes = "blockers_notes"
+        case dateOfBirth = "date_of_birth"
+        case goalPace = "goal_pace"
+        case createdAt = "created_at"
+        case bodyPhotoEmphasisTags = "body_photo_emphasis_tags"
+        case trainingEmphasis = "training_emphasis"
+    }
+
+    /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.
+    static func regionDisplay(country: String?, city: String?) -> String? {
+        let parts = [city, country]
+            .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 
     static let empty = UserProfile(
@@ -153,6 +231,8 @@ struct UserProfile: Codable, Equatable {
         injuryNotes: nil,
         experienceLevel: nil,
         pregnancy: nil,
+        pregnancyWeek: nil,
+        weeklySessionTarget: nil,
         goalBodyPhotoPath: nil,
         currentBodyPhotoPath: nil
     )

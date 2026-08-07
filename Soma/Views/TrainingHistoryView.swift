@@ -9,6 +9,9 @@ struct TrainingHistoryView: View {
     @State private var logs: [WorkoutLogEntry] = []
     @State private var isLoading = true
     @State private var selectedDate: String?
+    /// Feeds DayDetailView's "best readiness of the week" crown -- same
+    /// 7-day window and source Home's calendar strip already uses.
+    @State private var recentRecommendations: [DailyRecommendation] = []
 
     var body: some View {
         NavigationStack {
@@ -62,7 +65,7 @@ struct TrainingHistoryView: View {
             set: { if !$0 { selectedDate = nil } }
         )) {
             if let selectedDate {
-                DayDetailView(date: selectedDate)
+                DayDetailView(date: selectedDate, recentRecommendations: recentRecommendations)
             }
         }
         .task { await load() }
@@ -90,6 +93,7 @@ struct TrainingHistoryView: View {
             fromDate: formatter.string(from: start),
             toDate: formatter.string(from: end)
         )) ?? []
+        recentRecommendations = (try? await SupabaseClient.shared.fetchRecentRecommendations()) ?? []
         isLoading = false
     }
 }

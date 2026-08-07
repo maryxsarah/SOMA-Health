@@ -1,3 +1,4 @@
+import SuperwallKit
 import SwiftUI
 
 @main
@@ -5,6 +6,12 @@ struct SomaApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
     @StateObject private var sessionManager = SessionManager()
+
+    init() {
+        // Must precede AppState's first read of the keychain/UserDefaults.
+        // (@StateObject defers its wrappedValue autoclosure past this body.)
+        UITestSupport.bootstrapIfNeeded()
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -40,6 +47,13 @@ struct SomaApp: App {
                 if appState.screen != .onboarding {
                     FeedbackPresenter.present()
                 }
+            }
+            // Whoop/Oura/Google OAuth all complete via ASWebAuthenticationSession's
+            // own in-process callback, not a deep link back into the app, so
+            // this is exclusively for Superwall paywall previews/campaign
+            // deep links -- no risk of double-handling an OAuth callback.
+            .onOpenURL { url in
+                Superwall.handleDeepLink(url)
             }
             // The visual design (white cards, pale-blue gradient, navy
             // pills) is a fixed light aesthetic per spec, not an adaptive

@@ -7,6 +7,8 @@
 // scratch; the LLM still elaborates the concept into concrete
 // exercises/instructions, same as it does for the rest of the plan.
 
+import type { TrainingEmphasis } from "../_shared/nutritionTargets.ts";
+
 export type FinisherModality =
   | "emom"
   | "density_set"
@@ -79,7 +81,25 @@ const FINISHER_CATALOG: FinisherDefinition[] = [
 /// Picks the finisher matching today's body part -- falls back to the
 /// full-body metabolic-conditioning entry if there's no exact match
 /// (e.g. an injury-substituted body part this catalog doesn't cover yet).
-function selectFinisher(bodyPart: string): FinisherDefinition {
+///
+/// On a "cut" training_emphasis (from the goal-photo comparison), the
+/// cardio/sprint_interval entry is preferred over the body-part match --
+/// e.g. leg day would otherwise always get a strength-flavored "complex"
+/// finisher (see FINISHER_CATALOG's lower_body entry) with nothing that
+/// actually raises heart rate, even for someone whose stated direction is
+/// leaning out. bulk/recomp/maintain/unknown keep the existing body-part
+/// match unchanged -- this is deliberately a "cut" override, not a general
+/// rebalancing, since more compound/heavy work is exactly right for bulk.
+/// Equipment isn't checked here: the cardio concept's concrete exercises
+/// are still elaborated under the prompt's existing "ONLY the user's
+/// available equipment" constraint (index.ts's finisherEquipmentConstraint),
+/// so a bodyweight-only user gets bodyweight cardio (e.g. high knees,
+/// mountain climbers), not an assumed treadmill.
+function selectFinisher(bodyPart: string, trainingEmphasis: TrainingEmphasis | null): FinisherDefinition {
+  if (trainingEmphasis === "cut") {
+    const cardio = FINISHER_CATALOG.find((f) => f.focusArea === "cardio");
+    if (cardio) return cardio;
+  }
   return (
     FINISHER_CATALOG.find((f) => f.focusArea === bodyPart) ??
     FINISHER_CATALOG.find((f) => f.focusArea === "full_body")!
@@ -96,15 +116,14 @@ function isFinisherSafeGivenInjuries(finisher: FinisherDefinition, excludedKeywo
   return !excludedKeywords.some((kw) => haystack.includes(kw.toLowerCase()));
 }
 
-/// True if yesterday's logged workout was itself a push_hard day targeting
-/// the SAME focus area as this finisher -- avoids stacking two max-effort
-/// sessions on the same muscle group back to back.
+/// True if yesterday's push_hard day targeted the same muscle group as today.
+/// Takes the real body part, not the finisher's own (possibly cut-redirected) focusArea.
 function conflictsWithRecentSplit(
-  finisher: FinisherDefinition,
+  bodyPart: string,
   recentLogs: { date: string; body_part: string; category: string }[],
   yesterday: string,
 ): boolean {
-  return recentLogs.some((l) => l.date === yesterday && l.category === "push_hard" && l.body_part === finisher.focusArea);
+  return recentLogs.some((l) => l.date === yesterday && l.category === "push_hard" && l.body_part === bodyPart);
 }
 
 export interface FinisherDecision {
@@ -129,15 +148,16 @@ export function decideFinisher(
   excludedKeywords: string[],
   recentLogs: { date: string; body_part: string; category: string }[],
   yesterday: string,
+  trainingEmphasis: TrainingEmphasis | null = null,
 ): FinisherDecision {
   const eligibleCategory = category === "moderate" || category === "push_hard";
   if (!eligibleCategory) {
     return { include: false, exceptional: false, definition: null };
   }
 
-  const candidate = selectFinisher(bodyPart);
+  const candidate = selectFinisher(bodyPart, trainingEmphasis);
   const safeFromInjury = isFinisherSafeGivenInjuries(candidate, excludedKeywords);
-  const safeFromSplit = !conflictsWithRecentSplit(candidate, recentLogs, yesterday);
+  const safeFromSplit = !conflictsWithRecentSplit(bodyPart, recentLogs, yesterday);
   return {
     include: true,
     exceptional: exceptionalReadiness && safeFromInjury && safeFromSplit,

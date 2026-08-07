@@ -53,20 +53,16 @@ final class WhoopOAuthManager: NSObject, ASWebAuthenticationPresentationContextP
                     continuation.resume(throwing: error)
                     return
                 }
-                guard
-                    let callbackURL,
-                    let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
-                    let code = components.queryItems?.first(where: { $0.name == "code" })?.value
-                else {
+                guard let callbackURL else {
                     continuation.resume(throwing: OAuthError.missingCode)
                     return
                 }
-                let returnedState = components.queryItems?.first(where: { $0.name == "state" })?.value
-                guard returnedState == expectedState else {
-                    continuation.resume(throwing: OAuthError.stateMismatch)
-                    return
+                do {
+                    let code = try OAuthPKCE.extractCode(from: callbackURL, expectedState: expectedState)
+                    continuation.resume(returning: code)
+                } catch {
+                    continuation.resume(throwing: error)
                 }
-                continuation.resume(returning: code)
             }
             session.presentationContextProvider = self
             session.prefersEphemeralWebBrowserSession = true

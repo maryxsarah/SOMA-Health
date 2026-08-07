@@ -76,9 +76,7 @@ struct GoalPaceQuestionView: View {
     }
 
     private var estimatedMonths: Int {
-        let baselineMonthsPerKg = 0.9
-        let months = abs(weightDeltaKg) * baselineMonthsPerKg * pace.timelineMultiplier
-        return max(1, Int(months.rounded()))
+        GoalPace.estimatedMonths(deltaKg: weightDeltaKg, pace: pace)
     }
 
     private var estimateHeadline: String {

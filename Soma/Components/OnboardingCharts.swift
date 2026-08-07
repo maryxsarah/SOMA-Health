@@ -24,6 +24,9 @@ struct TrendLineShape: Shape {
 /// plan-summary screen both reuse this.
 struct UpwardTrendChartView: View {
     var xAxisLabels: [String] = ["3 Days", "7 Days", "30 Days"]
+    /// Compact call sites (e.g. the welcome screen, which must fit without
+    /// scrolling) pass a shorter height than the default.
+    var chartHeight: CGFloat = 160
     @State private var drawProgress: CGFloat = 0
     @State private var showBadge = false
 
@@ -47,7 +50,7 @@ struct UpwardTrendChartView: View {
                         .transition(.scale.combined(with: .opacity))
                 }
             }
-            .frame(height: 160)
+            .frame(height: chartHeight)
 
             HStack {
                 ForEach(xAxisLabels, id: \.self) { label in
@@ -56,7 +59,7 @@ struct UpwardTrendChartView: View {
                 }
             }
         }
-        .padding(20)
+        .padding(chartHeight < 160 ? 14 : 20)
         .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(.systemGray6)))
         .onAppear {
             withAnimation(.easeOut(duration: 1.4)) { drawProgress = 1 }

@@ -1,5 +1,6 @@
 import AuthenticationServices
 import CryptoKit
+import SuperwallKit
 import UIKit
 
 /// Drives Sign in with Apple (Screen 1's "Get Started" button) using a
@@ -41,6 +42,7 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
         do {
             try await performSignIn()
             AnalyticsManager.shared.loginCompleted()
+            identifyWithSuperwall()
             return true
         } catch {
             errorMessage = Self.userFacingMessage(for: error)
@@ -97,6 +99,7 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
         do {
             try await GoogleOAuthManager.shared.signIn()
             AnalyticsManager.shared.loginCompleted()
+            identifyWithSuperwall()
             return true
         } catch {
             errorMessage = Self.userFacingMessage(forGoogleOrEmail: error)
@@ -119,6 +122,7 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
         do {
             let sessionEstablished = try await SupabaseClient.shared.signUpWithEmail(email: email, password: password)
             AnalyticsManager.shared.signupCompleted()
+            identifyWithSuperwall()
             return sessionEstablished
         } catch {
             errorMessage = Self.userFacingMessage(forGoogleOrEmail: error)
@@ -135,6 +139,7 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
         do {
             try await SupabaseClient.shared.signInWithEmail(email: email, password: password)
             AnalyticsManager.shared.loginCompleted()
+            identifyWithSuperwall()
             return true
         } catch {
             errorMessage = Self.userFacingMessage(forGoogleOrEmail: error)
@@ -163,6 +168,17 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
             return "That password doesn't meet the requirements -- try a longer one."
         }
         return "Couldn't complete that. Please try again."
+    }
+
+    /// Aliases the anonymous on-device Superwall ID to Soma's real user id
+    /// (a UUID, satisfying StoreKit's appAccountToken requirement -- see
+    /// Superwall's identify(userId:) docs) so paywall assignment and
+    /// purchase attribution carry across reinstalls/devices. A returning
+    /// signed-in user is identified separately, at launch, in
+    /// AppDelegate -- this covers the moment of interactive sign-in itself.
+    private func identifyWithSuperwall() {
+        guard let userId = SupabaseClient.shared.currentUserID else { return }
+        Superwall.shared.identify(userId: userId)
     }
 
     private func performSignIn() async throws {
