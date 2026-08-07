@@ -171,6 +171,13 @@ interface UserRow {
   /// finisher selection and to add one more prompt line. Kept separate
   /// from `goals`, same reasoning as body_photo_emphasis_tags.
   training_emphasis: TrainingEmphasis | null;
+  /// Optional, user-stated real working weights (Profile's "your current
+  /// lifts" section) keyed by the same bilateral pattern names as
+  /// loadGuidance.ts's LOAD_FRACTION_OF_BODYWEIGHT -- when present for a
+  /// pattern, buildLoadGuidance uses it instead of the population-level
+  /// bodyweight-ratio estimate. See that function's own comment for the
+  /// bug this exists to fix.
+  known_lifts: Record<string, number> | null;
 }
 
 interface SnapshotRow {
@@ -251,6 +258,18 @@ Deno.serve(async (req: Request) => {
     if (safety.flagged) {
       return jsonResponse({ date, safety_flag: true, message: safety.message });
     }
+    // The injury state belongs in the cache key -- same fix already applied
+    // to generate-gym-workout (see that function's own comment on this
+    // exact bug), never carried over here. Without it, a plan generated
+    // before the user noted an injury replayed unchanged after they added
+    // one: a "back" tag added mid-morning never invalidated a deadlift
+    // already cached from a generation minutes earlier, because nothing
+    // about the cache-hit path below ever re-consulted injury state. A
+    // severity edit (mild -> severe) must also miss the cache -- it changes
+    // which keywords get excluded, not just whether any do.
+    const injurySignature =
+      (safety.excludeHighImpact ? "no-impact|" : "") +
+      (safety.excludedKeywords.length > 0 ? "kw:" + [...safety.excludedKeywords].sort().join(",") : "");
 
     // Active sport goal (Sport Goal Programs) -- fetched before the cache
     // read because its state hash joins cache identity below.
@@ -300,9 +319,21 @@ Deno.serve(async (req: Request) => {
     const cachedGoalSignature =
       ((cached?.plan as { goal_signature?: string | null } | undefined)?.goal_signature) ?? null;
     const cachedSelectionLogged = (existingLogs ?? []).some((log) => log.title === selection.title);
+    // Deliberately stricter than the goal-signature null-passes rule above:
+    // a cache row from before this column existed (cachedInjurySignature ===
+    // null) only serves as-is when the user currently has NO active
+    // exclusions (injurySignature === "") -- there is nothing it could have
+    // gotten wrong in that case. If the user currently has an injury
+    // exclusion active, an old-format row can never be verified safe and
+    // regenerates, same as an explicit signature mismatch would.
+    const cachedInjurySignature =
+      ((cached?.plan as { injury_signature?: string | null } | undefined)?.injury_signature) ?? null;
+    const injurySignatureOk = cachedSelectionLogged ||
+      (cachedInjurySignature !== null ? cachedInjurySignature === injurySignature : injurySignature === "");
     if (
       cached && cached.selected_title === selection.title &&
-      (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged)
+      (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged) &&
+      injurySignatureOk
     ) {
       return jsonResponse({ date, category: cached.category, source: cached.source, ...cached.plan });
     }
@@ -347,7 +378,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis")
+      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -560,6 +591,9 @@ Deno.serve(async (req: Request) => {
       // Cache identity (see the cache read above) + tomorrow's goal-block
       // history (hangs-never-consecutive-days rule in goalWork.ts).
       goal_signature: goalSignature,
+      // Cache identity -- see the injurySignature comment near the top of
+      // this handler for why this exists at all.
+      injury_signature: injurySignature,
       goal_block: goalBlockMeta(goalDecision),
       // Drives the "Optional finisher -- you're well recovered today"
       // badge client-side (AIWorkoutPlanSections.swift) -- only ever true
@@ -711,7 +745,7 @@ function buildPrompt(
   const injuryNotes = userRow?.injury_notes ? ` User's free-text notes: ${userRow.injury_notes}.` : "";
   const experience = userRow?.experience_level ?? "moderate";
   const experienceGuidance = EXPERIENCE_GUIDANCE[experience] ?? EXPERIENCE_GUIDANCE.moderate;
-  const loadGuidance = buildLoadGuidance(userRow?.weight_kg ?? null, experience);
+  const loadGuidance = buildLoadGuidance(userRow?.weight_kg ?? null, experience, userRow?.known_lifts ?? null);
   const ageLine = userRow?.date_of_birth ? `The user is ${ageFromDOB(userRow.date_of_birth)} years old -- use general caution appropriate to their age, but this is context, not a numeric load rule.` : "";
   const sexLine = userRow?.sex ? `Sex: ${userRow.sex}.` : "";
   // Deterministic, trimester-scaled guidance -- never left to the model to

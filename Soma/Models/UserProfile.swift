@@ -152,6 +152,15 @@ struct UserProfile: Codable, Equatable {
     var heightCm: Double? = nil
     var journeyStage: JourneyStage? = nil
     var blockersNotes: String? = nil
+    /// Optional, user-stated real working weights for the 5 bilateral
+    /// load-guidance patterns generate-workout-plan's loadGuidance.ts
+    /// uses, keyed the same way (squat_pattern/hinge_pattern/
+    /// overhead_press/horizontal_press/row_pull -- see LiftPattern), kg
+    /// values. When present for a pattern, the AI workout plan uses it
+    /// directly instead of estimating from bodyweight -- real feedback: a
+    /// self-described non-powerlifter was prescribed 125-135kg for a
+    /// deadlift from the population estimate alone.
+    var knownLifts: [String: Double]? = nil
     /// Read-only (set at onboarding, never edited here) -- "yyyy-MM-dd".
     /// Exists on this model ONLY for the Goal Body adult-only gate
     /// (bodyPhotosEditor); every other date-of-birth use is server-side.
@@ -206,6 +215,7 @@ struct UserProfile: Codable, Equatable {
         case heightCm = "height_cm"
         case journeyStage = "journey_stage"
         case blockersNotes = "blockers_notes"
+        case knownLifts = "known_lifts"
         case dateOfBirth = "date_of_birth"
         case goalPace = "goal_pace"
         case createdAt = "created_at"
@@ -236,4 +246,40 @@ struct UserProfile: Codable, Equatable {
         goalBodyPhotoPath: nil,
         currentBodyPhotoPath: nil
     )
+}
+
+/// The 5 bilateral movement patterns generate-workout-plan's
+/// loadGuidance.ts prices load guidance around -- same raw values as
+/// that file's LOAD_FRACTION_OF_BODYWEIGHT keys, used as the dictionary
+/// keys in UserProfile.knownLifts. Deliberately no unilateral entries:
+/// nobody tracks a "one-arm dumbbell row max" the way they track a
+/// squat/bench/deadlift number.
+enum LiftPattern: String, CaseIterable, Identifiable {
+    case squatPattern = "squat_pattern"
+    case hingePattern = "hinge_pattern"
+    case overheadPress = "overhead_press"
+    case horizontalPress = "horizontal_press"
+    case rowPull = "row_pull"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .squatPattern: "Squat"
+        case .hingePattern: "Deadlift"
+        case .overheadPress: "Overhead press"
+        case .horizontalPress: "Bench press"
+        case .rowPull: "Row"
+        }
+    }
+
+    var placeholder: String {
+        switch self {
+        case .squatPattern: "e.g. back squat, both legs"
+        case .hingePattern: "e.g. barbell deadlift"
+        case .overheadPress: "e.g. barbell or double-dumbbell, both arms"
+        case .horizontalPress: "e.g. barbell or dumbbell bench, both arms"
+        case .rowPull: "e.g. barbell row, both arms"
+        }
+    }
 }

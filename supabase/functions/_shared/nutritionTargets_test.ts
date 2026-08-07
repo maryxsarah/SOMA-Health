@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { activityLevelFromWorkoutsPerWeek, computeNutritionTargets } from "./nutritionTargets.ts";
+import { activityLevelFromWorkoutsPerWeek, computeNutritionTargets, trainingEmphasisFromWeights } from "./nutritionTargets.ts";
 
 Deno.test("Mifflin-St Jeor: known worked example matches by hand (male, moderate, maintain)", () => {
   // BMR = 10*80 + 6.25*180 - 5*30 + 5 = 800 + 1125 - 150 + 5 = 1780
@@ -94,4 +94,31 @@ Deno.test("basis string names the formula and every input that drove the result"
     weightKg: 60, heightCm: 160, age: 22, sex: "female", activityLevel: "sedentary", trainingEmphasis: "recomp",
   });
   assertEquals(result.basis, "mifflin_st_jeor:recomp:activity=sedentary:sex=female");
+});
+
+Deno.test("trainingEmphasisFromWeights: a meaningfully lower target reads as cut", () => {
+  assertEquals(trainingEmphasisFromWeights(80, 74), "cut");
+});
+
+Deno.test("trainingEmphasisFromWeights: a meaningfully higher target reads as bulk", () => {
+  assertEquals(trainingEmphasisFromWeights(70, 76), "bulk");
+});
+
+Deno.test("trainingEmphasisFromWeights: a target within 2% of current reads as maintain, not noise", () => {
+  assertEquals(trainingEmphasisFromWeights(80, 80.5), "maintain");
+  assertEquals(trainingEmphasisFromWeights(80, 79.5), "maintain");
+});
+
+Deno.test("trainingEmphasisFromWeights: the 2% threshold is proportional, not a flat kg amount", () => {
+  // 2kg on a 50kg person (4%) is a real signal; 2kg on a 120kg person
+  // (1.7%) is inside normal fluctuation -- a flat kg threshold would get
+  // these backwards or treat them the same.
+  assertEquals(trainingEmphasisFromWeights(50, 48), "cut");
+  assertEquals(trainingEmphasisFromWeights(120, 118), "maintain");
+});
+
+Deno.test("trainingEmphasisFromWeights: missing either input returns null rather than guessing", () => {
+  assertEquals(trainingEmphasisFromWeights(null, 74), null);
+  assertEquals(trainingEmphasisFromWeights(80, null), null);
+  assertEquals(trainingEmphasisFromWeights(null, null), null);
 });

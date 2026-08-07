@@ -266,7 +266,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -301,6 +301,7 @@ final class SupabaseClient {
         body["height_cm"] = profile.heightCm ?? NSNull()
         body["journey_stage"] = profile.journeyStage?.rawValue ?? NSNull()
         body["blockers_notes"] = profile.blockersNotes ?? NSNull()
+        body["known_lifts"] = (profile.knownLifts?.isEmpty ?? true) ? NSNull() : profile.knownLifts!
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")

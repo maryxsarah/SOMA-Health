@@ -120,8 +120,16 @@ enum GoalPace: String, Codable, CaseIterable, Identifiable {
     /// this same real number instead of a generic, unrelated chart
     /// timeline (tester feedback: "needs to be realistic with recommended
     /// timeline").
+    ///
+    /// Direction matters here, not just distance -- a single flat
+    /// months-per-kg baseline (tester feedback: "probably can take a bit
+    /// more than 1 month" on a size/muscle goal) understated bulk timelines
+    /// badly. Losing weight can track close to a commonly-cited
+    /// 0.5-1kg/week sustainable rate; natural muscle/mass gain is far
+    /// slower even at a fast pace, so a positive deltaKg (bulk) uses a
+    /// meaningfully larger baseline than a negative one (cut).
     static func estimatedMonths(deltaKg: Double, pace: GoalPace) -> Int {
-        let baselineMonthsPerKg = 0.9
+        let baselineMonthsPerKg = deltaKg > 0 ? 1.3 : 0.45
         let months = abs(deltaKg) * baselineMonthsPerKg * pace.timelineMultiplier
         return max(1, Int(months.rounded()))
     }

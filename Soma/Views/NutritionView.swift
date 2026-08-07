@@ -83,11 +83,16 @@ struct NutritionView: View {
 
     // MARK: - Empty state (no target computed yet)
 
+    /// Reached only once the silent weight-only attempt in load() has
+    /// already come back empty -- i.e. weight/height/goal-weight aren't
+    /// all on file (normally collected at onboarding, so this is the
+    /// rare case, not the common one). Copy reflects that photos are one
+    /// option now, not a requirement.
     private var emptyStateSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Get your daily targets.")
                 .font(Theme.display)
-            Text("Add a goal photo and a current photo -- Soma uses them to work out a calorie and macro target that actually fits where you are today and where you're headed.")
+            Text("Soma computes this from your weight, height, and goal weight -- normally already on file from onboarding. Add goal photos for an even more tailored target, or make sure those numbers are filled in.")
                 .font(.body)
                 .foregroundStyle(.secondary)
             Button {
@@ -246,6 +251,18 @@ struct NutritionView: View {
         isLoading = true
         errorMessage = nil
         target = try? await SupabaseClient.shared.fetchNutritionTargets()
+        // No target yet doesn't necessarily mean "never set up goal
+        // photos" -- analyze-body-photo can now also derive a target from
+        // just the weight/goal-weight already collected at onboarding, no
+        // photos required (real feedback: "a lot of users likely won't
+        // want to upload their photos, and calories can already be
+        // estimated roughly from the target weight and the current one").
+        // One silent attempt, then re-check -- a user with neither weight
+        // nor photos on file still lands on the real empty state below.
+        if target == nil {
+            try? await SupabaseClient.shared.analyzeBodyPhotos()
+            target = try? await SupabaseClient.shared.fetchNutritionTargets()
+        }
         if target != nil {
             await loadEntries()
         }

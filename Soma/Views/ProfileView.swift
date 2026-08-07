@@ -42,6 +42,11 @@ struct ProfileView: View {
     @State private var pregnancy: Bool?
     @State private var pregnancyWeek: Int?
     @State private var weeklySessionTarget: Int?
+    /// Text, not Double, per pattern -- same "let the user type freely,
+    /// parse on save" reasoning as LogMealView's numeric fields. A blank
+    /// entry for a pattern just means "keep using the estimate for this
+    /// one", not zero.
+    @State private var knownLiftsText: [LiftPattern: String] = [:]
     @State private var sessionsDoneThisWeek = 0
     // Region (country ISO code + free-text city) -- powers the future
     // nearby gyms/partners suggestions; saved via the normal profile flow.
@@ -633,6 +638,12 @@ struct ProfileView: View {
             ) { activeSheet = .experience }
 
             summaryRow(
+                title: "Your current lifts",
+                consequence: "Optional -- a real number beats an estimated one",
+                value: knownLifts.isEmpty ? "Not set" : "\(knownLifts.count) set"
+            ) { activeSheet = .knownLifts }
+
+            summaryRow(
                 title: "Goals",
                 consequence: "Prioritizes which workouts are suggested first",
                 value: goals.isEmpty ? "Not set" : "\(goals.count) selected"
@@ -917,6 +928,7 @@ struct ProfileView: View {
                     case .pregnancy: pregnancyEditor
                     case .contactEmail: contactEmailEditor
                     case .region: regionEditor
+                    case .knownLifts: knownLiftsEditor
                     }
                 }
                 .padding(20)
@@ -1000,6 +1012,38 @@ struct ProfileView: View {
                 Text("\(sessionsDoneThisWeek) done this week so far.")
                     .font(.caption.bold())
                     .foregroundStyle(SomaTokens.accent)
+            }
+        }
+    }
+
+    /// Real feedback: a self-described non-powerlifter was prescribed
+    /// 125-135kg for a barbell deadlift from the population-level
+    /// bodyweight-ratio estimate alone. Entirely optional, entirely
+    /// separate from experience level -- filling in even one pattern here
+    /// makes the AI plan use that real number for that pattern specifically,
+    /// leaving the others on the estimate.
+    private var knownLiftsEditor: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("If you know your comfortable working weight for any of these, Soma uses it directly for the AI plan instead of estimating from your bodyweight and experience level. Leave any blank to keep using the estimate.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(LiftPattern.allCases) { pattern in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(pattern.displayName)
+                        .font(.system(size: 14.5, weight: .semibold))
+                    HStack {
+                        TextField(pattern.placeholder, text: Binding(
+                            get: { knownLiftsText[pattern] ?? "" },
+                            set: { knownLiftsText[pattern] = $0 }
+                        ))
+                        .keyboardType(.numberPad)
+                        Text("kg")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous).fill(SomaTokens.surface3))
+                }
             }
         }
     }
@@ -1191,6 +1235,9 @@ struct ProfileView: View {
         pregnancy = profile.pregnancy
         pregnancyWeek = profile.pregnancyWeek
         weeklySessionTarget = profile.weeklySessionTarget
+        knownLiftsText = Dictionary(uniqueKeysWithValues: (profile.knownLifts ?? [:]).compactMap { key, value in
+            LiftPattern(rawValue: key).map { ($0, String(Int(value))) }
+        })
         countryCode = profile.country
         cityText = profile.city ?? ""
         betaOptIn = (try? await SupabaseClient.shared.fetchBetaOptIn()) ?? false
@@ -1337,6 +1384,20 @@ struct ProfileView: View {
         return Set(logs.map(\.date)).count
     }
 
+    /// Parses knownLiftsText into the wire shape -- a blank or
+    /// non-positive entry for a pattern is dropped rather than saved as
+    /// 0, so it falls back to the population estimate exactly like never
+    /// having entered anything.
+    private var knownLifts: [String: Double] {
+        var result: [String: Double] = [:]
+        for (pattern, text) in knownLiftsText {
+            if let value = Double(text.trimmingCharacters(in: .whitespaces)), value > 0 {
+                result[pattern.rawValue] = value
+            }
+        }
+        return result
+    }
+
     private func save() {
         guard let userId = SupabaseClient.shared.currentUserID else { return }
         isSaving = true
@@ -1356,7 +1417,8 @@ struct ProfileView: View {
             pregnancyWeek: pregnancy == true ? pregnancyWeek : nil,
             weeklySessionTarget: weeklySessionTarget,
             country: countryCode,
-            city: cityText.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cityText.trimmingCharacters(in: .whitespaces)
+            city: cityText.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cityText.trimmingCharacters(in: .whitespaces),
+            knownLifts: knownLifts
         )
 
         let currentInjuryTags = Array(injuryTags)
@@ -1395,7 +1457,7 @@ private enum ProfileSection: String, CaseIterable, Identifiable {
 }
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region
+    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -1407,6 +1469,7 @@ private enum ProfileSheet: String, Identifiable {
         case .pregnancy: "Pregnancy"
         case .contactEmail: "Contact email"
         case .region: "Region"
+        case .knownLifts: "Your current lifts"
         }
     }
 }

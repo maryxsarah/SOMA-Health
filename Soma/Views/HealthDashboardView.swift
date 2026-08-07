@@ -245,6 +245,49 @@ struct HealthDashboardView: View {
                     .font(.caption)
                     .foregroundStyle(SomaTokens.ink4)
             }
+
+            if let bmi = BodyMetrics.bmi(weightKg: weight, heightCm: profile?.heightCm) {
+                CardView {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("BMI")
+                            .font(.subheadline.bold())
+                        Spacer()
+                        Text(String(format: "%.1f", bmi))
+                            .font(.system(size: 22, design: .serif).italic())
+                    }
+                    Text(BodyMetrics.bmiCategory(bmi))
+                        .font(.caption.bold())
+                        .foregroundStyle(SomaTokens.ink2)
+                    Text("A general population screening measure, not a fitness or body-composition score -- it doesn't distinguish muscle from fat.")
+                        .font(.caption2)
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+            }
+
+            if let journey = GoalJourneyProgress.compute(
+                createdAt: profile?.createdAt,
+                weightKg: profile?.weightKg,
+                desiredWeightKg: profile?.desiredWeightKg,
+                goalPace: profile?.goalPace
+            ) {
+                CardView {
+                    Text("Progress toward your goal")
+                        .font(.subheadline.bold())
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(SomaTokens.surface3)
+                            Capsule()
+                                .fill(SomaTokens.accent)
+                                .frame(width: max(0, geo.size.width * journey.fraction))
+                        }
+                    }
+                    .frame(height: 10)
+                    .clipShape(Capsule())
+                    Text("Day \(journey.daysElapsed) of roughly \(journey.estimatedTotalDays), at your chosen pace.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         } else {
             CardView {
                 Text("No body data yet")

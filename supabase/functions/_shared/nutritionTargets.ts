@@ -114,3 +114,31 @@ export function computeNutritionTargets(input: NutritionTargetsInput): Nutrition
     basis: `mifflin_st_jeor:${input.trainingEmphasis}:activity=${input.activityLevel}:sex=${input.sex}`,
   };
 }
+
+/// Deterministic training_emphasis fallback for when there's no goal/
+/// current body photo pair to run analyze-body-photo's vision comparison
+/// against -- real feedback: "a lot of users likely won't want to upload
+/// their photos, and calories can already be estimated roughly from the
+/// target weight and the current one." Both inputs are already collected
+/// at onboarding regardless of whether the (separate, optional) body-
+/// photo feature is ever used.
+///
+/// Cannot distinguish "recomp" from "maintain" without photos -- both
+/// look identical as just "a similar target weight" -- so a close target
+/// reads as maintain, the honest simpler answer, rather than guessing.
+/// A percentage-of-bodyweight threshold (not a flat kg one) so "2kg"
+/// means something proportionally consistent whether someone weighs 50kg
+/// or 120kg.
+export function trainingEmphasisFromWeights(
+  weightKg: number | null,
+  desiredWeightKg: number | null,
+): TrainingEmphasis | null {
+  if (weightKg === null || desiredWeightKg === null || weightKg <= 0) return null;
+  const deltaFraction = (desiredWeightKg - weightKg) / weightKg;
+  // Inside +/-2% of current bodyweight is comfortably within normal
+  // day-to-day fluctuation -- below that, a direction would be reading
+  // noise, not an actual stated goal.
+  if (deltaFraction <= -0.02) return "cut";
+  if (deltaFraction >= 0.02) return "bulk";
+  return "maintain";
+}

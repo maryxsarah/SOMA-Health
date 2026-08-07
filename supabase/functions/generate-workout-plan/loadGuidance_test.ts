@@ -59,6 +59,35 @@ Deno.test("prompt text instructs rounding to real dumbbell/kettlebell increments
   assert(guidance.toLowerCase().includes("increment"));
 });
 
+Deno.test("REGRESSION: the real bug report -- an advanced-tier deadlift stays well under the old 125-135kg ceiling for a realistic bodyweight", () => {
+  // BUG report: a self-described non-powerlifter was prescribed
+  // 125-135kg for a barbell deadlift (near the old advanced ceiling of
+  // 1.75x bodyweight -- elite/competitive territory for a working set).
+  const [, advancedHigh] = loadFractionRange("hinge_pattern", "advanced");
+  const bodyweightKg = 80;
+  assert(
+    advancedHigh * bodyweightKg < 125,
+    `advanced hinge ceiling for an 80kg lifter (${(advancedHigh * bodyweightKg).toFixed(0)}kg) must be well under the reported unrealistic 125-135kg`,
+  );
+});
+
+Deno.test("a known lift always overrides the population estimate for that pattern", () => {
+  const guidance = buildLoadGuidance(80, "advanced", { hinge_pattern: 100 });
+  assert(guidance.includes("90-110kg"), `expected a +/-10% band around the stated 100kg, got: ${guidance}`);
+});
+
+Deno.test("known lifts only apply to the pattern they were given for -- other patterns stay population-based", () => {
+  const withKnown = buildLoadGuidance(80, "moderate", { hinge_pattern: 100 });
+  const withoutKnown = buildLoadGuidance(80, "moderate");
+  const squatLine = (s: string) => s.match(/squat pattern (\d+-\d+kg)/)?.[1];
+  assertEquals(squatLine(withKnown), squatLine(withoutKnown));
+});
+
+Deno.test("a missing or zero known lift for a pattern falls back to the population estimate, not a bogus 0-0kg range", () => {
+  const guidance = buildLoadGuidance(80, "moderate", { hinge_pattern: 0, squat_pattern: undefined as unknown as number });
+  assert(!guidance.includes("0-0kg"));
+});
+
 Deno.test("unknown experience level falls back to moderate, same as the rest of this codebase's convention", () => {
   const guidance = buildLoadGuidance(70, "some_unknown_value");
   const moderateGuidance = buildLoadGuidance(70, "moderate");
