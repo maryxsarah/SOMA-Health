@@ -45,6 +45,9 @@ Case IDs are referenced from test names, e.g. `test_SGP_D2_etaSlipLine`.
 | SGP-B5 | negative | Second active goal → HTTP 409 → "You already have an active goal…" error shown, nothing created | manual + deno (partial unique index; create-goal) | covered |
 | SGP-B6 | negative | Goal created but baseline insert failed → button retries **only** the baseline (no duplicate goal; BUG-78) | unit (`GoalCreationFlowTests`) | automated |
 | SGP-B7 | state | Safety conflict at create (e.g. pregnancy × unsafe goal keywords): warning card requires explicit acknowledgment | snapshot + deno (`goalConflicts_test.ts`) | automated |
+| SGP-B8 | journey | Coach's task AI assist: pasted text → "Auto-fill with AI" → coach name/duration/frequency fields pre-fill for review, nothing submits until "Start the block" | uitest **J15** + deno (`assignmentParsing_test.ts`) | automated |
+| SGP-B9 | negative | Unparseable input → low-confidence notice shown, already-good fields left completely untouched (never overwritten with garbage) | uitest **J15** + deno (`assignmentParsing_test.ts`) | automated |
+| SGP-B10 | journey | Preset goal creation gains the same schedule step custom goals already have (specific weekdays / every-other-day / before court days / readiness); the matched band's named program (e.g. "Foundation Jump Block") renders pre-creation and persists post-creation | uitest **J17** | automated |
 
 ## C. Daily training
 
@@ -56,6 +59,7 @@ Case IDs are referenced from test names, e.g. `test_SGP_D2_etaSlipLine`.
 | SGP-C4 | behavior | Dose caps & spacing: ≤60 plyo contacts, hangs never on consecutive days, ≤3 padel wall sessions/wk | deno | covered |
 | SGP-C5 | behavior | Custom coach text emitted byte-identical, "Built with Coach X" | deno | covered |
 | SGP-C6 | behavior | Goal exercises union into the vocabulary **before** equipment/level/exclusion filters (BUG-73) | deno | covered |
+| SGP-C7 | state | Calendar strip stars any day with a real `goal_block`, coexisting with the crown on the same day, absent on days with none | uitest **J16** | automated |
 
 ## D. Progress & re-test
 
@@ -69,6 +73,7 @@ Case IDs are referenced from test names, e.g. `test_SGP_D2_etaSlipLine`.
 | SGP-D6 | journey | |delta| ≤ noise band → "No change yet — normal at this stage." — honest, not dressed up as progress | uitest **J9** + snapshot | automated |
 | SGP-D7 | journey | Day-5 baseline confirm: "Confirm your baseline" → save → "official starting point"; week-1 hub shows the "second attempts usually score higher" line | uitest **J8** + snapshot | automated |
 | SGP-D8 | state | Progress chart: 0 points ("your baseline starts the chart"), 1 point, trend | snapshot | automated |
+| SGP-D9 | state | Hub "Upcoming" section: weekdays/before-court-days show real next dates, every-other-day/readiness/no-schedule show an honest description instead of a fabricated date — same for preset and custom goals | unit (`UpcomingSessionsTests`) + uitest **J17** (renders) | automated |
 
 ## E. Lifecycle edges
 
@@ -110,6 +115,9 @@ Superwall paywall never gates the detail sheet.
 | J12 `test_SGP_E5_finalRetestMissedStaysNeutral` | `activeGoalAtEta` | SGP-E5 (neutral ending) |
 | J13 `test_SGP_E1_pauseAndResume` | `activeGoalWeek4Slipped` | SGP-E1 |
 | J14 `test_SGP_A4_betaToggleOpensCatalog` | `betaGate` | SGP-A4 (stubbed RLS gate) |
+| J15 `test_SGP_B8_autoFillAssignmentFromTextThenLowConfidence` | `customCoachFlow` | SGP-B8, SGP-B9 |
+| J16 `test_SGP_C7_calendarStripShowsGoalTrainingStar` | `activeGoalWeek2` | SGP-C7 |
+| J17 `test_SGP_B10_presetGoalGetsScheduleAndNamedProgram` | `catalogOpen` | SGP-B10, SGP-D9 (renders) |
 
 ## Known non-coverage
 

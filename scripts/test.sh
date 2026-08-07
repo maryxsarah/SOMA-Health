@@ -46,6 +46,9 @@ UI_TESTS=(
   test_SGP_E5_finalRetestMissedStaysNeutral
   test_SGP_E7_endGoalOffersPauseInsteadFirst
   test_SGP_E8_coachTaskHubCountsSessionsAndExports
+  test_SGP_B8_autoFillAssignmentFromTextThenLowConfidence
+  test_SGP_C7_calendarStripShowsGoalTrainingStar
+  test_SGP_B10_presetGoalGetsScheduleAndNamedProgram
 )
 
 run_ui() {

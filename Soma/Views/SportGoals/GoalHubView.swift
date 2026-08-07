@@ -167,6 +167,10 @@ struct GoalHubView: View {
 
                 baselineConfirmNote
 
+                if !isPaused, !isUnavailable {
+                    upcomingCard
+                }
+
                 if goal.kind == .custom || presetGoal?.kind == .qualitative {
                     sessionsCard
                 }
@@ -234,6 +238,11 @@ struct GoalHubView: View {
                 .foregroundStyle(SomaTokens.ink3)
             Text(goal.displayName(in: catalog))
                 .font(Theme.display)
+            if let programName = goal.programName {
+                Text(programName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(SomaTokens.accent)
+            }
             if !isPaused {
                 GoalPhaseStrip(current: goal.currentPhase)
                     .padding(.vertical, 4)
@@ -395,6 +404,25 @@ struct GoalHubView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.accentSoft))
+    }
+
+    // MARK: - Upcoming
+
+    /// weekdays/beforeCourtDays get real forward dates; every other rule
+    /// gets an honest description instead of a guessed one (see UpcomingSessions).
+    private var upcomingCard: some View {
+        CardView {
+            Text("Upcoming")
+                .font(.body.bold())
+            switch UpcomingSessions.display(scheduleRule: goal.scheduleRule, scheduleDays: goal.scheduleDays, courtDays: goal.courtDays) {
+            case .dates(let dates):
+                Text(dates.map(SportGoalFormat.weekdayShort).joined(separator: " · "))
+                    .font(.system(size: 15, weight: .semibold))
+            case .qualitative(let description):
+                Text(description)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+        }
     }
 
     // MARK: - Sessions (custom & qualitative)

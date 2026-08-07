@@ -118,6 +118,19 @@ enum FixtureScenario: String {
     var onboardingSeenAtLaunch: Bool { self != .catalogOpen }
 }
 
+/// Independent of FixtureScenario -- passed via the UITEST_NUTRITION_STATE
+/// launch environment so any sport-goal scenario can also carry a nutrition
+/// day. Nil (the default) reproduces today's real behavior: nutrition_targets
+/// empty, nutritionRow shows its CTA state.
+enum NutritionFixtureState: String {
+    case perfect, over, under
+
+    static var current: NutritionFixtureState? {
+        ProcessInfo.processInfo.environment["UITEST_NUTRITION_STATE"]
+            .flatMap(NutritionFixtureState.init(rawValue:))
+    }
+}
+
 // MARK: - Fixture data (PostgREST wire shapes)
 
 /// All rows are built at request time so relative dates (week 4, day 28)
@@ -140,6 +153,64 @@ enum FixtureData {
 
     static var today: String { day(fromNow: 0) }
 
+    // MARK: - Nutrition fixtures
+
+    static func loggedAt(hoursAgo: Int) -> String {
+        ISO8601DateFormatter().string(from: Date().addingTimeInterval(TimeInterval(-hoursAgo * 3600)))
+    }
+
+    static let nutritionTargetsRow: [String: Any] = [
+        "daily_calories": 2200, "daily_protein_g": 160, "daily_carbs_g": 220, "daily_fat_g": 70,
+        "computed_at": iso(daysAgo: 3), "basis": "mifflin_st_jeor:cut:activity=moderate:sex=female",
+    ]
+
+    /// Three calorie stories against the 2200 kcal target above -- perfect
+    /// (right on target), over (a heavy day, protein still lags), under
+    /// (light on volume even though the choices themselves score well).
+    static func mealLogRows(state: NutritionFixtureState) -> [[String: Any]] {
+        func row(_ id: String, _ label: String, cal: Int, protein: Int, carbs: Int, fat: Int,
+                  score: Int, rationale: String, hoursAgo: Int) -> [String: Any] {
+            ["id": id, "date": today, "label": label, "calories": cal, "protein_g": protein,
+             "carbs_g": carbs, "fat_g": fat, "source": "manual", "logged_at": loggedAt(hoursAgo: hoursAgo),
+             "score": score, "rationale": rationale]
+        }
+        switch state {
+        case .perfect:
+            return [
+                row("ml-1", "Salmon, rice & greens", cal: 760, protein: 46, carbs: 72, fat: 26,
+                    score: 9, rationale: "Great protein and healthy fats for dinner.", hoursAgo: 1),
+                row("ml-2", "Grilled chicken bowl", cal: 640, protein: 55, carbs: 62, fat: 16,
+                    score: 9, rationale: "Balanced macros, right on target for lunch.", hoursAgo: 6),
+                row("ml-3", "Almonds & apple", cal: 410, protein: 10, carbs: 46, fat: 20,
+                    score: 7, rationale: "Solid snack, keeps carbs and fat on pace.", hoursAgo: 3),
+                row("ml-4", "Greek yogurt & berries", cal: 380, protein: 32, carbs: 40, fat: 9,
+                    score: 8, rationale: "High protein, fits your macro split well.", hoursAgo: 11),
+            ]
+        case .over:
+            return [
+                row("ml-1", "Double cheeseburger & fries", cal: 980, protein: 42, carbs: 88, fat: 52,
+                    score: 3, rationale: "Way over on fat, protein too low for the calories.", hoursAgo: 6),
+                row("ml-2", "Pasta carbonara", cal: 820, protein: 30, carbs: 90, fat: 34,
+                    score: 4, rationale: "Heavy on carbs and fat relative to today's target.", hoursAgo: 1),
+                row("ml-3", "Ice cream", cal: 430, protein: 6, carbs: 52, fat: 20,
+                    score: 2, rationale: "Mostly added sugar, barely moves protein.", hoursAgo: 3),
+                row("ml-4", "Bagel with cream cheese", cal: 520, protein: 18, carbs: 68, fat: 20,
+                    score: 5, rationale: "Fine as breakfast, but sets up a heavy day.", hoursAgo: 12),
+            ]
+        case .under:
+            return [
+                row("ml-1", "Grilled fish & veggies", cal: 720, protein: 50, carbs: 35, fat: 26,
+                    score: 8, rationale: "Well balanced, just not enough volume today.", hoursAgo: 1),
+                row("ml-2", "Small salad with chicken", cal: 380, protein: 32, carbs: 20, fat: 16,
+                    score: 8, rationale: "Good protein, but a light lunch overall.", hoursAgo: 6),
+                row("ml-3", "Protein bar", cal: 210, protein: 15, carbs: 22, fat: 8,
+                    score: 7, rationale: "Decent macros, still leaves calories on the table.", hoursAgo: 9),
+                row("ml-4", "Black coffee & banana", cal: 140, protein: 2, carbs: 33, fat: 1,
+                    score: 6, rationale: "Light start, most of the day's target still ahead.", hoursAgo: 12),
+            ]
+        }
+    }
+
     static let sports: [[String: Any]] = [
         ["id": "sp-volleyball", "name": "Volleyball", "variant": NSNull()],
     ]
@@ -157,9 +228,9 @@ enum FixtureData {
             "target_table": [
                 "bands": [
                     "novice": ["min": 10, "max": 55, "gain_low": 3, "gain_high": 6,
-                               "horizon_weeks_low": 10, "horizon_weeks_high": 12],
+                               "horizon_weeks_low": 10, "horizon_weeks_high": 12, "program_name": "Foundation Jump Block"],
                     "intermediate": ["min": 55, "max": 75, "gain_low": 2, "gain_high": 4,
-                                     "horizon_weeks_low": 10, "horizon_weeks_high": 12],
+                                     "horizon_weeks_low": 10, "horizon_weeks_high": 12, "program_name": "Builder Jump Block"],
                 ],
             ],
         ],
@@ -175,6 +246,7 @@ enum FixtureData {
             "baseline_value": 42,
             "target_low": 3,
             "target_high": 6,
+            "program_name": "Foundation Jump Block",
             "created_at": iso(daysAgo: ageDays),
             "eta_start": day(fromNow: 70 - ageDays),
             "eta_end": day(fromNow: 84 - ageDays),
@@ -270,14 +342,42 @@ enum FixtureData {
         return row
     }
 
+    /// A real plyo exercise actually mapped to the vertical jump goal
+    /// (goal_exercise seed, 'plyo' role) -- name matches exerciseLibraryRow
+    /// so ExerciseDetailView's name-based lookup finds real media.
     static let planExercise: [String: Any] = [
-        "name": "Box jump",
+        "name": "Front Box Jump",
         "sets": 3,
         "reps": "5",
         "weight_guidance": "Bodyweight",
         "intensity": "Explosive, full recovery between sets",
         "duration_minutes": 8,
         "instructions": "Land soft, step down between reps.",
+    ]
+
+    /// Real exercise_library row, id/name/instructions/image_paths all
+    /// copied verbatim from the seeded DB row -- exercise-media is a public
+    /// bucket under an `exercises/` prefix (see the
+    /// 20260731092000_fix_exercise_image_paths_prefix migration), so
+    /// ExerciseDetailView's image fetch (URLSession.shared, not stubbed)
+    /// loads the real photo over real network.
+    static let exerciseLibraryRow: [String: Any] = [
+        "id": "Front_Box_Jump",
+        "name": "Front Box Jump",
+        "force": "push",
+        "level": "beginner",
+        "mechanic": "compound",
+        "equipment": "other",
+        "primary_muscles": ["hamstrings"],
+        "secondary_muscles": ["abductors", "adductors", "calves", "glutes", "quadriceps"],
+        "instructions": [
+            "Begin with a box of an appropriate height 1-2 feet in front of you. Stand with your feet should width apart. This will be your starting position.",
+            "Perform a short squat in preparation for jumping, swinging your arms behind you.",
+            "Rebound out of this position, extending through the hips, knees, and ankles to jump as high as possible. Swing your arms forward and up.",
+            "Land on the box with the knees bent, absorbing the impact through the legs. You can jump from the box back to the ground, or preferably step down one leg at a time.",
+        ],
+        "category": "plyometrics",
+        "image_paths": ["exercises/Front_Box_Jump/0.jpg", "exercises/Front_Box_Jump/1.jpg"],
     ]
 
     /// ai_workout_plan row for J2 -- the plan genuinely carries the
@@ -302,6 +402,62 @@ enum FixtureData {
             ],
         ]]
     }
+
+    /// Same shape as todaysAIPlan, framed as a coach's verbatim block --
+    /// lets the custom-goal "return and do today's session" demo show real
+    /// exercises too, not just the preset path.
+    static var customTodaysAIPlan: [[String: Any]] {
+        [[
+            "category": "moderate",
+            "selected_title": "Coach Alex's task",
+            "added_to_plan": true,
+            "source": "suggestion",
+            "plan": [
+                "focus": "Coach-assigned session",
+                "warm_up": [planExercise],
+                "blocks": [[
+                    "name": "Block 1",
+                    "rounds": 1,
+                    "rest_between_rounds": "90s",
+                    "exercises": [planExercise],
+                ]],
+                "cool_down": [planExercise],
+                "goal_block": ["kind": "custom", "text": "3 rounds: 10 approach jumps, 8 depth drops, 10 banded squats."],
+            ],
+        ]]
+    }
+
+    /// Ranged ai_workout_plan rows for the calendar strip's star badge --
+    /// today and 2-days-ago carry a goal block, yesterday doesn't. Covers
+    /// both preset (activeGoalWeek2) and custom (customGoalWeek2) goals.
+    static func goalTrainingPlanRows(scenario: FixtureScenario) -> [[String: Any]] {
+        guard scenario == .activeGoalWeek2 || scenario == .customGoalWeek2 else { return [] }
+        let kind = scenario == .customGoalWeek2 ? "custom" : "preset"
+        func row(daysAgo: Int, hasGoalBlock: Bool) -> [String: Any] {
+            let goalBlock: Any = hasGoalBlock ? ["kind": kind, "text": "plyo: box jumps, low dose"] : NSNull()
+            // Top-level "goal_block", matching the real endpoint's PostgREST
+            // path-select alias (select=date,goal_block:plan->goal_block) --
+            // not nested under "plan" the way the full plan document is.
+            return [
+                "date": day(fromNow: -daysAgo),
+                "goal_block": goalBlock,
+            ]
+        }
+        return [row(daysAgo: 0, hasGoalBlock: true), row(daysAgo: 1, hasGoalBlock: false), row(daysAgo: 2, hasGoalBlock: true)]
+    }
+
+    /// parse-goal-assignment's success payload -- "Coach Priya" differs from
+    /// customGoalRow's manual "Alex" default so a test can tell them apart.
+    static let parsedAssignment: [String: Any] = [
+        "givenText": "Add spring before the season",
+        "workoutText": "3 rounds: 10 approach jumps, 8 depth drops, 10 banded squats.",
+        "coachName": "Coach Priya",
+        "durationWeeks": 8,
+        "frequencyPerWeek": 3,
+        "scheduleRule": NSNull(),
+        "scheduleDays": NSNull(),
+        "courtDays": NSNull(),
+    ]
 }
 
 // MARK: - URLProtocol stub
@@ -443,13 +599,35 @@ final class FixtureURLProtocol: URLProtocol {
                 : FixtureData.presetGoalRow(ageDays: 0)
             return (["created": true, "goal": goal], 200)
 
+        // A fixed sentinel substring drives the low-confidence branch,
+        // same idea as the real endpoint's isAssignment/confidence gate.
+        case path.hasSuffix("/functions/v1/parse-goal-assignment"):
+            let text = requestBody["text"] as? String ?? ""
+            if text.contains("zzz-unparseable") {
+                return (["parsed": NSNull(), "confidence": 0.2, "lowConfidence": true], 200)
+            }
+            return (["parsed": FixtureData.parsedAssignment, "confidence": 0.92, "lowConfidence": false], 200)
+
         // Home data
         case path.hasSuffix("/rest/v1/daily_recommendation"):
             return ([FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory)], 200)
         case path.hasSuffix("/rest/v1/daily_snapshot"):
             return ([], 200)
         case path.hasSuffix("/rest/v1/ai_workout_plan"):
-            return (scenario == .activeGoalWeek2 ? FixtureData.todaysAIPlan : [], 200)
+            if query.contains("date=gte.") {
+                return (filterByDate(FixtureData.goalTrainingPlanRows(scenario: scenario), query: query), 200)
+            }
+            switch scenario {
+            case .activeGoalWeek2: return (FixtureData.todaysAIPlan, 200)
+            case .customGoalWeek2: return (FixtureData.customTodaysAIPlan, 200)
+            default: return ([], 200)
+            }
+
+        case path.hasSuffix("/rest/v1/nutrition_targets") && method == "GET":
+            return (NutritionFixtureState.current != nil ? [FixtureData.nutritionTargetsRow] : [], 200)
+        case path.hasSuffix("/rest/v1/meal_log") && method == "GET":
+            guard let nutritionState = NutritionFixtureState.current else { return ([], 200) }
+            return (filterByDate(FixtureData.mealLogRows(state: nutritionState), query: query), 200)
 
         // The rest-day override (C3): category=null clears the request.
         case path.hasSuffix("/functions/v1/set-recommendation-override"):
@@ -478,6 +656,11 @@ final class FixtureURLProtocol: URLProtocol {
 
         case path.hasSuffix("/functions/v1/generate-recommendation"):
             return (FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory), 200)
+
+        // Real row (matches the seeded DB exactly) so ExerciseDetailView's
+        // image fetch -- unstubbed, goes over real network -- loads a real photo.
+        case path.contains("/rest/v1/exercise_library"):
+            return ([FixtureData.exerciseLibraryRow], 200)
 
         // Everything else: harmless empties in the right container shape.
         case method == "GET" && path.contains("/rest/v1/"):

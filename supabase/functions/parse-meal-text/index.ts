@@ -14,6 +14,7 @@
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkFlatDailyLimit, logGeneration } from "../_shared/generationLimits.ts";
+import { clampEstimate, type MealEstimate } from "./estimateBounds.ts";
 
 // Meals are logged multiple times a day (breakfast/lunch/dinner/snacks),
 // unlike the once-a-day workout generation -- a generous flat ceiling,
@@ -38,14 +39,6 @@ const ESTIMATE_SCHEMA = {
   additionalProperties: false,
 };
 
-interface MealEstimate {
-  label: string;
-  calories: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-}
-
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -66,7 +59,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Too many estimates today. Enter the numbers directly, or try again tomorrow." }, 429);
     }
 
-    const estimate = await callClaude(text.trim());
+    const estimate = clampEstimate(await callClaude(text.trim()));
     await logGeneration(supabase, userId, date, "meal_text_estimate");
     return jsonResponse(estimate);
   } catch (err) {

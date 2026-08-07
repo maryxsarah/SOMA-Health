@@ -429,4 +429,129 @@ final class SportGoalJourneyTests: XCTestCase {
         XCTAssertTrue(text(app, containing: "Train for your sport").waitForExistence(timeout: 20),
                       "Opting in must reveal the promo card in the same session")
     }
+
+    // MARK: - J15 · SGP-B8/B9 — coach-assignment AI assist
+
+    /// Types delete-key presses to clear a field's existing text before
+    /// typing new text -- XCUITest has no direct "clear" action.
+    private func clearAndType(_ field: XCUIElement, text: String) {
+        field.tap()
+        if let existing = field.value as? String, !existing.isEmpty {
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count))
+        }
+        field.typeText(text)
+    }
+
+    func test_SGP_B8_autoFillAssignmentFromTextThenLowConfidence() {
+        let app = launch(scenario: "customCoachFlow")
+
+        let promo = text(app, containing: "Train for your sport")
+        XCTAssertTrue(promo.waitForExistence(timeout: 20))
+        promo.tap()
+        XCTAssertTrue(text(app, containing: "What do you train for?").waitForExistence(timeout: 10))
+        app.buttons.matching(NSPredicate(format: "label CONTAINS 'Volleyball'")).firstMatch.tap()
+        let customRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "coach's task")).firstMatch
+        XCTAssertTrue(customRow.waitForExistence(timeout: 10))
+        customRow.tap()
+
+        // .any, not .textFields -- a multi-line TextField(axis: .vertical)
+        // doesn't reliably surface under the .textFields element type.
+        let workoutField = app.descendants(matching: .any)["workoutTextField"]
+        XCTAssertTrue(workoutField.waitForExistence(timeout: 10))
+        clearAndType(workoutField, text: "3 rounds: 10 approach jumps, 8 depth drops, 10 banded squats")
+
+        let autoFill = app.buttons["Auto-fill with AI"]
+        XCTAssertTrue(autoFill.waitForExistence(timeout: 5))
+        autoFill.tap()
+
+        let coachField = app.descendants(matching: .any)["coachNameField"]
+        XCTAssertTrue(coachField.waitForExistence(timeout: 10))
+        // Poll for the AI-filled value -- waitForExistence only covers
+        // presence, not a value change on a field that already existed.
+        let coachFilled = NSPredicate(format: "value CONTAINS %@", "Coach Priya")
+        wait(for: [XCTNSPredicateExpectation(predicate: coachFilled, object: coachField)], timeout: 10)
+
+        // A second parse with an unparseable input must leave the
+        // already-good coach field untouched and surface the warning.
+        clearAndType(workoutField, text: "zzz-unparseable-test-input")
+        autoFill.tap()
+        XCTAssertTrue(text(app, containing: "Couldn't confidently read").waitForExistence(timeout: 10))
+        XCTAssertTrue(coachFilled.evaluate(with: coachField),
+                      "a low-confidence parse must never overwrite a field that already had good data")
+    }
+
+    // MARK: - J16 · SGP-C7 — calendar strip goal-training star
+
+    func test_SGP_C7_calendarStripShowsGoalTrainingStar() {
+        let app = launch(scenario: "activeGoalWeek2")
+        XCTAssertTrue(app.buttons["Start workout"].waitForExistence(timeout: 20))
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        func dateString(daysAgo: Int) -> String {
+            formatter.string(from: Date().addingTimeInterval(TimeInterval(-daysAgo * 86400)))
+        }
+
+        let todayStar = app.images["calendarStar-\(dateString(daysAgo: 0))"]
+        let todayCrown = app.images["calendarCrown-\(dateString(daysAgo: 0))"]
+        XCTAssertTrue(todayStar.waitForExistence(timeout: 20), "today has a real goal_block, star should show")
+        XCTAssertTrue(todayCrown.waitForExistence(timeout: 5), "star and crown must coexist on the same day")
+
+        let twoDaysAgoStar = app.images["calendarStar-\(dateString(daysAgo: 2))"]
+        XCTAssertTrue(twoDaysAgoStar.waitForExistence(timeout: 5))
+
+        let yesterdayStar = app.images["calendarStar-\(dateString(daysAgo: 1))"]
+        XCTAssertFalse(yesterdayStar.exists, "a day with no goal_block must not show a star")
+    }
+
+    // MARK: - J17 · SGP-B10/SGP-D9 — preset schedule step + named program + Upcoming
+
+    func test_SGP_B10_presetGoalGetsScheduleAndNamedProgram() {
+        let app = launch(scenario: "catalogOpen")
+
+        let promo = text(app, containing: "Train for your sport")
+        XCTAssertTrue(promo.waitForExistence(timeout: 20))
+        promo.tap()
+        let skip = app.buttons["Skip — I'll find it later"]
+        XCTAssertTrue(skip.waitForExistence(timeout: 10))
+        skip.tap()
+        XCTAssertTrue(promo.waitForExistence(timeout: 10))
+        promo.tap()
+        XCTAssertTrue(text(app, containing: "What do you train for?").waitForExistence(timeout: 10))
+        app.buttons.matching(NSPredicate(format: "label CONTAINS 'Volleyball'")).firstMatch.tap()
+
+        let goal = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Standing vertical jump'")).firstMatch
+        XCTAssertTrue(goal.waitForExistence(timeout: 10))
+        goal.tap()
+        XCTAssertTrue(text(app, containing: "How to measure").waitForExistence(timeout: 10))
+        let ruler = app.descendants(matching: .any)["ruler-number-picker"].firstMatch
+        XCTAssertTrue(ruler.waitForExistence(timeout: 5))
+        ruler.swipeRight()
+        XCTAssertTrue(text(app, containing: "A realistic target").waitForExistence(timeout: 5))
+        // Every band gets a name ending in "Jump Block" -- see Part A.
+        XCTAssertTrue(text(app, containing: "Jump Block").waitForExistence(timeout: 5),
+                      "the matched band's program name should render pre-creation")
+
+        // Schedule step: pick specific weekdays instead of the 2/3/4x default.
+        let customChip = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Custom")).firstMatch
+        XCTAssertTrue(customChip.waitForExistence(timeout: 5))
+        customChip.tap()
+        let weekdaysRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Specific weekdays")).firstMatch
+        XCTAssertTrue(weekdaysRow.waitForExistence(timeout: 10))
+        weekdaysRow.tap()
+        app.descendants(matching: .any)["weekday-1"].tap()
+        app.descendants(matching: .any)["weekday-3"].tap()
+        app.buttons["Done"].tap()
+
+        let start = app.buttons["Start the block"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+
+        // Hub: the named program persists post-creation, and the new
+        // Upcoming section renders for a preset goal (not just custom).
+        XCTAssertTrue(text(app, containing: "Jump Block").waitForExistence(timeout: 15),
+                      "the program name should be snapshotted onto the created goal")
+        XCTAssertTrue(text(app, containing: "Upcoming").waitForExistence(timeout: 10))
+    }
 }

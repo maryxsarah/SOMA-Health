@@ -9,6 +9,8 @@ import SwiftUI
 struct CalendarStripView: View {
     let recommendations: [DailyRecommendation]
     let completedDates: Set<String>
+    /// Dates with a real sport-goal training session -- drives the star badge.
+    var goalTrainingDates: Set<String> = []
     /// The day currently open in DayDetailView, if any -- drives the ink
     /// selection outline (distinct from, and drawn outside, the state ring).
     var selectedDate: String?
@@ -20,6 +22,7 @@ struct CalendarStripView: View {
     private let circleSize: CGFloat = 34
 
     @State private var isPulsing = false
+    @State private var isGoalPulsing = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -35,6 +38,9 @@ struct CalendarStripView: View {
             withAnimation(.easeOut(duration: 1.9).repeatForever(autoreverses: false)) {
                 isPulsing = true
             }
+            withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
+                isGoalPulsing = true
+            }
         }
     }
 
@@ -44,6 +50,7 @@ struct CalendarStripView: View {
         let status = status(of: day.dateString)
         let isSelected = selectedDate == day.dateString
         let isBestReadiness = day.dateString == bestReadinessDate
+        let hasGoalTraining = goalTrainingDates.contains(day.dateString)
 
         return Button {
             onSelectDay(day.dateString)
@@ -53,6 +60,7 @@ struct CalendarStripView: View {
                     Image(systemName: "crown.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(SomaTokens.warn)
+                        .accessibilityIdentifier("calendarCrown-\(day.dateString)")
                 } else {
                     Color.clear.frame(height: 10)
                 }
@@ -72,11 +80,24 @@ struct CalendarStripView: View {
                             .scaleEffect(isPulsing ? 1.45 : 1.0)
                     }
 
+                    // Only today's own goal session pulses -- a past/future
+                    // goal day still gets the star, just not the glow, and
+                    // the whole column is already tappable into that day's
+                    // real workout via onSelectDay below.
+                    if hasGoalTraining, day.isToday {
+                        Circle()
+                            .fill(SomaTokens.star.opacity(isGoalPulsing ? 0.22 : 0.06))
+                            .frame(width: circleSize + 10, height: circleSize + 10)
+                    }
+
                     Circle()
-                        .fill(circleFill(for: status))
+                        .fill(circleFill(for: status, isGoalDay: hasGoalTraining))
                         .frame(width: circleSize, height: circleSize)
                         .overlay(
-                            Circle().stroke(ringColor(for: status), lineWidth: ringWidth(for: status))
+                            Circle().stroke(
+                                ringColor(for: status, isGoalDay: hasGoalTraining),
+                                lineWidth: ringWidth(for: status)
+                            )
                         )
                         // Selection outline -- 2pt ink, 2pt offset, drawn
                         // outside the state ring, never replacing it.
@@ -86,8 +107,14 @@ struct CalendarStripView: View {
                                 .frame(width: circleSize + 4, height: circleSize + 4)
                         )
 
-                    heartIcon(for: status)
-                        .font(.system(size: 16, weight: status == .toDo ? .semibold : .regular))
+                    if hasGoalTraining {
+                        starIcon(for: status)
+                            .font(.system(size: 16, weight: status == .toDo ? .semibold : .regular))
+                            .accessibilityIdentifier("calendarStar-\(day.dateString)")
+                    } else {
+                        heartIcon(for: status)
+                            .font(.system(size: 16, weight: status == .toDo ? .semibold : .regular))
+                    }
                 }
 
                 Text("\(day.dayNumber)")
@@ -114,19 +141,32 @@ struct CalendarStripView: View {
         return (isPast && hasRecommendation) ? .skipped : .toDo
     }
 
-    private func circleFill(for status: DayStatus) -> Color {
+    /// The two token families circleFill/ringColor pick between -- keeping
+    /// this as one struct instead of two parallel switches means a future
+    /// DayStatus case only needs updating in those two switches, not four.
+    private struct GlyphTokens {
+        let circleDone: Color
+        let ringDone: Color
+        let ringToDo: Color
+    }
+    private static let heartTokens = GlyphTokens(circleDone: SomaTokens.heartSoft, ringDone: SomaTokens.heartLine, ringToDo: SomaTokens.heart)
+    private static let starTokens = GlyphTokens(circleDone: SomaTokens.starSoft, ringDone: SomaTokens.starLine, ringToDo: SomaTokens.star)
+
+    private func circleFill(for status: DayStatus, isGoalDay: Bool) -> Color {
+        let tokens = isGoalDay ? Self.starTokens : Self.heartTokens
         switch status {
-        case .done: SomaTokens.heartSoft
-        case .toDo: SomaTokens.surface
-        case .skipped: SomaTokens.surface3
+        case .done: return tokens.circleDone
+        case .toDo: return SomaTokens.surface
+        case .skipped: return SomaTokens.surface3
         }
     }
 
-    private func ringColor(for status: DayStatus) -> Color {
+    private func ringColor(for status: DayStatus, isGoalDay: Bool) -> Color {
+        let tokens = isGoalDay ? Self.starTokens : Self.heartTokens
         switch status {
-        case .done: SomaTokens.heartLine
-        case .toDo: SomaTokens.heart
-        case .skipped: SomaTokens.neutralDot
+        case .done: return tokens.ringDone
+        case .toDo: return tokens.ringToDo
+        case .skipped: return SomaTokens.neutralDot
         }
     }
 
@@ -138,23 +178,35 @@ struct CalendarStripView: View {
         }
     }
 
-    /// One shared heart glyph -- the only difference between states is
-    /// fill, stroke-width and opacity, never three separate paths (guide
-    /// 01 step 2). Filled red means done, and nothing else in the app may
-    /// use a filled red heart.
+    /// One shared glyph shape for both heart and star -- the only
+    /// difference between states is fill, stroke-width and opacity, never
+    /// three separate paths (guide 01 step 2), and the only difference
+    /// between heart/star is which SF Symbol pair and accent color feed
+    /// it. Filled red means done, and nothing else in the app may use a
+    /// filled red heart.
     @ViewBuilder
-    private func heartIcon(for status: DayStatus) -> some View {
+    private func statusIcon(for status: DayStatus, filledSymbol: String, outlineSymbol: String, accent: Color) -> some View {
         switch status {
         case .done:
-            Image(systemName: "heart.fill")
-                .foregroundStyle(SomaTokens.heart)
+            Image(systemName: filledSymbol)
+                .foregroundStyle(accent)
         case .toDo:
-            Image(systemName: "heart")
-                .foregroundStyle(SomaTokens.heart)
+            Image(systemName: outlineSymbol)
+                .foregroundStyle(accent)
         case .skipped:
-            Image(systemName: "heart")
+            Image(systemName: outlineSymbol)
                 .foregroundStyle(SomaTokens.ink.opacity(0.55))
         }
+    }
+
+    private func heartIcon(for status: DayStatus) -> some View {
+        statusIcon(for: status, filledSymbol: "heart.fill", outlineSymbol: "heart", accent: SomaTokens.heart)
+    }
+
+    /// A goal-training day replaces the heart with a star entirely, same
+    /// done/to-do/skipped fill logic as heartIcon.
+    private func starIcon(for status: DayStatus) -> some View {
+        statusIcon(for: status, filledSymbol: "star.fill", outlineSymbol: "star", accent: SomaTokens.star)
     }
 
     // MARK: - Legend

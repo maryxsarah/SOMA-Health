@@ -908,6 +908,19 @@ async function fetchWhoopTrainingLoad(
   return { strainScore, recentHighStrain };
 }
 
+/// 400/401 means the refresh grant itself is dead (RFC 6749 5.2 invalid_grant).
+/// 403 is also included -- not RFC-standard for invalid_grant, but a common
+/// real-world status providers use for a revoked/disabled authorization
+/// (as opposed to a scope or rate-limit 403, which this endpoint can't
+/// distinguish from here either way, so treating it as dead is the safer
+/// default: a wrongly-flagged reconnect prompt is recoverable, a silently
+/// stale connection that never re-prompts is not).
+/// A 5xx/timeout says nothing about token validity and must not trigger
+/// reconnect -- that distinction is the one this function exists to protect.
+function isDeadRefreshTokenStatus(status: number): boolean {
+  return status === 400 || status === 401 || status === 403;
+}
+
 async function ensureFreshWhoopToken(
   // deno-lint-ignore no-explicit-any
   supabase: any,
@@ -933,16 +946,15 @@ async function ensureFreshWhoopToken(
     }),
   });
   if (!res.ok) {
-    // The refresh token itself is dead (revoked, expired) -- this is the
-    // one signal the client has no other way to learn. Previously this
-    // just returned null and the row sat there unchanged forever, so the
-    // client's local "connected" cache never found out. Best-effort: a
-    // failure marking the row shouldn't also break this request.
-    await supabase
-      .from("wearable_tokens")
-      .update({ needs_reconnect: true })
-      .eq("id", token.id)
-      .then(null, () => {});
+    if (isDeadRefreshTokenStatus(res.status)) {
+      // Surface the dead token to the client; a failure here shouldn't
+      // break this request (best-effort).
+      await supabase
+        .from("wearable_tokens")
+        .update({ needs_reconnect: true })
+        .eq("id", token.id)
+        .then(null, () => {});
+    }
     return null;
   }
   const json = await res.json();
@@ -1123,12 +1135,15 @@ async function ensureFreshOuraToken(
     }),
   });
   if (!res.ok) {
-    // Same signal as ensureFreshWhoopToken -- see its comment.
-    await supabase
-      .from("wearable_tokens")
-      .update({ needs_reconnect: true })
-      .eq("id", token.id)
-      .then(null, () => {});
+    // Same signal (and same 400/401-only classification) as
+    // ensureFreshWhoopToken -- see its comment.
+    if (isDeadRefreshTokenStatus(res.status)) {
+      await supabase
+        .from("wearable_tokens")
+        .update({ needs_reconnect: true })
+        .eq("id", token.id)
+        .then(null, () => {});
+    }
     return null;
   }
   const json = await res.json();

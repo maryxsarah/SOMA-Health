@@ -53,6 +53,9 @@ enum SomaTokens {
     static let heartSoft = Color(red: 0.992, green: 0.918, blue: 0.918)   // #FDEAEA
     static let heartLine = Color(red: 0.984, green: 0.851, blue: 0.851)   // #FBD9D9
     static let neutralDot = Color(red: 0.843, green: 0.843, blue: 0.871)  // #D7D7DE
+    static let star = Color(red: 0.949, green: 0.702, blue: 0.129)        // #F2B321
+    static let starSoft = Color(red: 0.996, green: 0.961, blue: 0.867)    // #FEF5DD
+    static let starLine = Color(red: 0.988, green: 0.894, blue: 0.667)    // #FCE4AA
 
     // MARK: Radii (Mubert ramp: 4·6·8·10·12·16·pill)
     static let rMD: CGFloat = 10   // sm button

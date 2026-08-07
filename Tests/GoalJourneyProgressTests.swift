@@ -62,5 +62,23 @@ final class GoalJourneyProgressTests: XCTestCase {
             createdAt: isoString(daysAgo: 5), weightKg: 80, desiredWeightKg: 80, goalPace: .recommended
         ))
         XCTAssertEqual(progress.estimatedTotalDays, 30)
+        XCTAssertFalse(progress.hasReliableEstimate,
+                       "a near-zero weight delta must not be shown as a confident 1-month estimate")
+    }
+
+    // REGRESSION: a stale/tiny weight target must not claim a specific,
+    // misleadingly short timeline next to an ambitious goal photo.
+    func testTinyDeltaIsMarkedUnreliableEvenOnFastPace() throws {
+        let progress = try XCTUnwrap(GoalJourneyProgress.compute(
+            createdAt: isoString(daysAgo: 13), weightKg: 60, desiredWeightKg: 61, goalPace: .fast
+        ))
+        XCTAssertFalse(progress.hasReliableEstimate)
+    }
+
+    func testMeaningfulDeltaIsMarkedReliable() throws {
+        let progress = try XCTUnwrap(GoalJourneyProgress.compute(
+            createdAt: isoString(daysAgo: 13), weightKg: 60, desiredWeightKg: 75, goalPace: .recommended
+        ))
+        XCTAssertTrue(progress.hasReliableEstimate)
     }
 }
