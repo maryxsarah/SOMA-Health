@@ -35,6 +35,7 @@ import { describeContraindications, type InjurySeverityLevel } from "../_shared/
 import { describePregnancyGuidance } from "../_shared/pregnancyGuidance.ts";
 import { describeVolumeGuidance, type ExperienceLevel } from "../_shared/volumeLandmarks.ts";
 import { describeRirGuidance } from "./rirGuidance.ts";
+import { decideShapingGoalGuidance } from "./shapingGoalGuidance.ts";
 import { describeSexAwareConsiderations } from "./sexAwareGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
@@ -849,6 +850,27 @@ function buildPrompt(
   const rirGuidanceLine = describeRirGuidance(goals, experienceLevel, category);
   const sexAwareLine = describeSexAwareConsiderations(userRow?.sex ?? null, category);
 
+  // Phase 3 (docs/coaching-personalization-plan.md): deterministic goal-
+  // specific rep-range + recurring-foundation-movement guidance -- decided
+  // entirely from the user's own goals/body_photo_emphasis_tags/
+  // training_emphasis (same precedence those signals already carry
+  // elsewhere in this prompt), never left to the LLM. Null whenever none
+  // of the three give a recognized shaping goal, or today's category/body
+  // part doesn't call for one -- see decideShapingGoalGuidance's own
+  // "omit rather than fabricate" doc comment.
+  const shapingGoalGuidance = decideShapingGoalGuidance(
+    userRow?.goals ?? null,
+    userRow?.body_photo_emphasis_tags ?? null,
+    userRow?.training_emphasis ?? null,
+    selection.bodyPart,
+    category,
+  );
+  const shapingGoalLine = shapingGoalGuidance
+    ? `\nGoal-specific rep-range guidance for today's working sets (${shapingGoalGuidance.repRangeRationale}): aim for ${shapingGoalGuidance.repRangeLabel} reps on the main movements. Build today's session around these recurring foundation movement patterns for this goal -- reuse the SAME patterns session to session (progressing load/reps over time per the recent-workout history below) rather than inventing new ones each time: ${
+      shapingGoalGuidance.foundationMovements.join("; ")
+    }.${shapingGoalGuidance.hardConstraint ? ` ${shapingGoalGuidance.hardConstraint}` : ""}`
+    : "";
+
   // Free, real signal already collected at onboarding but not previously
   // threaded into this prompt.
   const workoutsPerWeekLine = workoutsPerWeekLabel(userRow?.workouts_per_week ?? null);
@@ -923,6 +945,7 @@ ${sexLine}${ageLine ? `\n${ageLine}` : ""}${pregnancyLine}
 ${loadGuidance}
 ${volumeGuidanceLine ? `\n${volumeGuidanceLine}` : ""}
 ${rirGuidanceLine ? `\n${rirGuidanceLine}` : ""}
+${shapingGoalLine}
 ${sexAwareLine ? `\n${sexAwareLine}` : ""}
 ${workoutsPerWeekLine ? `\n${workoutsPerWeekLine}` : ""}${dietLine ? `\n${dietLine}` : ""}${goalPaceLine ? `\n${goalPaceLine}` : ""}${blockersLine ? `\n${blockersLine}` : ""}${accomplishmentLine ? `\n${accomplishmentLine}` : ""}
 ${upcomingGoalLine ? `\n${upcomingGoalLine}` : ""}

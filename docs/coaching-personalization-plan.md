@@ -48,6 +48,6 @@ don't hand policy decisions to the LLM.
 ## Phase status
 - [x] Phase 1 — Measured-BMR nutrition override
 - [x] Phase 2 — Workout reasoning text, per-exercise rest, forward-looking scheduling
-- [ ] Phase 3 — Goal-specific rep-range / fixture-exercise engine
+- [x] Phase 3 — Goal-specific rep-range / fixture-exercise engine
 - [ ] Phase 4 — Weekly anchor-session concept + onboarding
 - [ ] Phase 5 — Cycle-phase tracking (design first, then implement)
