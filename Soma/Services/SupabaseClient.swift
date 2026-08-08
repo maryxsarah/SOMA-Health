@@ -1103,6 +1103,16 @@ final class SupabaseClient {
             // yoga session (has none) therefore synced NOTHING -- and since
             // the call site uses `try?`, silently.
             row["calories"] = entry.calories ?? NSNull()
+            // activity_type (WorkoutTimelineEntry.isWalk) intentionally NOT
+            // synced here yet -- the healthkit_workout_sync table doesn't
+            // have that column live yet (see the still-held migration,
+            // 20260808000000_add_healthkit_activity_type.sql); referencing
+            // an unknown column in this insert would 400 and silently break
+            // ALL HealthKit sync via this function's try?-wrapped caller.
+            // Wire this through once that migration deploys -- until then,
+            // the walk-exclusion fix only covers this device's own local
+            // HealthKit query (HomeView.autoLogDeviceDetectedWorkoutIfNeeded),
+            // which is what the reported bug actually hit.
             return row
         }
 
@@ -1131,6 +1141,12 @@ final class SupabaseClient {
     /// data that nothing consumes is the wrong side of data minimisation as
     /// well as an unmet promise.
     func fetchSyncedHealthKitWorkouts(date: String) async throws -> [WorkoutTimelineEntry] {
+        // activity_type deliberately left out of select= -- see the
+        // matching comment in syncHealthKitWorkouts above; the column
+        // isn't live yet. Entries read back here decode with
+        // activityType == nil, i.e. isWalk == false: an honest "we don't
+        // know" rather than a false positive that would wrongly block a
+        // real workout from being auto-logged for another device's entries.
         let path = "rest/v1/healthkit_workout_sync?select=source,title,start_time,duration_minutes,calories&start_time=gte.\(date)T00:00:00&start_time=lt.\(date)T23:59:59.999&order=start_time.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)

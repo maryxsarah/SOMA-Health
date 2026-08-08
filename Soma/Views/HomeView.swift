@@ -1234,13 +1234,14 @@ struct HomeView: View {
     /// generic CompletedWorkoutView, same as a manual entry).
     private func autoLogDeviceDetectedWorkoutIfNeeded() async {
         guard todaysWorkoutLog == nil else { return }
-        // A trivial multi-minute entry (HealthKit logs even a short walk
-        // as its own "workout") shouldn't silently satisfy the whole day
-        // -- require a real minimum duration, and prefer the longest
-        // qualifying session over merely the chronologically-first one.
-        guard let entry = timelineEntries
-            .filter({ $0.durationMinutes >= 10 })
-            .max(by: { $0.durationMinutes < $1.durationMinutes })
+        // Real feedback: "I went for a 2k steps walk, but SOMA is not
+        // giving me a workout ... only a real workout should mark the day
+        // done, not just a walk." See qualifyingAutoLogCandidate: a
+        // trivial multi-minute entry (HealthKit logs even a short walk as
+        // its own "workout") shouldn't silently satisfy the whole day,
+        // and neither should a walk of any length -- only a deliberate
+        // workout session should suppress today's generated plan.
+        guard let entry = WorkoutTimelineEntry.qualifyingAutoLogCandidate(from: timelineEntries)
         else { return }
 
         let endedAt = Calendar.current.date(byAdding: .minute, value: entry.durationMinutes, to: entry.startTime) ?? entry.startTime

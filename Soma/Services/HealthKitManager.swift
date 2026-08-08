@@ -151,12 +151,35 @@ final class HealthKitManager {
                         title: Self.displayName(for: workout.workoutActivityType),
                         startTime: workout.startDate,
                         durationMinutes: Int(workout.duration / 60),
-                        calories: workout.totalEnergyBurned.map { Int($0.doubleValue(for: .kilocalorie())) }
+                        calories: workout.totalEnergyBurned.map { Int($0.doubleValue(for: .kilocalorie())) },
+                        activityType: Self.activityTypeKey(for: workout.workoutActivityType)
                     )
                 } ?? []
                 continuation.resume(returning: entries)
             }
             store.execute(query)
+        }
+    }
+
+    /// Stable machine key for WorkoutTimelineEntry.activityType -- kept
+    /// separate from displayName() below since that one is user-facing
+    /// copy and free to change wording without breaking the "is this a
+    /// walk" check that depends on this key.
+    private static func activityTypeKey(for type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .walking: "walking"
+        case .running: "running"
+        case .cycling: "cycling"
+        case .swimming: "swimming"
+        case .traditionalStrengthTraining, .functionalStrengthTraining: "strength_training"
+        case .yoga: "yoga"
+        case .highIntensityIntervalTraining: "hiit"
+        case .coreTraining: "core_training"
+        case .flexibility: "flexibility"
+        case .hiking: "hiking"
+        case .rowing: "rowing"
+        case .elliptical: "elliptical"
+        default: "other"
         }
     }
 
