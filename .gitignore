@@ -62,3 +62,6 @@ docs/*
 # Snapshot-test reference images are machine-local (record with
 # scripts/test.sh snapshot --record); never committed by decision 2026-08-04.
 SnapshotTests/__Snapshots__/
+
+# Generated secrets helper for the repo owner (contains real values) -- never commit.
+scripts/gh-set-secrets.sh
