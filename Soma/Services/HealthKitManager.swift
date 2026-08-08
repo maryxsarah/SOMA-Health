@@ -1,7 +1,8 @@
 import HealthKit
 
 /// Wraps the exact read-only HealthKit access the spec calls for: sleep,
-/// HRV, resting/instant heart rate, steps, active energy, exercise time.
+/// HRV, resting/instant heart rate, steps, active energy, basal energy,
+/// exercise time.
 final class HealthKitManager {
     static let shared = HealthKitManager()
 
@@ -17,6 +18,7 @@ final class HealthKitManager {
         HKObjectType.quantityType(forIdentifier: .heartRate)!,
         HKObjectType.quantityType(forIdentifier: .stepCount)!,
         HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
+        HKObjectType.quantityType(forIdentifier: .basalEnergyBurned)!,
         HKObjectType.quantityType(forIdentifier: .appleExerciseTime)!,
         HKObjectType.workoutType(),
     ]
@@ -60,6 +62,7 @@ final class HealthKitManager {
             .restingHeartRate,
             unit: HKUnit.count().unitDivided(by: .minute())
         )
+        async let basalEnergy = fetchCumulativeQuantity(.basalEnergyBurned, unit: .kilocalorie())
         async let stages = fetchSleepStageBreakdown()
         let stageBreakdown = await stages
         return await HealthKitSnapshot(
@@ -69,7 +72,8 @@ final class HealthKitManager {
             sleepLightHours: stageBreakdown.light,
             sleepDeepHours: stageBreakdown.deep,
             sleepRemHours: stageBreakdown.rem,
-            sleepAwakeHours: stageBreakdown.awake
+            sleepAwakeHours: stageBreakdown.awake,
+            basalEnergyKcal: basalEnergy
         )
     }
 
@@ -330,6 +334,51 @@ final class HealthKitManager {
                 let values = (samples as? [HKQuantitySample])?
                     .map { $0.quantity.doubleValue(for: unit) } ?? []
                 continuation.resume(returning: Self.median(values))
+            }
+            store.execute(query)
+        }
+    }
+
+    /// Trailing-window SUM of a cumulative quantity type (e.g.
+    /// basalEnergyBurned, which HealthKit reports as many small
+    /// per-interval samples throughout the day, not one point reading like
+    /// restingHeartRate/HRV) -- nil if nothing was recorded in the window.
+    /// Same "nil rather than stale" rule as fetchMedianQuantity: this is
+    /// never allowed to fall back to an older window's total.
+    ///
+    /// basalEnergyBurned specifically: summing a full trailing 24h already
+    /// yields kcal/day directly (it's a rate accumulated over the day, not
+    /// a snapshot to average) -- this is what nutritionTargets.ts treats as
+    /// a "measured BMR" override for the day's calorie target. Apple's own
+    /// estimate, itself algorithmic (derived from the user's weight/age/sex
+    /// plus their actual activity), not a lab-measured BMR -- but it is
+    /// this specific user's real recent data rather than a population
+    /// formula, and it's the only device-level resting-energy signal this
+    /// app has access to (see nutritionTargets.ts's own comment on this).
+    private func fetchCumulativeQuantity(
+        _ identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        hours: Double = 24
+    ) async -> Double? {
+        guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { return nil }
+        let now = Date()
+        let predicate = HKQuery.predicateForSamples(
+            withStart: now.addingTimeInterval(-hours * 3600),
+            end: now,
+            options: .strictStartDate
+        )
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, _ in
+                guard let sum = statistics?.sumQuantity() else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: sum.doubleValue(for: unit))
             }
             store.execute(query)
         }

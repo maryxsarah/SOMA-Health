@@ -1,5 +1,10 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { activityLevelFromWorkoutsPerWeek, computeNutritionTargets, trainingEmphasisFromWeights } from "./nutritionTargets.ts";
+import {
+  activityLevelFromWorkoutsPerWeek,
+  computeNutritionTargets,
+  isMeasuredBmrFresh,
+  trainingEmphasisFromWeights,
+} from "./nutritionTargets.ts";
 
 Deno.test("Mifflin-St Jeor: known worked example matches by hand (male, moderate, maintain)", () => {
   // BMR = 10*80 + 6.25*180 - 5*30 + 5 = 800 + 1125 - 150 + 5 = 1780
@@ -121,4 +126,55 @@ Deno.test("trainingEmphasisFromWeights: missing either input returns null rather
   assertEquals(trainingEmphasisFromWeights(null, 74), null);
   assertEquals(trainingEmphasisFromWeights(80, null), null);
   assertEquals(trainingEmphasisFromWeights(null, null), null);
+});
+
+Deno.test("measuredBmrKcal overrides the formula BMR, flagged in basis", () => {
+  const formula = computeNutritionTargets({
+    weightKg: 80, heightCm: 180, age: 30, sex: "male", activityLevel: "moderate", trainingEmphasis: "maintain",
+  });
+  // A measured BMR well above the formula's ~1780 estimate should move
+  // calories up, not just get silently ignored.
+  const measured = computeNutritionTargets({
+    weightKg: 80, heightCm: 180, age: 30, sex: "male", activityLevel: "moderate", trainingEmphasis: "maintain",
+    measuredBmrKcal: 2000,
+  });
+  assert(measured.dailyCalories > formula.dailyCalories);
+  assertEquals(measured.basis, "measured_bmr:maintain:activity=moderate:sex=male");
+  assertEquals(formula.basis, "mifflin_st_jeor:maintain:activity=moderate:sex=male");
+});
+
+Deno.test("measuredBmrKcal still respects the activity multiplier and emphasis adjustment downstream", () => {
+  // BMR fixed at 2000 -> TDEE = 2000*1.55 = 3100 -> cut adjustment -500 -> 2600
+  const result = computeNutritionTargets({
+    weightKg: 80, heightCm: 180, age: 30, sex: "male", activityLevel: "moderate", trainingEmphasis: "cut",
+    measuredBmrKcal: 2000,
+  });
+  assertEquals(result.dailyCalories, 2600);
+});
+
+Deno.test("measuredBmrKcal of null, undefined, zero, or negative all fall back to the formula", () => {
+  const formula = computeNutritionTargets({
+    weightKg: 80, heightCm: 180, age: 30, sex: "male", activityLevel: "moderate", trainingEmphasis: "maintain",
+  });
+  for (const bad of [null, undefined, 0, -100]) {
+    const result = computeNutritionTargets({
+      weightKg: 80, heightCm: 180, age: 30, sex: "male", activityLevel: "moderate", trainingEmphasis: "maintain",
+      measuredBmrKcal: bad,
+    });
+    assertEquals(result.dailyCalories, formula.dailyCalories, `measuredBmrKcal=${bad} should fall back to formula`);
+    assert(result.basis.startsWith("mifflin_st_jeor"), `measuredBmrKcal=${bad} should not be flagged as measured`);
+  }
+});
+
+Deno.test("isMeasuredBmrFresh: same day and within the 7-day window are fresh", () => {
+  assert(isMeasuredBmrFresh("2026-08-08", "2026-08-08"));
+  assert(isMeasuredBmrFresh("2026-08-01", "2026-08-08"));
+});
+
+Deno.test("isMeasuredBmrFresh: older than 7 days is stale", () => {
+  assert(!isMeasuredBmrFresh("2026-07-31", "2026-08-08"));
+});
+
+Deno.test("isMeasuredBmrFresh: a future-dated snapshot (clock skew) is rejected rather than trusted", () => {
+  assert(!isMeasuredBmrFresh("2026-08-09", "2026-08-08"));
 });

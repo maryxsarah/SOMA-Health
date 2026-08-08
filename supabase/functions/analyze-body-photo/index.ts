@@ -39,7 +39,13 @@ import { extractOutputText } from "../_shared/openai.ts";
 import { GOAL_TAG_VOCABULARY, normalizeGoalTags } from "../_shared/goalTags.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { ADULT_AGE, ageFromDOB } from "../_shared/age.ts";
-import { activityLevelFromWorkoutsPerWeek, computeNutritionTargets, trainingEmphasisFromWeights, type TrainingEmphasis } from "../_shared/nutritionTargets.ts";
+import {
+  activityLevelFromWorkoutsPerWeek,
+  computeNutritionTargets,
+  isMeasuredBmrFresh,
+  trainingEmphasisFromWeights,
+  type TrainingEmphasis,
+} from "../_shared/nutritionTargets.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MODEL_PRIMARY = "gpt-5.6-luna";
@@ -224,6 +230,35 @@ interface NutritionInputs {
   workoutsPerWeek: string | null;
 }
 
+/// Most recent HealthKit-sourced basal_energy_kcal for this user, if any
+/// exists and is fresh enough (see nutritionTargets.ts's
+/// MEASURED_BMR_MAX_AGE_DAYS) -- null for a user with no Apple Watch, a
+/// device that's never reported basalEnergyBurned, or a reading too old to
+/// trust. Non-fatal on read error: a measured BMR is a nice-to-have
+/// upgrade to the formula, never a hard requirement for nutrition targets
+/// to compute at all.
+// deno-lint-ignore no-explicit-any
+async function fetchMeasuredBmrKcal(supabase: any, userId: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase
+      .from("daily_snapshot")
+      .select("date, basal_energy_kcal")
+      .eq("user_id", userId)
+      .eq("source", "healthkit")
+      .not("basal_energy_kcal", "is", null)
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    if (!isMeasuredBmrFresh(data.date, today)) return null;
+    return data.basal_energy_kcal as number;
+  } catch (e) {
+    console.error(`measured BMR lookup failed for ${userId}: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
 // deno-lint-ignore no-explicit-any
 async function maybeUpdateNutritionTargets(
   // deno-lint-ignore no-explicit-any
@@ -248,6 +283,8 @@ async function maybeUpdateNutritionTargets(
       return;
     }
 
+    const measuredBmrKcal = await fetchMeasuredBmrKcal(supabase, userId);
+
     const targets = computeNutritionTargets({
       weightKg: inputs.weightKg,
       heightCm: inputs.heightCm,
@@ -255,6 +292,7 @@ async function maybeUpdateNutritionTargets(
       sex,
       activityLevel: activityLevelFromWorkoutsPerWeek(inputs.workoutsPerWeek),
       trainingEmphasis,
+      measuredBmrKcal,
     });
 
     const { error } = await supabase

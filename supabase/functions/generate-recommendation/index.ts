@@ -182,6 +182,7 @@ Deno.serve(async (req: Request) => {
         sleep_deep_hours: healthkit.sleepDeepHours,
         sleep_rem_hours: healthkit.sleepRemHours,
         sleep_awake_hours: healthkit.sleepAwakeHours,
+        basal_energy_kcal: healthkit.basalEnergyKcal,
       });
     }
 

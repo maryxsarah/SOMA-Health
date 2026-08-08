@@ -1338,6 +1338,7 @@ final class SupabaseClient {
             if let v = healthkit.sleepDeepHours { hk["sleepDeepHours"] = v }
             if let v = healthkit.sleepRemHours { hk["sleepRemHours"] = v }
             if let v = healthkit.sleepAwakeHours { hk["sleepAwakeHours"] = v }
+            if let v = healthkit.basalEnergyKcal { hk["basalEnergyKcal"] = v }
             body["healthkit"] = hk
         }
 
