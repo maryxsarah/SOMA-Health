@@ -187,6 +187,15 @@ struct UserProfile: Codable, Equatable {
     /// case here for anyone not yet analyzed).
     var bodyPhotoEmphasisTags: [GoalTag]? = nil
     var trainingEmphasis: TrainingEmphasis? = nil
+    /// A recurring class/activity (e.g. "Hot Yoga") the rest of the week
+    /// gets built around -- Phase 4 (see
+    /// docs/coaching-personalization-plan.md). Editable here, unlike
+    /// weightKg/desiredWeightKg above -- there's no reason to lock it once
+    /// set, same reasoning as heightCm. nil name = no anchor session set.
+    var anchorSessionName: String? = nil
+    /// 0=Sun..6=Sat (JS getUTCDay), same convention SportGoals'
+    /// scheduleDays already uses server-side.
+    var anchorSessionDays: [Int] = []
     /// Read-only, server-assigned at account creation -- the journey
     /// "start date" the goal-progress bar counts elapsed days from. Not a
     /// plan-start date (there isn't a separate one), but close enough: for
@@ -227,6 +236,8 @@ struct UserProfile: Codable, Equatable {
         case createdAt = "created_at"
         case bodyPhotoEmphasisTags = "body_photo_emphasis_tags"
         case trainingEmphasis = "training_emphasis"
+        case anchorSessionName = "anchor_session_name"
+        case anchorSessionDays = "anchor_session_days"
     }
 
     /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.

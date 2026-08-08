@@ -288,5 +288,13 @@ struct OnboardingSurveyAnswers: Equatable {
     var blockersNotes: String?
     var dietType: DietType?
     var accomplishmentGoals: Set<AccomplishmentGoal> = []
+    /// A recurring class/activity (e.g. "Hot Yoga", "Tennis league") the
+    /// rest of the week should be scheduled around -- Phase 4 (see
+    /// docs/coaching-personalization-plan.md). Always skippable, same
+    /// "structured field, freely optional" rule as blockersNotes. Days use
+    /// the same 0=Sun..6=Sat convention as SportGoals' scheduleDays (JS
+    /// getUTCDay), and the same WeekdayMiniPicker component.
+    var anchorSessionName: String?
+    var anchorSessionDays: Set<Int> = []
     var marketingOptIn = false
 }

@@ -69,6 +69,11 @@ struct ProfileView: View {
     // nearby gyms/partners suggestions; saved via the normal profile flow.
     @State private var countryCode: String?
     @State private var cityText = ""
+    // Weekly anchor session (Phase 4: see docs/coaching-personalization-plan.md)
+    // -- a real editor, unlike preservedHeightCm/etc above, so these are
+    // loaded AND sent back live on every save, same as countryCode/cityText.
+    @State private var anchorSessionName = ""
+    @State private var anchorSessionDays: Set<Int> = []
     // Beta opt-in -- reflects the user's own beta_optins row.
     @State private var betaOptIn = false
 
@@ -678,6 +683,12 @@ struct ProfileView: View {
                 value: weeklySessionTarget.map { "\($0)/wk · \(sessionsDoneThisWeek) done" } ?? "Not set"
             ) { activeSheet = .weeklyTarget }
 
+            summaryRow(
+                title: "Weekly anchor session",
+                consequence: "The rest of your week is built around it",
+                value: anchorSessionRowValue
+            ) { activeSheet = .anchorSession }
+
             if showSportGoalRow {
                 summaryRow(
                     title: "My goal",
@@ -689,6 +700,15 @@ struct ProfileView: View {
                 }
             }
         }
+    }
+
+    /// "Hot Yoga · Tue" / "Hot Yoga" (no day picked yet) / "Not set".
+    private var anchorSessionRowValue: String {
+        let name = anchorSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return "Not set" }
+        guard !anchorSessionDays.isEmpty else { return name }
+        let days = anchorSessionDays.sorted().map(WeekdayMiniPicker.shortName(forValue:)).joined(separator: ", ")
+        return "\(name) · \(days)"
     }
 
     /// Kill switch: the row exists only when the server-gated catalog has
@@ -953,6 +973,7 @@ struct ProfileView: View {
                     case .region: regionEditor
                     case .dateOfBirth: dateOfBirthEditor
                     case .knownLifts: knownLiftsEditor
+                    case .anchorSession: anchorSessionEditor
                     }
                 }
                 .padding(20)
@@ -1202,6 +1223,25 @@ struct ProfileView: View {
         }
     }
 
+    /// Same field pair as onboarding's AnchorSessionQuestionView, same
+    /// WeekdayMiniPicker component -- lets someone who skipped it at
+    /// onboarding set it later, or fix the wrong day.
+    private var anchorSessionEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("A recurring class or activity (e.g. a Tuesday hot yoga class) the rest of your week gets built around.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("e.g. \"Hot Yoga\", \"Tennis league\"", text: $anchorSessionName)
+                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Which day(s) is it usually on?")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                WeekdayMiniPicker(selected: $anchorSessionDays)
+            }
+        }
+    }
+
     /// Real feedback traced to a missing DOB: an account created before
     /// the onboarding DOB step existed has no other way to supply one,
     /// which silently hides the whole Goal Body photo feature -- see
@@ -1301,6 +1341,8 @@ struct ProfileView: View {
         })
         countryCode = profile.country
         cityText = profile.city ?? ""
+        anchorSessionName = profile.anchorSessionName ?? ""
+        anchorSessionDays = Set(profile.anchorSessionDays)
         preservedHeightCm = profile.heightCm
         preservedJourneyStage = profile.journeyStage
         preservedBlockersNotes = profile.blockersNotes
@@ -1487,7 +1529,9 @@ struct ProfileView: View {
             journeyStage: preservedJourneyStage,
             blockersNotes: preservedBlockersNotes,
             knownLifts: knownLifts,
-            dateOfBirth: dateOfBirthDate.map(Self.dobFormatter.string(from:))
+            dateOfBirth: dateOfBirthDate.map(Self.dobFormatter.string(from:)),
+            anchorSessionName: anchorSessionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : anchorSessionName,
+            anchorSessionDays: Array(anchorSessionDays)
         )
 
         let currentInjuryTags = Array(injuryTags)
@@ -1544,7 +1588,7 @@ private enum ProfileSection: String, CaseIterable, Identifiable {
 }
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth
+    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -1558,6 +1602,7 @@ private enum ProfileSheet: String, Identifiable {
         case .region: "Region"
         case .knownLifts: "Your current lifts"
         case .dateOfBirth: "Date of birth"
+        case .anchorSession: "Weekly anchor session"
         }
     }
 }

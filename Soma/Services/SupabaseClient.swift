@@ -257,6 +257,15 @@ final class SupabaseClient {
         }
         if let diet = answers.dietType { body["diet_type"] = diet.rawValue }
         if !answers.accomplishmentGoals.isEmpty { body["accomplishment_goals"] = answers.accomplishmentGoals.map(\.rawValue) }
+        // Name is the primary signal -- a day picked with no name isn't
+        // saved (there's nothing to name the day against); a name with no
+        // day is still saved as context even though it can't drive
+        // scheduling yet, same "save what we have" rule as blockersNotes.
+        let trimmedAnchorName = answers.anchorSessionName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedAnchorName.isEmpty {
+            body["anchor_session_name"] = trimmedAnchorName
+            if !answers.anchorSessionDays.isEmpty { body["anchor_session_days"] = Array(answers.anchorSessionDays).sorted() }
+        }
         body["marketing_opt_in"] = answers.marketingOptIn
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
@@ -274,7 +283,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_session_name,anchor_session_days&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -314,6 +323,13 @@ final class SupabaseClient {
         // UserProfile.dateOfBirth's doc comment for why this needed to
         // stop being read-only.
         body["date_of_birth"] = profile.dateOfBirth ?? NSNull()
+        // Name is the primary signal here too, same "save what we have"
+        // rule as saveOnboardingSurvey -- clearing the name also clears
+        // the days, rather than leaving orphaned days with no name to
+        // anchor them to.
+        let trimmedAnchorName = profile.anchorSessionName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        body["anchor_session_name"] = trimmedAnchorName.isEmpty ? NSNull() : trimmedAnchorName
+        body["anchor_session_days"] = trimmedAnchorName.isEmpty ? [] : profile.anchorSessionDays
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")

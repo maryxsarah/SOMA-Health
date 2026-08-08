@@ -3,7 +3,7 @@ import SwiftUI
 private enum SurveyStep: Int, CaseIterable {
     case sex, workoutFrequency, dateOfBirth, referralSource, trustChart
     case currentWeight, heightEntry, personalTrainer, goal, desiredWeight, weightDeltaReaction
-    case goalPace, comparisonBar, journeyStage, blockers, blockersNotes, dietType, accomplishment
+    case goalPace, comparisonBar, journeyStage, blockers, blockersNotes, anchorSession, dietType, accomplishment
     case onTrack, celebration
 }
 
@@ -144,6 +144,17 @@ struct OnboardingSurveyView: View {
                         get: { answers.blockersNotes ?? "" },
                         set: { answers.blockersNotes = $0 }
                     ),
+                    onBack: goBack,
+                    onContinue: advance
+                )
+            case .anchorSession:
+                AnchorSessionQuestionView(
+                    progress: progress,
+                    name: Binding(
+                        get: { answers.anchorSessionName ?? "" },
+                        set: { answers.anchorSessionName = $0 }
+                    ),
+                    days: $answers.anchorSessionDays,
                     onBack: goBack,
                     onContinue: advance
                 )

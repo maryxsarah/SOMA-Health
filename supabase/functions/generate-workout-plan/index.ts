@@ -36,6 +36,7 @@ import { describePregnancyGuidance } from "../_shared/pregnancyGuidance.ts";
 import { describeVolumeGuidance, type ExperienceLevel } from "../_shared/volumeLandmarks.ts";
 import { describeRirGuidance } from "./rirGuidance.ts";
 import { decideShapingGoalGuidance } from "./shapingGoalGuidance.ts";
+import { describeAnchorSession } from "./anchorSessionGuidance.ts";
 import { describeSexAwareConsiderations } from "./sexAwareGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
@@ -211,6 +212,12 @@ interface UserRow {
   /// is 42 degrees celsius, SOMA should not recommend a run outside."
   country: string | null;
   city: string | null;
+  /// Phase 4 (docs/coaching-personalization-plan.md): a recurring class/
+  /// activity the rest of the week gets built around, set at onboarding or
+  /// from ProfileView. Null name = no anchor session set. See
+  /// anchorSessionGuidance.ts for how these two feed the prompt.
+  anchor_session_name: string | null;
+  anchor_session_days: number[] | null;
 }
 
 interface SnapshotRow {
@@ -416,7 +423,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city")
+      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_session_name, anchor_session_days")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -550,6 +557,17 @@ Deno.serve(async (req: Request) => {
       await maybeUpdateEtaSlip(supabase, goalRow, userId, date, Number.isFinite(profilePerWeek) ? profilePerWeek : null);
     }
 
+    // Phase 4 (docs/coaching-personalization-plan.md): purely advisory,
+    // same "never overrides safety/category" framing as upcomingGoalLine --
+    // independent of the goal-work machinery above (no user_goal row
+    // needed), so it's computed here rather than inside that `if (goalRow)`
+    // block.
+    const anchorSessionLine = describeAnchorSession({
+      name: (userRow as UserRow | null)?.anchor_session_name ?? null,
+      days: (userRow as UserRow | null)?.anchor_session_days ?? [],
+      date,
+    });
+
     const prompt = buildPrompt(
       category,
       resolvedSelection,
@@ -561,6 +579,7 @@ Deno.serve(async (req: Request) => {
       (recentLogs ?? []) as WorkoutLogRow[],
       notes,
       upcomingGoalLine,
+      anchorSessionLine,
     );
 
     // Goal-mapped exercise ids join the closed vocabulary inside, under
@@ -798,6 +817,7 @@ function buildPrompt(
   recentLogs: WorkoutLogRow[],
   notes: string | undefined,
   upcomingGoalLine: string | null,
+  anchorSessionLine: string | null,
 ): string {
   const goals = userRow?.goals?.length ? userRow.goals.join(", ") : "general fitness";
   // A secondary, lower-confidence signal from comparing the user's stored
@@ -949,6 +969,7 @@ ${shapingGoalLine}
 ${sexAwareLine ? `\n${sexAwareLine}` : ""}
 ${workoutsPerWeekLine ? `\n${workoutsPerWeekLine}` : ""}${dietLine ? `\n${dietLine}` : ""}${goalPaceLine ? `\n${goalPaceLine}` : ""}${blockersLine ? `\n${blockersLine}` : ""}${accomplishmentLine ? `\n${accomplishmentLine}` : ""}
 ${upcomingGoalLine ? `\n${upcomingGoalLine}` : ""}
+${anchorSessionLine ? `\n${anchorSessionLine}` : ""}
 
 Recent logged workouts (last 14 days, oldest first) -- use this for progressive overload: if the user has repeated an exercise, suggest a sensible progression (more reps, more weight, or more sets) rather than repeating the exact same prescription. If an exercise is new, prescribe a safe, moderate starting point.
 ${historyLines}
