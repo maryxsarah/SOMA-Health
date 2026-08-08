@@ -1,0 +1,25 @@
+-- Re-timestamped re-application of 20260807000000_add_known_lifts.sql.
+-- That migration's numeric prefix (20260807000000) collides with a
+-- DIFFERENT, independently-authored migration on another branch
+-- (add_user_goal_program_name.sql) that reached this shared remote
+-- project first. supabase's migration tracking keys purely on the
+-- leading timestamp, not the filename or content, so `supabase migration
+-- list` reported 20260807000000 as "already applied" even though this
+-- branch's actual known_lifts column was never created -- confirmed via
+-- information_schema.columns showing no users.known_lifts anywhere on
+-- the remote. This silently broke every ProfileView save for every user
+-- (updateProfile unconditionally references known_lifts), surfaced as
+-- "Couldn't save profile. Try again." with no further detail.
+--
+-- Original content, unchanged:
+--
+-- Optional, user-stated real working weights for the 5 bilateral load-
+-- guidance patterns (squat_pattern, hinge_pattern, overhead_press,
+-- horizontal_press, row_pull -- same keys as generate-workout-plan/
+-- loadGuidance.ts's LOAD_FRACTION_OF_BODYWEIGHT), kg values, e.g.
+-- {"hinge_pattern": 100}. Real feedback: a self-described non-
+-- powerlifter was prescribed 125-135kg for a deadlift from the
+-- population-level bodyweight-ratio estimate alone -- "probably need to
+-- ask the user about their strength levels." When a pattern has a value
+-- here, buildLoadGuidance uses it directly instead of estimating.
+alter table users add column known_lifts jsonb;
