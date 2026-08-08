@@ -44,6 +44,7 @@ import { findDuplicateExerciseNames } from "./planValidation.ts";
 import { buildLoadGuidance } from "./loadGuidance.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
 import { resolveFreeTextEquipment } from "../_shared/equipment.ts";
+import { fetchOutdoorSafetyForCity, isOutdoorCardioExerciseName } from "../_shared/weatherSafety.ts";
 import { computeEtaShift, conceptFromRow, decideGoalWork, decideSafetyPause, deriveEtaInputs, derivePhase, type GoalBlockHistoryEntry, type GoalWorkBlock, type GoalWorkConcept } from "./goalWork.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
@@ -51,6 +52,13 @@ const ANTHROPIC_VERSION = "2023-06-01";
 // Cheap/fast tier -- appropriate for a short, structured, once-a-day
 // generation task like this one.
 const MODEL = "claude-haiku-4-5";
+
+// Mirrors exerciseLibraryMatch.ts's MIN_CANDIDATES_AFTER_FRESHNESS_EXCLUSION
+// -- never shrink the candidate pool so far a weather-unsafe exercise
+// becomes preferable to what's left. In practice this floor is rarely
+// tested: the exercise library is mostly gym/strength content, so outdoor
+// cardio is a small slice of any given candidate pool.
+const MIN_CANDIDATES_AFTER_WEATHER_EXCLUSION = 5;
 
 // Exercise `name` is constrained to a request-scoped closed vocabulary
 // (see _shared/exerciseLibraryMatch.ts) via a JSON-schema enum so every
@@ -178,6 +186,11 @@ interface UserRow {
   /// bodyweight-ratio estimate. See that function's own comment for the
   /// bug this exists to fix.
   known_lifts: Record<string, number> | null;
+  /// Feeds the outdoor-cardio weather safety check (weatherSafety.ts) --
+  /// real feedback: "when the user is in Dubai, and the temperature ...
+  /// is 42 degrees celsius, SOMA should not recommend a run outside."
+  country: string | null;
+  city: string | null;
 }
 
 interface SnapshotRow {
@@ -378,7 +391,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts")
+      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -386,6 +399,18 @@ Deno.serve(async (req: Request) => {
     if (userReadError) {
       throw new Error(`could not read user personalization: ${userReadError.message}`);
     }
+    // Kicked off here (not awaited yet) so the geocode+weather round trip
+    // overlaps with everything else this handler does before candidate
+    // exercises are actually filtered, below -- awaited only once
+    // candidateExerciseNames exists. Real feedback: "when the user is in
+    // Dubai, and the temperature ... is 42 degrees celsius, SOMA should
+    // not recommend a run outside." Best-effort: resolves to null on any
+    // failure (no city on file, geocoding miss, network error/timeout),
+    // treated identically to "safe" by the caller below.
+    const outdoorSafetyPromise = fetchOutdoorSafetyForCity(
+      (userRow as UserRow | null)?.city ?? null,
+      (userRow as UserRow | null)?.country ?? null,
+    );
 
     const { data: snapshots } = await supabase
       .from("daily_snapshot")
@@ -516,7 +541,7 @@ Deno.serve(async (req: Request) => {
     // same workout, day after day. Soft-excluded, see
     // MIN_CANDIDATES_AFTER_FRESHNESS_EXCLUSION.
     const recentExerciseNames = await fetchRecentExerciseNames(supabase, userId, selection.title, date);
-    const candidateExerciseNames = await fetchCandidateExerciseNames(
+    let candidateExerciseNames = await fetchCandidateExerciseNames(
       supabase,
       resolvedBodyPart,
       (userRow as UserRow | null)?.equipment ?? [],
@@ -527,6 +552,21 @@ Deno.serve(async (req: Request) => {
       freeTextEquipment.unlocksCardio,
       recentExerciseNames,
     );
+    // Post-filter rather than folded into fetchCandidateExerciseNames's own
+    // excludedKeywords param -- that mechanism is plain substring matching
+    // with no equipment-awareness, which would also drop safe indoor
+    // equivalents (see weatherSafety.ts's isOutdoorCardioExerciseName doc
+    // comment for why). Same "never shrink to a degenerate pool" guard as
+    // the freshness exclusion in exerciseLibraryMatch.ts.
+    const outdoorSafety = await outdoorSafetyPromise;
+    let weatherUnsafeNote: string | null = null;
+    if (outdoorSafety && !outdoorSafety.safe) {
+      const withoutOutdoorCardio = candidateExerciseNames.filter((name) => !isOutdoorCardioExerciseName(name));
+      if (withoutOutdoorCardio.length >= MIN_CANDIDATES_AFTER_WEATHER_EXCLUSION) {
+        candidateExerciseNames = withoutOutdoorCardio;
+        weatherUnsafeNote = outdoorSafety.reason ?? null;
+      }
+    }
     const workoutSchema = buildWorkoutSchema(candidateExerciseNames);
 
     let plan = await callClaude(prompt, workoutSchema);
@@ -599,6 +639,12 @@ Deno.serve(async (req: Request) => {
       // badge client-side (AIWorkoutPlanSections.swift) -- only ever true
       // alongside a block whose is_finisher is also true.
       exceptional_finisher: finisherDecision.exceptional,
+      // Non-null only when outdoor cardio was actually excluded from
+      // today's candidate pool for weather -- surfaced so the client can
+      // say why, same "say it out loud" pattern as every other cap's note.
+      // Cached alongside the plan (not just in the fresh-generation
+      // response) so a same-day cache hit still shows it.
+      weather_note: weatherUnsafeNote,
     };
 
     // A freshly generated plan always starts unconfirmed -- added_to_plan is

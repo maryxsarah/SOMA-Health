@@ -123,6 +123,14 @@ struct AIWorkoutPlan: Codable {
     /// Non-nil only when the plan actually includes a goal block -- gates
     /// the GOAL BLOCK eyebrow (an active goal alone doesn't imply one today).
     let goalBlock: AIGoalBlockMarker?
+    /// Non-nil only when outdoor cardio was actually excluded from today's
+    /// candidate pool for weather -- e.g. "It's 42°C (feels like) right
+    /// now -- too hot for safe outdoor cardio." Real feedback: "when the
+    /// user is in Dubai, and the temperature ... is 42 degrees celsius,
+    /// SOMA should not recommend a run outside." See
+    /// _shared/weatherSafety.ts server-side. Absent-means-nil for plans
+    /// cached before this field existed.
+    let weatherNote: String?
 
     enum CodingKeys: String, CodingKey {
         case date, category, focus, blocks, source
@@ -133,6 +141,7 @@ struct AIWorkoutPlan: Codable {
         case templateBodyPart = "bodyPart"
         case exceptionalFinisher = "exceptional_finisher"
         case goalBlock = "goal_block"
+        case weatherNote = "weather_note"
     }
 
     init(from decoder: Decoder) throws {
@@ -160,6 +169,7 @@ struct AIWorkoutPlan: Codable {
         source = try container.decodeIfPresent(String.self, forKey: .source) ?? "suggestion"
         // Lenient: absent, null, or an unexpected shape all mean "no marker".
         goalBlock = try? container.decodeIfPresent(AIGoalBlockMarker.self, forKey: .goalBlock)
+        weatherNote = try container.decodeIfPresent(String.self, forKey: .weatherNote)
     }
 }
 
