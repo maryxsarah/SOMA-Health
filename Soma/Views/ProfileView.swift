@@ -47,6 +47,23 @@ struct ProfileView: View {
     /// entry for a pattern just means "keep using the estimate for this
     /// one", not zero.
     @State private var knownLiftsText: [LiftPattern: String] = [:]
+    /// Pass-through only -- this screen has no editor for these three yet
+    /// (set during onboarding), but updateProfile writes height_cm/
+    /// journey_stage/blockers_notes unconditionally (NSNull if absent).
+    /// Without loading and re-sending them, ANY save from this screen --
+    /// including something as unrelated as changing region -- silently
+    /// wiped all three, which in turn silently broke the Health
+    /// Dashboard's BMI card (needs height) on the next load. Loaded once
+    /// in load(), never mutated by any control here, sent back unchanged.
+    @State private var preservedHeightCm: Double?
+    @State private var preservedJourneyStage: JourneyStage?
+    @State private var preservedBlockersNotes: String?
+    /// Unlike the three above, THIS one now has a real editor
+    /// (dateOfBirthEditor) -- see UserProfile.dateOfBirth's doc comment.
+    /// nil means genuinely unset (an account that predates the onboarding
+    /// DOB step), distinct from "user picked today's date" which the
+    /// DatePicker binding below needs a concrete non-optional default for.
+    @State private var dateOfBirthDate: Date?
     @State private var sessionsDoneThisWeek = 0
     // Region (country ISO code + free-text city) -- powers the future
     // nearby gyms/partners suggestions; saved via the normal profile flow.
@@ -750,6 +767,12 @@ struct ProfileView: View {
                 value: UserProfile.regionDisplay(country: countryCode, city: cityText) ?? "Not set"
             ) { activeSheet = .region }
 
+            summaryRow(
+                title: "Date of birth",
+                consequence: "Needed to unlock Goal Body progress photos",
+                value: dateOfBirthDate.map { Self.dobFormatter.string(from: $0) } ?? "Not set"
+            ) { activeSheet = .dateOfBirth }
+
             groupEyebrow("EARLY ACCESS")
             betaOptInRow
 
@@ -928,6 +951,7 @@ struct ProfileView: View {
                     case .pregnancy: pregnancyEditor
                     case .contactEmail: contactEmailEditor
                     case .region: regionEditor
+                    case .dateOfBirth: dateOfBirthEditor
                     case .knownLifts: knownLiftsEditor
                     }
                 }
@@ -1140,6 +1164,19 @@ struct ProfileView: View {
             .textFieldStyle(.roundedBorder)
     }
 
+    /// "yyyy-MM-dd", matching UserProfile.dateOfBirth's wire format
+    /// (same as AgeGate.isAdult's parser).
+    private static let dobFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        return formatter
+    }()
+
+    private static var defaultDateOfBirth: Date {
+        Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
+    }
+
     /// ISO region codes sorted by their localized display name -- never a
     /// hand-maintained country list.
     private static let countryOptions: [(code: String, name: String)] = Locale.Region.isoRegions
@@ -1162,6 +1199,30 @@ struct ProfileView: View {
             .pickerStyle(.menu)
             TextField("City", text: $cityText)
                 .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    /// Real feedback traced to a missing DOB: an account created before
+    /// the onboarding DOB step existed has no other way to supply one,
+    /// which silently hides the whole Goal Body photo feature -- see
+    /// UserProfile.dateOfBirth's doc comment. Same wheel DatePicker as
+    /// the onboarding step (DateOfBirthQuestionView) for a consistent feel.
+    private var dateOfBirthEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Confirms you're 18+ to unlock Goal Body progress photos. Never shown to other users.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DatePicker(
+                "Date of birth",
+                selection: Binding(
+                    get: { dateOfBirthDate ?? Self.defaultDateOfBirth },
+                    set: { dateOfBirthDate = $0 }
+                ),
+                in: ...Date(),
+                displayedComponents: .date
+            )
+            .datePickerStyle(.wheel)
+            .labelsHidden()
         }
     }
 
@@ -1240,6 +1301,10 @@ struct ProfileView: View {
         })
         countryCode = profile.country
         cityText = profile.city ?? ""
+        preservedHeightCm = profile.heightCm
+        preservedJourneyStage = profile.journeyStage
+        preservedBlockersNotes = profile.blockersNotes
+        dateOfBirthDate = profile.dateOfBirth.flatMap(Self.dobFormatter.date(from:))
         betaOptIn = (try? await SupabaseClient.shared.fetchBetaOptIn()) ?? false
 
         isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
@@ -1418,7 +1483,11 @@ struct ProfileView: View {
             weeklySessionTarget: weeklySessionTarget,
             country: countryCode,
             city: cityText.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cityText.trimmingCharacters(in: .whitespaces),
-            knownLifts: knownLifts
+            heightCm: preservedHeightCm,
+            journeyStage: preservedJourneyStage,
+            blockersNotes: preservedBlockersNotes,
+            knownLifts: knownLifts,
+            dateOfBirth: dateOfBirthDate.map(Self.dobFormatter.string(from:))
         )
 
         let currentInjuryTags = Array(injuryTags)
@@ -1430,6 +1499,21 @@ struct ProfileView: View {
             defer { isSaving = false }
             do {
                 try await SupabaseClient.shared.updateProfile(id: userId, profile: profile)
+            } catch {
+                // Distinct from the injury-report failure below -- real
+                // feedback: "when user updates the region, the app showed
+                // an error 'Couldn't save profile. Try again.'" One shared
+                // catch around both calls meant a reportInjury-only
+                // failure (e.g. an invalid legacy severity value) showed
+                // this exact message even when the actual field being
+                // edited -- like region -- had already saved successfully
+                // moments earlier. Bail out here before reportInjury runs,
+                // so a genuine profile-fields failure is reported
+                // accurately and isn't masked by/blamed on injury state.
+                errorMessage = "Couldn't save profile. Try again."
+                return
+            }
+            do {
                 try await SupabaseClient.shared.reportInjury(
                     tags: currentInjuryTags,
                     severity: currentInjurySeverity,
@@ -1438,7 +1522,10 @@ struct ProfileView: View {
                 )
                 savedConfirmation = true
             } catch {
-                errorMessage = "Couldn't save profile. Try again."
+                // Profile fields (region, goals, equipment, etc.) DID save
+                // above -- only the injury-tag write failed, so say that
+                // specifically rather than implying nothing was saved.
+                errorMessage = "Profile saved, but couldn't update injury info. Try again."
             }
         }
     }
@@ -1457,7 +1544,7 @@ private enum ProfileSection: String, CaseIterable, Identifiable {
 }
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts
+    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -1470,6 +1557,7 @@ private enum ProfileSheet: String, Identifiable {
         case .contactEmail: "Contact email"
         case .region: "Region"
         case .knownLifts: "Your current lifts"
+        case .dateOfBirth: "Date of birth"
         }
     }
 }

@@ -57,8 +57,16 @@ final class SupabaseClient {
 
         // Apple only shares the real email on the user's very first
         // authorization for this app -- capture it here since it's never
-        // offered again on subsequent sign-ins.
-        try await upsertUser(id: auth.user.id, contactEmail: email)
+        // offered again on subsequent sign-ins. Real feedback: "Contact
+        // E-Mail should be auto-filled ... these mails are used for the
+        // setup." `?? auth.user.email` is a harmless-if-unavailable
+        // fallback: AuthResponse.AuthUser's own doc comment notes
+        // Supabase's Apple id_token exchange has not been observed to
+        // populate `email` (unlike Google/email sign-in), so this adds no
+        // coverage today if that holds -- but costs nothing to keep in
+        // case that ever changes, and does help if it turns out not to be
+        // universally true.
+        try await upsertUser(id: auth.user.id, contactEmail: email ?? auth.user.email)
         return auth.user.id
     }
 
@@ -302,6 +310,10 @@ final class SupabaseClient {
         body["journey_stage"] = profile.journeyStage?.rawValue ?? NSNull()
         body["blockers_notes"] = profile.blockersNotes ?? NSNull()
         body["known_lifts"] = (profile.knownLifts?.isEmpty ?? true) ? NSNull() : profile.knownLifts!
+        // Now editable from ProfileView's Account section -- see
+        // UserProfile.dateOfBirth's doc comment for why this needed to
+        // stop being read-only.
+        body["date_of_birth"] = profile.dateOfBirth ?? NSNull()
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")

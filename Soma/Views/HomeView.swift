@@ -877,6 +877,29 @@ struct HomeView: View {
                 }
             }
             .buttonStyle(.plain)
+        } else if Config.enableBodyPhotoUpload {
+            // Real feedback: "the progress picture section is gone now."
+            // Traced to accounts with no date_of_birth on record (e.g.
+            // created before the onboarding DOB step existed) --
+            // AgeGate.isAdult fails closed on a missing DOB, so the row
+            // above vanished entirely with no explanation. Same two-state
+            // "CTA vs. hidden" pattern as everywhere else on this screen:
+            // say what's missing and how to fix it, don't just disappear.
+            Button {
+                AnalyticsManager.shared.featureUsed(name: "goal_progress_dob_prompt")
+                showProfile = true
+            } label: {
+                scanRowBody(
+                    plate: SomaTokens.accentSoft, icon: "person.fill.questionmark", iconColor: SomaTokens.accent,
+                    title: "Add your date of birth",
+                    subtitle: "Confirms you're 18+ to unlock Goal Body progress photos"
+                ) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+            }
+            .buttonStyle(.plain)
         }
     }
 

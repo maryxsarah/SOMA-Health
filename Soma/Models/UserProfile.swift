@@ -161,8 +161,14 @@ struct UserProfile: Codable, Equatable {
     /// self-described non-powerlifter was prescribed 125-135kg for a
     /// deadlift from the population estimate alone.
     var knownLifts: [String: Double]? = nil
-    /// Read-only (set at onboarding, never edited here) -- "yyyy-MM-dd".
-    /// Exists on this model ONLY for the Goal Body adult-only gate
+    /// Set at onboarding -- "yyyy-MM-dd". Also now editable from
+    /// ProfileView's Account section (real feedback traced to this: an
+    /// account created before the onboarding DOB step existed has this
+    /// permanently null with no other way to supply it, which silently
+    /// hides the entire Goal Body photo feature behind AgeGate.isAdult's
+    /// fail-closed default -- read as "the progress picture section is
+    /// gone" rather than "add your birthday to unlock it"). Exists on
+    /// this model ONLY for the Goal Body adult-only gate
     /// (bodyPhotosEditor); every other date-of-birth use is server-side.
     var dateOfBirth: String? = nil
     /// Read-only -- written at onboarding (saveOnboardingSurvey), never
