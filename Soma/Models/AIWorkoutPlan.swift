@@ -11,6 +11,13 @@ struct AIExercise: Codable, Identifiable {
     let weightGuidance: String
     let intensity: String
     let durationMinutes: Int
+    /// Real prescriptive rest AFTER this exercise, in seconds -- only
+    /// populated by generate-workout-plan (Phase 2: see
+    /// docs/coaching-personalization-plan.md); nil for the gym-photo flow,
+    /// which doesn't send this field, and for any plan cached before it
+    /// existed. Display-only -- durationMinutes above already includes
+    /// rest in its own total, this is never separately added to it.
+    let restSeconds: Int?
     let instructions: String
     /// Which muscles/body area this exercise targets -- currently only
     /// populated by the gym-photo-workout flow (deterministic, set per
@@ -32,8 +39,21 @@ struct AIExercise: Codable, Identifiable {
         case name, sets, reps, intensity, instructions
         case weightGuidance = "weight_guidance"
         case durationMinutes = "duration_minutes"
+        case restSeconds = "rest_seconds"
         case targetArea = "target_area"
         case libraryId = "library_id"
+    }
+
+    /// Compact display string for restSeconds -- e.g. "45s rest", "90s
+    /// rest". Nil (not just an empty string) when there's nothing to show,
+    /// so callers can decide whether to render a row at all rather than an
+    /// empty one. 0 is a real, meaningful value (a stretch/warm-up item
+    /// with no prescribed rest), so it still renders as "0s rest" rather
+    /// than being treated the same as "not sent".
+    var restLabel: String? {
+        guard let restSeconds else { return nil }
+        if restSeconds <= 0 { return "no rest needed" }
+        return "\(restSeconds)s rest"
     }
 }
 

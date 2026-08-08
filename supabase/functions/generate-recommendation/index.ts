@@ -20,6 +20,7 @@ import { assessHealthKit } from "./healthkitBand.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
 import { computeInjuryProtocolRestApplied, computeMoodCapApplied } from "../_shared/independentCaps.ts";
+import { buildReasoningMessage } from "./reasoningMessage.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -43,16 +44,6 @@ const WHOOP_HIGH_STRAIN_THRESHOLD = 15;
 import type { Band, DataConfidence, HealthKitPayload } from "./healthkitBand.ts";
 type Category = "rest" | "light" | "moderate" | "push_hard";
 type Source = "whoop" | "oura" | "healthkit";
-
-const MESSAGES: Record<Category, string> = {
-  push_hard:
-    "You're well recovered — today's a good day to push. Go for a hard workout or high-intensity session.",
-  moderate:
-    "You're in decent shape today. A moderate cardio session or a solid strength workout (30-45 min) is a good call.",
-  light:
-    "Take it easier today — a short walk, mobility work, or light yoga (20-30 min) is ideal.",
-  rest: "Today's a recovery day. Keep movement light and let your body rest — a gentle walk is plenty.",
-};
 
 interface WearableTokenRow {
   id: string;
@@ -191,7 +182,7 @@ Deno.serve(async (req: Request) => {
     // today, same merge shape as sleep already used.
     const { data: todaysRows } = await supabase
       .from("daily_snapshot")
-      .select("source, sleep_hours, hrv_ms, stress_score")
+      .select("source, sleep_hours, hrv_ms, stress_score, resting_hr, strain_score")
       .eq("user_id", userId)
       .eq("date", date);
 
@@ -200,6 +191,12 @@ Deno.serve(async (req: Request) => {
     // Oura-only signal (see fetchOuraStress) -- no Whoop/HealthKit source
     // reports one today, so this naturally resolves to null for them.
     const todaysStress = pickTodaysMetric(todaysRows ?? [], "stress_score", undefined);
+    // Two more merged-source picks (Phase 2: see
+    // docs/coaching-personalization-plan.md), same shape as the two above --
+    // feed reasoningMessage.ts's degrade-gracefully number citations, not
+    // the band/cap decisions themselves.
+    const todaysRestingHr = pickTodaysMetric(todaysRows ?? [], "resting_hr", healthkit?.restingHr);
+    const todaysStrain = pickTodaysMetric(todaysRows ?? [], "strain_score", undefined);
 
     // Injury-based intensity cap: any noted injury caps the category at
     // moderate max for the day, same safety-first pattern as the sleep cap.
@@ -446,7 +443,37 @@ Deno.serve(async (req: Request) => {
     // computed cap above -- see the comment where userRequestedCategory is
     // read, near the top of this handler.
     const category: Category = userRequestedCategory ?? computedCategory;
-    const message = MESSAGES[category];
+    // Phase 2 (docs/coaching-personalization-plan.md): a short reasoning
+    // string citing today's actual numbers, replacing the old fixed
+    // MESSAGES[category] lookup. Deterministic (see reasoningMessage.ts's
+    // own header) -- the category decision above is never recomputed here.
+    const message = buildReasoningMessage({
+      category,
+      userRequestedCategory,
+      source,
+      band,
+      insufficientData,
+      dataConfidence,
+      recoveryScore: whoopRecovery?.recoveryScore ?? null,
+      readinessScore: ouraReadiness,
+      hrvMs: todaysHrv,
+      sleepHours,
+      restingHr: todaysRestingHr,
+      strainScore: todaysStrain,
+      stressMinutes: todaysStress,
+      caps: {
+        sleep: sleepCapApplied,
+        hrv: hrvCapApplied,
+        stress: stressCapApplied,
+        mood: moodCapApplied,
+        consecutiveDays: consecutiveDaysCapApplied,
+        consecutiveDaysRestEscalated,
+        volume: volumeCapApplied,
+        injury: injuryProtocolCapApplied,
+        injuryModerate: injuryProtocolModerateCapApplied,
+        injuryRest: injuryProtocolRestApplied,
+      },
+    });
 
     await supabase
       .from("daily_recommendation")
@@ -666,10 +693,17 @@ function pickSleepHours(
 }
 
 /// Same merge shape as pickSleepHours, generalized to any daily_snapshot
-/// numeric column -- used for today's HRV/stress cap inputs.
+/// numeric column -- used for today's HRV/stress cap inputs, and (Phase 2)
+/// resting_hr/strain_score for reasoningMessage.ts's number citations.
 function pickTodaysMetric(
-  rows: { source: string; hrv_ms?: number | null; stress_score?: number | null }[],
-  column: "hrv_ms" | "stress_score",
+  rows: {
+    source: string;
+    hrv_ms?: number | null;
+    stress_score?: number | null;
+    resting_hr?: number | null;
+    strain_score?: number | null;
+  }[],
+  column: "hrv_ms" | "stress_score" | "resting_hr" | "strain_score",
   healthkitValue: number | null | undefined,
 ): number | null {
   const bySource = (source: string) => rows.find((r) => r.source === source)?.[column] ?? null;

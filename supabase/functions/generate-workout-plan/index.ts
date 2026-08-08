@@ -45,7 +45,19 @@ import { buildLoadGuidance } from "./loadGuidance.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
 import { resolveFreeTextEquipment } from "../_shared/equipment.ts";
 import { fetchOutdoorSafetyForCity, isOutdoorCardioExerciseName } from "../_shared/weatherSafety.ts";
-import { computeEtaShift, conceptFromRow, decideGoalWork, decideSafetyPause, deriveEtaInputs, derivePhase, type GoalBlockHistoryEntry, type GoalWorkBlock, type GoalWorkConcept } from "./goalWork.ts";
+import {
+  computeEtaShift,
+  conceptFromRow,
+  decideGoalWork,
+  decideSafetyPause,
+  describeUpcomingGoalWork,
+  deriveEtaInputs,
+  derivePhase,
+  type GoalBlockHistoryEntry,
+  type GoalState,
+  type GoalWorkBlock,
+  type GoalWorkConcept,
+} from "./goalWork.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -75,6 +87,12 @@ function buildExerciseSchema(candidateNames: string[]) {
       weight_guidance: { type: "string" },
       intensity: { type: "string" },
       duration_minutes: { type: "integer" },
+      // How long to rest AFTER this exercise (between sets/before the next
+      // item) in seconds -- 0 for anything with no meaningful rest (a
+      // stretch, a warm-up cardio item). Informational/display-only:
+      // duration_minutes above already includes rest in its total, so this
+      // is never separately summed into the session duration.
+      rest_seconds: { type: "integer" },
       instructions: { type: "string" },
     },
     required: [
@@ -84,6 +102,7 @@ function buildExerciseSchema(candidateNames: string[]) {
       "weight_guidance",
       "intensity",
       "duration_minutes",
+      "rest_seconds",
       "instructions",
     ],
     additionalProperties: false,
@@ -219,6 +238,11 @@ interface GeneratedExercise {
   weight_guidance: string;
   intensity: string;
   duration_minutes: number;
+  // Nullable here (unlike the schema's own required integer, which Claude
+  // always fills in): buildCoachBlock below hand-builds a placeholder
+  // exercise with no parseable rest prescription and needs an honest "not
+  // known" rather than a fabricated number.
+  rest_seconds: number | null;
   instructions: string;
 }
 interface GeneratedBlock {
@@ -477,37 +501,49 @@ Deno.serve(async (req: Request) => {
     // words it. Custom (coach's task) blocks stay verbatim, injected below.
     let goalDecision: GoalWorkBlock | null = null;
     let goalExerciseIds: string[] = [];
+    // Advisory-only forward-looking hint (Phase 2: see
+    // docs/coaching-personalization-plan.md) -- null whenever there's no
+    // active goal, or its schedule isn't knowable this far ahead.
+    let upcomingGoalLine: string | null = null;
     if (goalRow) {
       // Independent fetches, so they run in parallel; the safety pause
       // above already settled the goal state they all read against.
       const fromCatalog = goalRow.kind === "preset" && goalRow.goal_id ? goalRow.goal_id : null;
-      const [sportVisible, concepts, recentGoalBlocks, exerciseIds] = await Promise.all([
+      const [sportVisibility, concepts, recentGoalBlocks, exerciseIds] = await Promise.all([
         isGoalSportVisible(supabase, goalRow, userId),
         fromCatalog ? fetchGoalConcepts(supabase, fromCatalog) : Promise.resolve([]),
         fetchRecentGoalBlocks(supabase, userId, date),
         fromCatalog ? fetchGoalExerciseIds(supabase, fromCatalog) : Promise.resolve([]),
       ]);
       goalExerciseIds = exerciseIds;
+      const goalState: GoalState = {
+        id: goalRow.id,
+        kind: goalRow.kind === "custom" ? "custom" : "preset",
+        targetKind: (goalRow.target_kind ?? "metric") as "metric" | "milestone" | "qualitative" | "commitment",
+        phase: goalRow.phase ?? null,
+        paused: goalRow.status === "paused",
+        sportVisible: sportVisibility.visible,
+        // deno-lint-ignore no-explicit-any
+        scheduleRule: (goalRow.schedule_rule ?? null) as any,
+        scheduleDays: goalRow.schedule_days ?? null,
+        courtDays: goalRow.court_days ?? null,
+        workoutText: goalRow.workout_text ?? null,
+        coachName: goalRow.coach_name ?? null,
+      };
       goalDecision = decideGoalWork({
         category,
         date,
-        goal: {
-          id: goalRow.id,
-          kind: goalRow.kind === "custom" ? "custom" : "preset",
-          targetKind: (goalRow.target_kind ?? "metric") as "metric" | "milestone" | "qualitative" | "commitment",
-          phase: goalRow.phase ?? null,
-          paused: goalRow.status === "paused",
-          sportVisible,
-          // deno-lint-ignore no-explicit-any
-          scheduleRule: (goalRow.schedule_rule ?? null) as any,
-          scheduleDays: goalRow.schedule_days ?? null,
-          courtDays: goalRow.court_days ?? null,
-          workoutText: goalRow.workout_text ?? null,
-          coachName: goalRow.coach_name ?? null,
-        },
+        goal: goalState,
         concepts,
         excludedKeywords: goalExcludedKeywords,
         recentGoalBlocks,
+      });
+      upcomingGoalLine = describeUpcomingGoalWork({
+        goal: goalState,
+        date,
+        recentGoalBlocks,
+        todaysDecision: goalDecision,
+        sportGoalName: sportVisibility.name,
       });
       const profilePerWeek = Number.parseInt((userRow as UserRow | null)?.workouts_per_week ?? "", 10);
       await maybeUpdateEtaSlip(supabase, goalRow, userId, date, Number.isFinite(profilePerWeek) ? profilePerWeek : null);
@@ -523,6 +559,7 @@ Deno.serve(async (req: Request) => {
       (snapshots ?? []) as SnapshotRow[],
       (recentLogs ?? []) as WorkoutLogRow[],
       notes,
+      upcomingGoalLine,
     );
 
     // Goal-mapped exercise ids join the closed vocabulary inside, under
@@ -759,6 +796,7 @@ function buildPrompt(
   snapshots: SnapshotRow[],
   recentLogs: WorkoutLogRow[],
   notes: string | undefined,
+  upcomingGoalLine: string | null,
 ): string {
   const goals = userRow?.goals?.length ? userRow.goals.join(", ") : "general fitness";
   // A secondary, lower-confidence signal from comparing the user's stored
@@ -887,6 +925,7 @@ ${volumeGuidanceLine ? `\n${volumeGuidanceLine}` : ""}
 ${rirGuidanceLine ? `\n${rirGuidanceLine}` : ""}
 ${sexAwareLine ? `\n${sexAwareLine}` : ""}
 ${workoutsPerWeekLine ? `\n${workoutsPerWeekLine}` : ""}${dietLine ? `\n${dietLine}` : ""}${goalPaceLine ? `\n${goalPaceLine}` : ""}${blockersLine ? `\n${blockersLine}` : ""}${accomplishmentLine ? `\n${accomplishmentLine}` : ""}
+${upcomingGoalLine ? `\n${upcomingGoalLine}` : ""}
 
 Recent logged workouts (last 14 days, oldest first) -- use this for progressive overload: if the user has repeated an exercise, suggest a sensible progression (more reps, more weight, or more sets) rather than repeating the exact same prescription. If an exercise is new, prescribe a safe, moderate starting point.
 ${historyLines}
@@ -904,7 +943,7 @@ Return the full session as:
 - blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). VARIETY IS REQUIRED: use each specific named exercise AT MOST ONCE across the ENTIRE session (warm_up + every block + cool_down combined) -- never repeat the same exercise in multiple blocks or rounds of a superset. Like a real strength coach programming a session, deliberately spread the work across different specific muscles within the target body part (e.g. a lower-body day should mix quad-, hamstring-, glute-, and calf-dominant movements, not four variations of the same squat pattern) and different movement patterns (push/pull/hinge/squat/carry/isolation as relevant), not near-duplicates of one exercise. ${finisherInstruction}${goalInstruction}
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
-For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, and instructions (2-3 sentences, plain and easy to follow, describing exact form/technique). Also give a one-line "focus" summarizing today's session.`;
+For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, rest_seconds (integer, real prescriptive rest AFTER this exercise before the next -- roughly 0 for a stretch/warm-up cardio item, 30-60s for lighter accessory/circuit work, 60-90s for standard working sets, 120-180s for heavy compound lifts near the top of the day's intensity; scale it with today's intensity and the user's experience level like a real coach would, don't default to the same number every time), and instructions -- 2-3 plain, easy-to-follow sentences giving EXACT form/technique PLUS one concrete, specific coaching cue for this exact movement (e.g. "brace your core like you're about to be punched in the stomach" or "drive through your mid-foot, not your toes" or "keep your ribs stacked over your hips throughout"). A generic filler cue that could apply to any exercise (e.g. "maintain good form", "focus on technique", "go at your own pace") is NOT acceptable -- the cue must be specific enough that it wouldn't make sense pasted onto a different exercise. Also give a one-line "focus" summarizing today's session.`;
 }
 
 /// Turns whichever provider(s) reported today into a plain-language health
@@ -1211,22 +1250,33 @@ function goalSignatureOf(goalRow: UserGoalRow | null): string | null {
 /// Per-sport server gate (spec, gating 3): live for everyone, internal for
 /// testers, beta for opt-ins (and testers) -- the same rule as the
 /// sport_status_visible() RLS helper. Fails closed on any unknown state.
-// deno-lint-ignore no-explicit-any
-async function isGoalSportVisible(supabase: any, goalRow: UserGoalRow, userId: string): Promise<boolean> {
-  if (goalRow.kind === "custom" || !goalRow.goal_id) return true;
+/// Visibility gate, PLUS (new, Phase 2) the sport_goal's own catalog name --
+/// piggybacked onto this same existing round trip rather than adding a
+/// second query just to label describeUpcomingGoalWork's advisory line.
+/// `name` is null for a custom goal (no catalog row to name) or on any
+/// read failure; callers must treat that as "no human label available",
+/// never fabricate one.
+async function isGoalSportVisible(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  goalRow: UserGoalRow,
+  userId: string,
+): Promise<{ visible: boolean; name: string | null }> {
+  if (goalRow.kind === "custom" || !goalRow.goal_id) return { visible: true, name: null };
   const { data, error } = await supabase
     .from("sport_goals")
-    .select("id, sports(status)")
+    .select("id, name, sports(status)")
     .eq("id", goalRow.goal_id)
     .maybeSingle();
   if (error || !data) {
     if (error) console.error(`could not read sport_goals for gating: ${error.message}`);
-    return false;
+    return { visible: false, name: null };
   }
+  const name = ((data as { name?: string }).name as string | undefined) ?? null;
   // deno-lint-ignore no-explicit-any
   const status = ((data as any).sports?.status as string | undefined) ?? null;
-  if (status === "live") return true;
-  if (status !== "internal" && status !== "beta") return false;
+  if (status === "live") return { visible: true, name };
+  if (status !== "internal" && status !== "beta") return { visible: false, name };
   // Roster table, not a users column -- users can edit their own users row
   // and could self-grant (see the internal_testers migration comment).
   const { data: tester, error: testerError } = await supabase
@@ -1236,10 +1286,10 @@ async function isGoalSportVisible(supabase: any, goalRow: UserGoalRow, userId: s
     .maybeSingle();
   if (testerError) {
     console.error(`could not read internal_testers for gating: ${testerError.message}`);
-    return false;
+    return { visible: false, name };
   }
-  if (tester !== null) return true;
-  if (status !== "beta") return false;
+  if (tester !== null) return { visible: true, name };
+  if (status !== "beta") return { visible: false, name };
   // Beta is a self-service opt-in (beta_optins is user-writable by design).
   const { data: optin, error: optinError } = await supabase
     .from("beta_optins")
@@ -1248,9 +1298,9 @@ async function isGoalSportVisible(supabase: any, goalRow: UserGoalRow, userId: s
     .maybeSingle();
   if (optinError) {
     console.error(`could not read beta_optins for gating: ${optinError.message}`);
-    return false;
+    return { visible: false, name };
   }
-  return optin !== null;
+  return { visible: optin !== null, name };
 }
 
 // deno-lint-ignore no-explicit-any
@@ -1350,6 +1400,10 @@ function buildCoachBlock(decision: Extract<GoalWorkBlock, { kind: "custom" }>): 
       // Nominal goal-block midpoint (spec: 10-20 min) -- the coach's text
       // carries no parseable duration in v1.
       duration_minutes: 15,
+      // Same "carries no parseable X in v1" reasoning as duration_minutes
+      // above -- the coach's free text has no parseable rest prescription,
+      // so this is an honest "not known" (null), never a fabricated number.
+      rest_seconds: null,
       instructions: decision.workoutText,
     }],
     is_finisher: false,

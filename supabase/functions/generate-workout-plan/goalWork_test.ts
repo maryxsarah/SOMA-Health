@@ -9,9 +9,12 @@ import {
   computeEtaShift,
   conceptFromRow,
   decideGoalWork,
+  describeUpcomingGoalWork,
   deriveEtaInputs,
   derivePhase,
+  isScheduledToday,
   type GoalState,
+  type GoalWorkBlock,
   type GoalWorkConcept,
   type GoalWorkInput,
 } from "./goalWork.ts";
@@ -525,4 +528,107 @@ Deno.test("INVARIANT: coach text stays byte-identical even when exclusions match
   }));
   assertEquals(block?.kind, "custom");
   assert(block?.kind === "custom" && block.workoutText === text);
+});
+
+// --- isScheduledToday (exported for describeUpcomingGoalWork) / describeUpcomingGoalWork ---
+
+const PRESET_BLOCK: GoalWorkBlock = {
+  kind: "preset",
+  concept: concept({ focus: "goal work" }),
+  optional: false,
+  usedSafeFallback: false,
+};
+
+Deno.test("isScheduledToday: weekdays rule matches only the listed weekday ints", () => {
+  const g = goal({ scheduleRule: "weekdays", scheduleDays: [2] }); // Tuesday
+  assertFalse(isScheduledToday(g, "2026-08-03", [])); // Monday
+  assert(isScheduledToday(g, "2026-08-04", [])); // Tuesday
+});
+
+Deno.test("isScheduledToday: every_other_day is false the day right after a block, true otherwise", () => {
+  const g = goal({ scheduleRule: "every_other_day" });
+  assertFalse(isScheduledToday(g, "2026-08-04", [{ date: "2026-08-03", text: "x" }]));
+  assert(isScheduledToday(g, "2026-08-04", [{ date: "2026-08-02", text: "x" }]));
+});
+
+Deno.test("describeUpcomingGoalWork: null for paused or not-visible goals", () => {
+  const base = { date: "2026-08-03", recentGoalBlocks: [], todaysDecision: null, sportGoalName: null };
+  assertEquals(
+    describeUpcomingGoalWork({ ...base, goal: goal({ scheduleRule: "weekdays", scheduleDays: [2], paused: true }) }),
+    null,
+  );
+  assertEquals(
+    describeUpcomingGoalWork({ ...base, goal: goal({ scheduleRule: "weekdays", scheduleDays: [2], sportVisible: false }) }),
+    null,
+  );
+});
+
+Deno.test("describeUpcomingGoalWork: null for readiness/unset schedule rules -- unknowable this far ahead", () => {
+  const base = { date: "2026-08-03", recentGoalBlocks: [], todaysDecision: null, sportGoalName: null };
+  assertEquals(describeUpcomingGoalWork({ ...base, goal: goal({ scheduleRule: "readiness" }) }), null);
+  assertEquals(describeUpcomingGoalWork({ ...base, goal: goal({ scheduleRule: null }) }), null);
+});
+
+Deno.test("describeUpcomingGoalWork: says 'tomorrow' when scheduled 1 day out, 'in two days' when 2 days out", () => {
+  const base = { date: "2026-08-03", recentGoalBlocks: [], todaysDecision: null, sportGoalName: null };
+  // Monday 2026-08-03; Tuesday (2) is tomorrow.
+  const tomorrow = describeUpcomingGoalWork({ ...base, goal: goal({ scheduleRule: "weekdays", scheduleDays: [2] }) });
+  assert(tomorrow?.includes("tomorrow"));
+  // Wednesday (3) is two days out -- Tuesday isn't scheduled, so this
+  // must skip past it to day+2 rather than stopping at "not scheduled".
+  const inTwoDays = describeUpcomingGoalWork({ ...base, goal: goal({ scheduleRule: "weekdays", scheduleDays: [3] }) });
+  assert(inTwoDays?.includes("in two days"));
+});
+
+Deno.test("describeUpcomingGoalWork: names the coach for custom goals, the catalog name for preset goals", () => {
+  const base = { date: "2026-08-03", recentGoalBlocks: [], todaysDecision: null };
+  const customLine = describeUpcomingGoalWork({
+    ...base,
+    goal: goal({ kind: "custom", scheduleRule: "weekdays", scheduleDays: [2], coachName: "Coach Ana", workoutText: "x" }),
+    sportGoalName: null,
+  });
+  assert(customLine?.includes("Coach Ana"));
+  const presetLine = describeUpcomingGoalWork({
+    ...base,
+    goal: goal({ scheduleRule: "weekdays", scheduleDays: [2] }),
+    sportGoalName: "Climb V5",
+  });
+  assert(presetLine?.includes("Climb V5"));
+});
+
+Deno.test("describeUpcomingGoalWork: degrades to a generic phrase when no catalog name is available", () => {
+  const line = describeUpcomingGoalWork({
+    date: "2026-08-03",
+    recentGoalBlocks: [],
+    todaysDecision: null,
+    goal: goal({ scheduleRule: "weekdays", scheduleDays: [2] }),
+    sportGoalName: null,
+  });
+  assert(line?.includes("goal-program work"));
+});
+
+Deno.test("describeUpcomingGoalWork: today's own decision correctly suppresses an every_other_day 'tomorrow', then resumes at day+2", () => {
+  const g = goal({ scheduleRule: "every_other_day" });
+  const line = describeUpcomingGoalWork({
+    date: "2026-08-03",
+    recentGoalBlocks: [],
+    todaysDecision: PRESET_BLOCK, // a block lands TODAY
+    goal: g,
+    sportGoalName: null,
+  });
+  // Tomorrow is skipped (a block just landed today); day+2 resumes.
+  assert(line?.includes("in two days"), `expected day+2, got: ${line}`);
+});
+
+Deno.test("describeUpcomingGoalWork: never fires when there's simply nothing scheduled in the 2-day window", () => {
+  // Weekday-only Sunday goal, checked from a Monday -- 6 days away, outside
+  // the lookahead entirely.
+  const line = describeUpcomingGoalWork({
+    date: "2026-08-03",
+    recentGoalBlocks: [],
+    todaysDecision: null,
+    goal: goal({ scheduleRule: "weekdays", scheduleDays: [0] }),
+    sportGoalName: null,
+  });
+  assertEquals(line, null);
 });
