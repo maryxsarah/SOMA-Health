@@ -10,6 +10,10 @@ export function dailyGenerationLimit(tier: SubscriptionTier): number {
   return tier === "annual" ? 3 : 1;
 }
 
+// The two `logGeneration` sources that actually represent "an AI workout
+// was generated" -- the only thing this specific limit is meant to gate.
+const WORKOUT_GENERATION_SOURCES = ["suggestion", "gym_photo"];
+
 export async function checkGenerationLimit(
   supabase: SupabaseClient,
   userId: string,
@@ -17,11 +21,21 @@ export async function checkGenerationLimit(
   tier: SubscriptionTier,
 ): Promise<{ allowed: boolean; remaining: number }> {
   const limit = dailyGenerationLimit(tier);
+  // BUG: this used to count every row in ai_generation_log for the day
+  // with no source filter -- but rate-meal/parse-meal-text/suggest-workout
+  // -addons all log their OWN, separately-limited activity (via
+  // checkFlatDailyLimit below, correctly scoped to their own source) into
+  // this SAME shared table. Real feedback: "I haven't done my workout for
+  // the day yet, and SOMA does not give me a workout generated" -- rating
+  // a meal or dictating one earlier that day silently consumed the "1 AI
+  // workout generation" quota this function exists to gate, before the
+  // user ever tried to generate a workout at all.
   const { count, error } = await supabase
     .from("ai_generation_log")
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId)
-    .eq("date", date);
+    .eq("date", date)
+    .in("source", WORKOUT_GENERATION_SOURCES);
   if (error) {
     throw new Error(`could not read ai_generation_log: ${error.message}`);
   }
