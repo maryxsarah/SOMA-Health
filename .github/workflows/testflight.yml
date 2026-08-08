@@ -46,10 +46,18 @@ jobs:
           printf 'SUPABASE_HOST = %s\nSUPABASE_ANON_KEY = %s\nWHOOP_CLIENT_ID = %s\nOURA_CLIENT_ID = %s\n' \
             "$SUPABASE_HOST" "$SUPABASE_ANON_KEY" "$WHOOP_CLIENT_ID" "$OURA_CLIENT_ID" \
             | tee Config/Config-Debug.xcconfig > Config/Config-Release.xcconfig
-          # Decode the .p8 signing key to where xcodebuild/altool auto-discover it.
+          # Decode the .p8 signing key (tolerate any whitespace/line-wrapping).
           mkdir -p "$HOME/.appstoreconnect/private_keys"
-          printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode \
-            > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          KEYFILE="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_KEY_P8_BASE64" | tr -d '[:space:]' | base64 --decode > "$KEYFILE" 2>/dev/null \
+            || printf '%s' "$ASC_KEY_P8_BASE64" | tr -d '[:space:]' | base64 -D > "$KEYFILE"
+          echo "decoded key: $(wc -c < "$KEYFILE") bytes, sha256 $(shasum -a 256 "$KEYFILE" | awk '{print $1}')"
+          echo "expected sha256 5521d0777dbd2f6b0ca01c43a9ebba64cf93b76e7dc5085a90370b88aa15b004"
+          echo "first line: $(head -1 "$KEYFILE")"
+          if ! grep -q "BEGIN PRIVATE KEY" "$KEYFILE"; then
+            echo "::error::Decoded .p8 is not a valid PEM -- the ASC_KEY_P8_BASE64 secret is corrupted."
+            exit 1
+          fi
           # Credentials file consumed by scripts/testflight.sh.
           printf 'ASC_KEY_ID=%s\nASC_ISSUER_ID=%s\nASC_KEY_PATH=%s\n' \
             "$ASC_KEY_ID" "$ASC_ISSUER_ID" \
