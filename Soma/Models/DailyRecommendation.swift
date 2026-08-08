@@ -336,6 +336,18 @@ struct DailyRecommendation: Codable, Equatable {
     let volumeCapApplied: Bool
     let hrvCapApplied: Bool
     let stressCapApplied: Bool
+    /// Set when a severe injury protocol was just reported/escalated in
+    /// the last ~24h, or has been trending worse for 3+ consecutive
+    /// check-ins -- forces `category` all the way to `.rest`, unlike
+    /// `injuryProtocolCapApplied`'s ceiling of `.light`. Real feedback:
+    /// "when the user shared a specific injury, if needed a rest day
+    /// needs to be recommended."
+    let injuryProtocolRestApplied: Bool
+    /// Set when today's daily_mood check-in (rating 1-2 of 5) downgraded
+    /// the day -- real feedback: "the emoji should be considered for the
+    /// workout." Asymmetric like every other cap: a good mood never
+    /// upgrades the day, so this only ever appears alongside a downgrade.
+    let moodCapApplied: Bool
     /// The uncapped recovery-band category, when the server has it on
     /// record -- lets RecommendationDetailView offer "a standard workout
     /// anyway" without re-deriving the recovery band client-side. Nil for
@@ -361,6 +373,8 @@ struct DailyRecommendation: Codable, Equatable {
         case volumeCapApplied = "volume_cap_applied"
         case hrvCapApplied = "hrv_cap_applied"
         case stressCapApplied = "stress_cap_applied"
+        case injuryProtocolRestApplied = "injury_protocol_rest_applied"
+        case moodCapApplied = "mood_cap_applied"
         case preCapCategory = "pre_cap_category"
         case userRequestedCategory = "user_requested_category"
     }
@@ -391,6 +405,8 @@ extension DailyRecommendation {
         volumeCapApplied = try container.decodeIfPresent(Bool.self, forKey: .volumeCapApplied) ?? false
         hrvCapApplied = try container.decodeIfPresent(Bool.self, forKey: .hrvCapApplied) ?? false
         stressCapApplied = try container.decodeIfPresent(Bool.self, forKey: .stressCapApplied) ?? false
+        injuryProtocolRestApplied = try container.decodeIfPresent(Bool.self, forKey: .injuryProtocolRestApplied) ?? false
+        moodCapApplied = try container.decodeIfPresent(Bool.self, forKey: .moodCapApplied) ?? false
         preCapCategory = try container.decodeIfPresent(RecommendationCategory.self, forKey: .preCapCategory)
         dataConfidence = try container.decodeIfPresent(DataConfidence.self, forKey: .dataConfidence)
         userRequestedCategory = try container.decodeIfPresent(RecommendationCategory.self, forKey: .userRequestedCategory)

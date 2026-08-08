@@ -19,6 +19,7 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { assessHealthKit } from "./healthkitBand.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
+import { computeInjuryProtocolRestApplied, computeMoodCapApplied } from "../_shared/independentCaps.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -221,7 +222,7 @@ Deno.serve(async (req: Request) => {
     // creates a recovery-state row for mild severity in the first place).
     const { data: injuryProtocolRows } = await supabase
       .from("injury_recovery_state")
-      .select("severity, status")
+      .select("severity, status, protocol_started_at, consecutive_bad_days")
       .eq("user_id", userId)
       .in("status", ["active", "recovering"]);
     const hasSevereInjuryProtocol = (injuryProtocolRows ?? []).some(
@@ -230,6 +231,17 @@ Deno.serve(async (req: Request) => {
     const hasModerateInjuryProtocol = (injuryProtocolRows ?? []).some(
       (r: { severity: string }) => r.severity === "moderate",
     );
+    // Real feedback: "when the user shared a specific injury, if needed a
+    // rest day needs to be recommended" -- today's severe-injury cap only
+    // ever reaches "light" (see injuryProtocolCapApplied below), never
+    // "rest", however acute or worsening the injury. See
+    // computeInjuryProtocolRestApplied's own doc comment (_shared/independentCaps.ts)
+    // for the two cases this covers and why -- pulled into a pure,
+    // unit-tested module given how explicitly safety-critical this one is.
+    const severeInjuryRows = (injuryProtocolRows ?? []).filter(
+      (r: { severity: string }) => r.severity === "severe",
+    );
+    const injuryProtocolRestApplied = computeInjuryProtocolRestApplied(severeInjuryRows, Date.now());
 
     let band: Band;
     let source: Source;
@@ -350,6 +362,23 @@ Deno.serve(async (req: Request) => {
     const stressCapApplied = todaysStress !== null && todaysStress >= HIGH_STRESS_MINUTES &&
       (bandCategory === "moderate" || bandCategory === "push_hard");
 
+    // Mood cap: real feedback: "when the user taps one of the emojis 'How
+    // you feeling today?', ... all the customization the user provides
+    // needs to be considered for the workout." daily_mood was previously
+    // recorded and shown as a trend but never read back into generation.
+    // See computeMoodCapApplied's doc comment (_shared/independentCaps.ts)
+    // for the asymmetric-caution reasoning. Only today's own check-in
+    // counts -- no trend/rolling window, unlike HRV's baseline, since a
+    // single bad day is exactly what this is meant to catch.
+    const { data: todaysMoodRow } = await supabase
+      .from("daily_mood")
+      .select("rating")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .maybeSingle();
+    const todaysMoodRating = (todaysMoodRow?.rating as number | null) ?? null;
+    const moodCapApplied = computeMoodCapApplied(todaysMoodRating, bandCategory);
+
     // Consecutive-training-days cap: unlike the three caps above (which act
     // on the recovery band before the category is chosen), this acts on the
     // FINAL category -- deliberately a different mechanism, since it's about
@@ -399,10 +428,15 @@ Deno.serve(async (req: Request) => {
     // moderate and one severe injury simultaneously -- severe wins.
     const injuryProtocolModerateCapApplied = !hasSevereInjuryProtocol &&
       hasModerateInjuryProtocol && bandCategory === "push_hard";
-    const computedCategory: Category = consecutiveDaysRestEscalated
+    // injuryProtocolRestApplied is NOT gated on bandCategory the way the
+    // caps above are -- a fresh/worsening severe injury forces rest even
+    // on a day the wearable band alone would only have called "light"
+    // (band reflects recovery signals like sleep/HRV, not injury status,
+    // so a good band score must never talk an acute injury back down).
+    const computedCategory: Category = consecutiveDaysRestEscalated || injuryProtocolRestApplied
       ? "rest"
       : (consecutiveDaysCapApplied || injuryProtocolCapApplied || volumeCapApplied ||
-          sleepCapApplied || hrvCapApplied || stressCapApplied)
+          sleepCapApplied || hrvCapApplied || stressCapApplied || moodCapApplied)
       ? "light"
       : injuryProtocolModerateCapApplied
       ? "moderate"
@@ -430,8 +464,10 @@ Deno.serve(async (req: Request) => {
           consecutive_days_cap_applied: consecutiveDaysCapApplied,
           injury_protocol_cap_applied: injuryProtocolCapApplied,
           injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+          injury_protocol_rest_applied: injuryProtocolRestApplied,
           hrv_cap_applied: hrvCapApplied,
           stress_cap_applied: stressCapApplied,
+          mood_cap_applied: moodCapApplied,
           // The uncapped category, so a later client re-fetch (after any
           // cap has been applied) still has access to what the
           // recommendation would have been -- the override affordance in
@@ -463,8 +499,10 @@ Deno.serve(async (req: Request) => {
       consecutive_days_cap_applied: consecutiveDaysCapApplied,
       injury_protocol_cap_applied: injuryProtocolCapApplied,
       injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+      injury_protocol_rest_applied: injuryProtocolRestApplied,
       hrv_cap_applied: hrvCapApplied,
       stress_cap_applied: stressCapApplied,
+      mood_cap_applied: moodCapApplied,
       pre_cap_category: bandCategory,
       data_confidence: dataConfidence,
       user_requested_category: userRequestedCategory,

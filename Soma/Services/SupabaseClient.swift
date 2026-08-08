@@ -764,7 +764,15 @@ final class SupabaseClient {
     /// Plain read via RLS -- used by HomeView on appear so opening the app
     /// doesn't invoke the mutating generate-recommendation function every time.
     func fetchTodaysRecommendation(date: String) async throws -> DailyRecommendation? {
-        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category&limit=1"
+        // hrv_cap_applied/stress_cap_applied/user_requested_category were
+        // missing from this select= entirely until now -- a plain RLS
+        // re-read (e.g. reopening the app after generation already ran)
+        // silently showed those caps as false/nil even when they were
+        // active, since only the Edge Function's own JSON response ever
+        // carried them. injury_protocol_rest_applied/mood_cap_applied are
+        // new columns added alongside this fix, so they'd have shipped
+        // with the same gap if not caught here.
+        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,injury_protocol_rest_applied,hrv_cap_applied,stress_cap_applied,mood_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category,user_requested_category&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -785,7 +793,8 @@ final class SupabaseClient {
         let startStr = formatter.string(from: start)
         let endStr = formatter.string(from: end)
 
-        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category&order=date.asc"
+        // Same select= gap as fetchTodaysRecommendation above -- see its comment.
+        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,injury_protocol_rest_applied,hrv_cap_applied,stress_cap_applied,mood_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category,user_requested_category&order=date.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)

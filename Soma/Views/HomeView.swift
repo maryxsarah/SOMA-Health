@@ -29,6 +29,13 @@ struct HomeView: View {
     // Dashboard's Overview tab; this card is just the daily capture.
     @State private var todaysMood: DailyMoodEntry?
     @State private var isSavingMood = false
+    /// Real feedback: "when the user taps on one of the emojis ... nothing
+    /// happens." logMood used to fail completely silently (the daily_mood
+    /// table not existing yet on a given backend was one real cause, but
+    /// ANY failure -- network, auth -- looked identical to the user: a tap
+    /// that visibly did nothing). Surfacing this turns a mystery bug report
+    /// into something the user can see and retry.
+    @State private var moodError: String?
     @State private var timelineEntries: [WorkoutTimelineEntry] = []
 
     @State private var showGymPhotoFlow = false
@@ -762,6 +769,11 @@ struct HomeView: View {
                             .buttonStyle(.plain)
                         }
                     }
+                    if let moodError {
+                        Text(moodError)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.red)
+                    }
                 }
                 .disabled(isSavingMood)
             }
@@ -1133,13 +1145,17 @@ struct HomeView: View {
 
     private func logMood(_ rating: MoodRating) async {
         isSavingMood = true
+        moodError = nil
         defer { isSavingMood = false }
         do {
             try await SupabaseClient.shared.logMood(date: Self.todayDateString(), rating: rating.rawValue)
             await loadTodaysMood()
         } catch {
-            // Best-effort, silent -- the row of options just stays
-            // tappable so the user can try again.
+            // Visible now instead of silent -- real feedback: "when the
+            // user taps on one of the emojis ... nothing happens." The
+            // row of options stays tappable either way so the user can
+            // retry without leaving the screen.
+            moodError = "Couldn't save that -- check your connection and try again."
         }
     }
 
