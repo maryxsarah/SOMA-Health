@@ -1,8 +1,8 @@
 import PhotosUI
 import SwiftUI
 
-/// S3 -- the coach's task. No model parsing: the photo is an attachment,
-/// the user fills the fields by hand, Soma schedules and tracks honestly.
+/// S3 -- the coach's task. AI can pre-fill from text/photo, but every
+/// field stays editable and nothing submits until the user taps Start.
 struct CustomGoalFormView: View {
     let sport: Sport
     let onCreated: () async -> Void
@@ -17,7 +17,6 @@ struct CustomGoalFormView: View {
     @State private var scheduleRule: GoalScheduleRule?
     @State private var scheduleDays: Set<Int> = []
     @State private var courtDays: Set<Int> = []
-    @State private var showFrequencySheet = false
     @State private var addMetric = false
     @State private var metricName = ""
     @State private var metricUnit = ""
@@ -25,6 +24,10 @@ struct CustomGoalFormView: View {
     @State private var isCreating = false
     @State private var errorMessage: String?
     @State private var conflicts: [GoalSafetyConflict] = []
+    @State private var isParsingAssignment = false
+    /// True after a parse came back too unsure to trust -- no field was
+    /// touched; this only drives the warning note.
+    @State private var assistLowConfidence = false
     /// Cached so the acknowledge-and-resend pass doesn't upload twice.
     @State private var uploadedPhotoPath: String?
     /// Set when the goal was created but its baseline insert failed --
@@ -85,9 +88,6 @@ struct CustomGoalFormView: View {
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Your own goal")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showFrequencySheet) {
-            frequencySheet
-        }
         .onChange(of: photoItem) { _, newItem in
             Task {
                 guard let newItem, let data = try? await newItem.loadTransferable(type: Data.self) else { return }
@@ -127,6 +127,9 @@ struct CustomGoalFormView: View {
                     Spacer()
                 }
             }
+            if photoImage != nil, !isParsingAssignment {
+                assistButton(title: "Read photo with AI") { Task { await autoFillFromPhoto() } }
+            }
 
             TextField("What did your coach set as the goal? (optional)", text: $givenText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
@@ -134,11 +137,36 @@ struct CustomGoalFormView: View {
             TextField("The workout, in your coach's words", text: $workoutText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(3...6)
+                .accessibilityIdentifier("workoutTextField")
+            if !workoutText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isParsingAssignment {
+                assistButton(title: "Auto-fill with AI") { Task { await autoFillFromText() } }
+            }
+            if isParsingAssignment {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Reading the assignment…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if assistLowConfidence {
+                Text("Couldn't confidently read an assignment there — check the fields below, or try again.")
+                    .font(.caption)
+                    .foregroundStyle(SomaTokens.warn)
+            }
             TextField("Coach's name (optional)", text: $coachName)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("coachNameField")
             Text("The name goes on your workouts and the progress card you can send back.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private func assistButton(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: "sparkles")
+                .font(.system(size: 13, weight: .semibold))
         }
     }
 
@@ -151,82 +179,12 @@ struct CustomGoalFormView: View {
             Stepper("How many weeks did your coach set? \(durationWeeks)", value: $durationWeeks, in: 1...26)
                 .font(.system(size: 13.5))
 
-            FlowLayout {
-                ForEach([2, 3, 4], id: \.self) { count in
-                    SomaChip(title: "\(count)× a week", isSelected: scheduleRule == nil && frequencyPerWeek == count) {
-                        scheduleRule = nil
-                        frequencyPerWeek = count
-                    }
-                }
-                SomaChip(title: customChipTitle, isSelected: scheduleRule != nil, isOneOff: scheduleRule == nil) {
-                    showFrequencySheet = true
-                }
-            }
-            Text("Sessions still defer to your readiness for placement — low days shift, the workout itself is never rewritten.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var customChipTitle: String {
-        switch scheduleRule {
-        case .weekdays: scheduleDays.isEmpty ? "Custom…" : Self.weekdaysLabel(scheduleDays)
-        case .everyOtherDay: "Every other day"
-        case .beforeCourtDays: "Before court days"
-        case .readiness: "When readiness allows"
-        case .unknown, nil: "Custom…"
-        }
-    }
-
-    private static func weekdaysLabel(_ days: Set<Int>) -> String {
-        // Monday-first, using the picker's server-value convention (0=Sunday).
-        WeekdayMiniPicker.dayValuesInDisplayOrder
-            .filter(days.contains)
-            .map(WeekdayMiniPicker.shortName(forValue:))
-            .joined(separator: " · ")
-    }
-
-    /// S3a -- the frequency rules sheet. "Before court days" reveals a
-    /// static court-days mini-picker inline; no calendar integration.
-    private var frequencySheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    ruleRow(.weekdays, title: "Specific weekdays", subtitle: "Train on fixed days", icon: "calendar")
-                    if scheduleRule == .weekdays {
-                        WeekdayMiniPicker(selected: $scheduleDays)
-                            .padding(.leading, 4)
-                    }
-                    ruleRow(.everyOtherDay, title: "Every other day", subtitle: "A steady one-on, one-off rhythm", icon: "arrow.left.arrow.right")
-                    ruleRow(.beforeCourtDays, title: "Before court days", subtitle: "Sessions land the day before you play", icon: "figure.tennis")
-                    if scheduleRule == .beforeCourtDays {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("My court days")
-                                .font(.caption.bold())
-                                .foregroundStyle(.secondary)
-                            WeekdayMiniPicker(selected: $courtDays)
-                        }
-                        .padding(.leading, 4)
-                    }
-                    ruleRow(.readiness, title: "When readiness allows", subtitle: "Soma places sessions on your better days", icon: "waveform.path.ecg")
-                }
-                .padding(20)
-            }
-            .somaBackground()
-            .navigationTitle("Frequency")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showFrequencySheet = false }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    private func ruleRow(_ rule: GoalScheduleRule, title: String, subtitle: String, icon: String) -> some View {
-        SurveyOptionRow(title: title, subtitle: subtitle, systemImageName: icon, isSelected: scheduleRule == rule) {
-            scheduleRule = rule
+            ScheduleFrequencyPicker(
+                frequencyPerWeek: $frequencyPerWeek,
+                scheduleRule: $scheduleRule,
+                scheduleDays: $scheduleDays,
+                courtDays: $courtDays
+            )
         }
     }
 
@@ -273,11 +231,56 @@ struct CustomGoalFormView: View {
     }
 
     private var effectiveFrequency: Int {
-        switch scheduleRule {
-        case .weekdays where !scheduleDays.isEmpty: scheduleDays.count
-        case .everyOtherDay: 3
-        case .beforeCourtDays where !courtDays.isEmpty: courtDays.count
-        default: frequencyPerWeek
+        ScheduleFrequencyPicker.effectiveFrequency(
+            frequencyPerWeek: frequencyPerWeek,
+            scheduleRule: scheduleRule,
+            scheduleDays: scheduleDays,
+            courtDays: courtDays
+        )
+    }
+
+    // MARK: - AI assist
+
+    private func autoFillFromText() async {
+        await runAssignmentParse { try await SupabaseClient.shared.parseGoalAssignment(text: workoutText) }
+    }
+
+    private func autoFillFromPhoto() async {
+        guard let photoImage, let compressed = ImageCompression.jpeg(photoImage) else { return }
+        await runAssignmentParse { try await SupabaseClient.shared.parseGoalAssignment(imageData: compressed) }
+    }
+
+    private func runAssignmentParse(_ call: () async throws -> GoalAssignmentParseResult) async {
+        errorMessage = nil
+        assistLowConfidence = false
+        isParsingAssignment = true
+        defer { isParsingAssignment = false }
+        do {
+            let result = try await call()
+            if let parsed = result.parsed {
+                applyParsed(parsed)
+            } else {
+                assistLowConfidence = true
+            }
+        } catch {
+            errorMessage = "Couldn't read that — try again, or fill in the fields yourself."
+        }
+    }
+
+    /// Only overwrites a field the parse actually found something for --
+    /// never blanks out text the user already typed themselves.
+    private func applyParsed(_ parsed: ParsedAssignment) {
+        if let given = parsed.givenText { givenText = given }
+        if let workout = parsed.workoutText { workoutText = workout }
+        if let coach = parsed.coachName { coachName = coach }
+        if let weeks = parsed.durationWeeks { durationWeeks = weeks }
+        if let rule = parsed.scheduleRule {
+            scheduleRule = rule
+            scheduleDays = Set(parsed.scheduleDays ?? [])
+            courtDays = Set(parsed.courtDays ?? [])
+        } else if let freq = parsed.frequencyPerWeek {
+            scheduleRule = nil
+            frequencyPerWeek = freq
         }
     }
 

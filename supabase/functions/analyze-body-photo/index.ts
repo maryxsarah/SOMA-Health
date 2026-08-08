@@ -104,7 +104,7 @@ Deno.serve(async (req: Request) => {
     const { data: userRow, error: readError } = await supabase
       .from("users")
       .select(
-        "goal_body_photo_path, current_body_photo_path, body_photo_emphasis_source_goal_path, body_photo_emphasis_source_current_path, body_photo_emphasis_tags, training_emphasis, date_of_birth, weight_kg, desired_weight_kg, height_cm, sex, workouts_per_week",
+        "goal_body_photo_path, current_body_photo_path, body_photo_emphasis_source_goal_path, body_photo_emphasis_source_current_path, body_photo_emphasis_tags, training_emphasis, body_photo_emphasis_low_confidence, date_of_birth, weight_kg, desired_weight_kg, height_cm, sex, workouts_per_week",
       )
       .eq("id", userId)
       .maybeSingle();
@@ -156,16 +156,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ skipped: true, reason: "missing_photo" });
     }
 
-    // Idempotent: skip the OpenAI call entirely if both photos are
-    // unchanged since the last analysis AND that last analysis already
-    // included training_emphasis (a user analyzed by a pre-upgrade version
-    // of this function has emphasis_tags but a null training_emphasis, and
-    // must not be stuck there forever).
+    // Idempotent: skip the OpenAI call if both photos are unchanged since
+    // the last analysis and it already reached a verdict (real or low-confidence).
     if (
       userRow?.body_photo_emphasis_source_goal_path === goalPath &&
       userRow?.body_photo_emphasis_source_current_path === currentPath &&
       userRow?.body_photo_emphasis_tags !== null &&
-      userRow?.training_emphasis !== null
+      (userRow?.training_emphasis !== null || userRow?.body_photo_emphasis_low_confidence === true)
     ) {
       return jsonResponse({ ok: true, cached: true });
     }
@@ -189,6 +186,7 @@ Deno.serve(async (req: Request) => {
       .update({
         body_photo_emphasis_tags: tags,
         training_emphasis: trainingEmphasis,
+        body_photo_emphasis_low_confidence: lowConfidence,
         body_photo_emphasis_source_goal_path: goalPath,
         body_photo_emphasis_source_current_path: currentPath,
         body_photo_emphasis_updated_at: new Date().toISOString(),

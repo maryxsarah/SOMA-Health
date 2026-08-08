@@ -4,11 +4,17 @@
 // docs/coaching-personalization-plan.md) -- these tests guard the
 // byte-identical fallback for anyone not opted in (the design's central
 // "no new parallel system" guarantee) and the phase-specific line once
-// cyclePhase is supplied.
+// cyclePhase is supplied. describeSexAwareGoalDoseConsideration is a
+// separate, unrelated function (goal-work dosing, not cycle-phase) --
+// its own coverage lives at the bottom of this file.
 
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert";
 import { CYCLE_PHASE_CONSIDERATIONS, type CyclePhaseResult } from "../_shared/cyclePhaseGuidance.ts";
-import { describeSexAwareConsiderations, GENERIC_SEX_AWARE_LINE } from "./sexAwareGuidance.ts";
+import {
+  describeSexAwareConsiderations,
+  describeSexAwareGoalDoseConsideration,
+  GENERIC_SEX_AWARE_LINE,
+} from "./sexAwareGuidance.ts";
 
 Deno.test("BYTE-IDENTICAL FALLBACK: cyclePhase null returns the exact pre-Phase-5 generic line", () => {
   assertEquals(describeSexAwareConsiderations("female", "moderate", null), GENERIC_SEX_AWARE_LINE);
@@ -55,4 +61,26 @@ Deno.test("every non-empty line still ends with the 'today's actual signals are 
   const caveat = "Treat today's actual recovery signals (given above) as the primary guide over any fixed assumption.";
   assert(generic.endsWith(caveat));
   assert(phaseSpecific.endsWith(caveat));
+});
+
+// --- describeSexAwareGoalDoseConsideration (unrelated to Phase 5, from main) ---
+
+Deno.test("describeSexAwareGoalDoseConsideration: female returns the goal-dose caveat", () => {
+  const line = describeSexAwareGoalDoseConsideration("female");
+  assertNotEquals(line, "");
+  assertEquals(line.includes("goal block"), true);
+});
+
+Deno.test("describeSexAwareGoalDoseConsideration: male returns nothing", () => {
+  assertEquals(describeSexAwareGoalDoseConsideration("male"), "");
+});
+
+Deno.test("describeSexAwareGoalDoseConsideration: null sex returns nothing", () => {
+  assertEquals(describeSexAwareGoalDoseConsideration(null), "");
+});
+
+Deno.test("describeSexAwareGoalDoseConsideration: never mentions target numbers -- dosing only", () => {
+  const line = describeSexAwareGoalDoseConsideration("female");
+  assertEquals(line.toLowerCase().includes("target"), false);
+  assertEquals(line.toLowerCase().includes("gain"), false);
 });

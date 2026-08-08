@@ -1536,7 +1536,8 @@ struct ProfileView: View {
     /// Consecutive days up to and including today with a logged workout --
     /// same underlying data (fetchRecentWorkoutLogDates) as the calendar
     /// strip's crown badges, just aggregated into a streak count here.
-    private static func streak(from dates: Set<String>) -> Int {
+    /// Not `private` so StreakMilestoneTests can exercise it directly.
+    static func streak(from dates: Set<String>) -> Int {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = .current

@@ -141,6 +141,9 @@ const LIBRARY: Row[] = [
   { id: "prone-manual-hamstring", name: "Prone Manual Hamstring", category: "strength", equipment: "body only", primary_muscles: ["hamstrings"], level: "beginner", requires_partner: true },
   { id: "overhead-lat", name: "Overhead Lat", category: "stretching", equipment: "body only", primary_muscles: ["lats"], level: "beginner", requires_partner: true },
   { id: "return-push-from-stance", name: "Return Push from Stance", category: "cardio", equipment: "medicine ball", primary_muscles: ["shoulders"], level: "beginner", requires_partner: true },
+  // Real data uses "machine" for both cardio and strength machines --
+  // see the extraCardioLibraryEquipment tests below.
+  { id: "leg-press", name: "Leg Press", category: "strength", equipment: "machine", primary_muscles: ["quadriceps"], level: "beginner", requires_partner: false },
 ];
 
 Deno.test("REGRESSION: floor-only user never sees the EZ-bar 'Bodyweight Flyes'", async () => {
@@ -368,6 +371,22 @@ Deno.test("REGRESSION: extraLibraryEquipment (parsed free text) unions in on top
     mockSupabase(LIBRARY), "upper_body", [], [], null, [], ["barbell"],
   );
   assert(names.includes("Barbell Bench Press"), "free-text-named equipment must unlock matching exercises");
+});
+
+Deno.test("REGRESSION: cardio-only free-text equipment (treadmill) never unlocks a strength machine in the main tier", async () => {
+  // extraCardioLibraryEquipment must only widen the cardio slice, not the main query.
+  const names = await fetchCandidateExerciseNames(
+    mockSupabase(LIBRARY), "lower_body", ["bodyweight_only"], [], null, [], [], false, [], ["machine"],
+  );
+  assertFalse(names.includes("Leg Press"), "cardio-only equipment leaked into the main tier's equipment filter");
+});
+
+Deno.test("REGRESSION: cardio-only free-text equipment (treadmill) still unlocks the cardio warm-up slice", async () => {
+  const names = await fetchCandidateExerciseNames(
+    mockSupabase(LIBRARY), "lower_body", ["bodyweight_only"], [], null, [], [], true, [], ["machine"],
+  );
+  assert(names.includes("Running, Treadmill"), "cardio-only equipment should still unlock the cardio-specific tier");
+  assertFalse(names.includes("Leg Press"), "cardio slice must not leak into unlocking the main strength tier either");
 });
 
 // --- recentlyUsedNames (day-over-day variety) ---

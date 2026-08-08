@@ -12,6 +12,13 @@ build/
 Config/Config-Debug.xcconfig
 Config/Config-Release.xcconfig
 
+# App Store Connect API credentials for scripts/testflight.sh -- this repo is
+# public, so the private key and issuer/key IDs stay machine-local. Only the
+# .example template is tracked. See scripts/README-testflight.md.
+scripts/asc-api.env
+*.p8
+AuthKey_*.p8
+
 # Firebase project config -- ties to a real Firebase project (API key,
 # project ID, app ID). This repo is public, so this stays local-only, same
 # reasoning as the Config-*.xcconfig secrets above. Each developer downloads
@@ -55,3 +62,6 @@ docs/*
 # Snapshot-test reference images are machine-local (record with
 # scripts/test.sh snapshot --record); never committed by decision 2026-08-04.
 SnapshotTests/__Snapshots__/
+
+# Generated secrets helper for the repo owner (contains real values) -- never commit.
+scripts/gh-set-secrets.sh

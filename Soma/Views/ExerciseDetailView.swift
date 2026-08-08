@@ -26,6 +26,11 @@ struct ExerciseDetailView: View {
                 // until that round trip finishes.
                 VStack(alignment: .leading, spacing: 16) {
                     mediaArea
+                    if let credit = entry?.imageCredit, !credit.isEmpty {
+                        Text(credit)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text(exercise.name)

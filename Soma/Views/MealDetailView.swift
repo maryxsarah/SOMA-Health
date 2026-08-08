@@ -141,7 +141,7 @@ struct MealDetailView: View {
         ratingError = nil
         defer { isRating = false }
         do {
-            let result = try await SupabaseClient.shared.rateMeal(id: entry.id)
+            let result = try await MealRatingCoordinator.shared.rate(id: entry.id)
             score = result.score
             rationale = result.rationale
         } catch {

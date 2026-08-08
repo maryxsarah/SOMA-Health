@@ -114,7 +114,123 @@ struct WeekdayMiniPicker: View {
                         .overlay(Circle().strokeBorder(isOn ? SomaTokens.accent : SomaTokens.hairline, lineWidth: isOn ? 2 : 1))
                 }
                 .buttonStyle(.plain)
+                // Labels alone are ambiguous ("T"/"S" repeat) -- a stable
+                // per-day target for tests.
+                .accessibilityIdentifier("weekday-\(day)")
             }
+        }
+    }
+}
+
+/// The frequency chips (2x/3x/4x a week, or a custom rule via a sheet) --
+/// shared by GoalStartView and CustomGoalFormView, which were otherwise
+/// carrying two byte-for-byte copies of this. Owns its own sheet
+/// presentation; callers embed it in whatever card/stepper context they
+/// need (a preset goal has no duration-weeks stepper, a custom one does).
+struct ScheduleFrequencyPicker: View {
+    @Binding var frequencyPerWeek: Int
+    @Binding var scheduleRule: GoalScheduleRule?
+    @Binding var scheduleDays: Set<Int>
+    @Binding var courtDays: Set<Int>
+    @State private var showFrequencySheet = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            FlowLayout {
+                ForEach([2, 3, 4], id: \.self) { count in
+                    SomaChip(title: "\(count)× a week", isSelected: scheduleRule == nil && frequencyPerWeek == count) {
+                        scheduleRule = nil
+                        frequencyPerWeek = count
+                    }
+                }
+                SomaChip(title: customChipTitle, isSelected: scheduleRule != nil, isOneOff: scheduleRule == nil) {
+                    showFrequencySheet = true
+                }
+            }
+            Text("Sessions still defer to your readiness for placement — low days shift, the workout itself is never rewritten.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .sheet(isPresented: $showFrequencySheet) {
+            frequencySheet
+        }
+    }
+
+    private var customChipTitle: String {
+        switch scheduleRule {
+        case .weekdays: scheduleDays.isEmpty ? "Custom…" : Self.weekdaysLabel(scheduleDays)
+        case .everyOtherDay: "Every other day"
+        case .beforeCourtDays: "Before court days"
+        case .readiness: "When readiness allows"
+        case .unknown, nil: "Custom…"
+        }
+    }
+
+    private static func weekdaysLabel(_ days: Set<Int>) -> String {
+        // Monday-first, using the picker's server-value convention (0=Sunday).
+        WeekdayMiniPicker.dayValuesInDisplayOrder
+            .filter(days.contains)
+            .map(WeekdayMiniPicker.shortName(forValue:))
+            .joined(separator: " · ")
+    }
+
+    /// "Before court days" reveals a static court-days mini-picker inline;
+    /// no calendar integration.
+    private var frequencySheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ruleRow(.weekdays, title: "Specific weekdays", subtitle: "Train on fixed days", icon: "calendar")
+                    if scheduleRule == .weekdays {
+                        WeekdayMiniPicker(selected: $scheduleDays)
+                            .padding(.leading, 4)
+                    }
+                    ruleRow(.everyOtherDay, title: "Every other day", subtitle: "A steady one-on, one-off rhythm", icon: "arrow.left.arrow.right")
+                    ruleRow(.beforeCourtDays, title: "Before court days", subtitle: "Sessions land the day before you play", icon: "figure.tennis")
+                    if scheduleRule == .beforeCourtDays {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("My court days")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            WeekdayMiniPicker(selected: $courtDays)
+                        }
+                        .padding(.leading, 4)
+                    }
+                    ruleRow(.readiness, title: "When readiness allows", subtitle: "Soma places sessions on your better days", icon: "waveform.path.ecg")
+                }
+                .padding(20)
+            }
+            .somaBackground()
+            .navigationTitle("Frequency")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showFrequencySheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func ruleRow(_ rule: GoalScheduleRule, title: String, subtitle: String, icon: String) -> some View {
+        SurveyOptionRow(title: title, subtitle: subtitle, systemImageName: icon, isSelected: scheduleRule == rule) {
+            scheduleRule = rule
+        }
+    }
+
+    /// Pure, so create()/submit logic in either caller can compute the
+    /// actual session count without needing a live picker instance.
+    static func effectiveFrequency(
+        frequencyPerWeek: Int,
+        scheduleRule: GoalScheduleRule?,
+        scheduleDays: Set<Int>,
+        courtDays: Set<Int>
+    ) -> Int {
+        switch scheduleRule {
+        case .weekdays where !scheduleDays.isEmpty: scheduleDays.count
+        case .everyOtherDay: 3
+        case .beforeCourtDays where !courtDays.isEmpty: courtDays.count
+        default: frequencyPerWeek
         }
     }
 }

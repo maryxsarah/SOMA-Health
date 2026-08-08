@@ -58,3 +58,12 @@ Deno.test("with no emphasis and an unmapped body part, falls back to full_body a
   const decision = decideFinisher("moderate", "some_unmapped_part", false, [], noRecentLogs, "2026-08-03", null);
   assertEquals(decision.definition?.focusArea, "full_body");
 });
+
+Deno.test("REGRESSION: a cut-redirected cardio finisher still detects yesterday's push_hard split conflict on the REAL body part", () => {
+  // Today's finisher is cut-redirected to "cardio", but the conflict check
+  // must still key off the real muscle group trained (lower_body).
+  const recentLogs = [{ date: "2026-08-03", body_part: "lower_body", category: "push_hard" }];
+  const decision = decideFinisher("push_hard", "lower_body", true, [], recentLogs, "2026-08-03", "cut");
+  assertEquals(decision.definition?.focusArea, "cardio");
+  assertEquals(decision.exceptional, false, "split conflict on the real body part must still block the exceptional tier");
+});

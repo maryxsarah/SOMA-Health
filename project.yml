@@ -80,7 +80,7 @@ targets:
         # Bump this before every new archive you upload to App Store
         # Connect -- Apple rejects re-uploading the same build number
         # under the same version, even for internal/bug-fix changes.
-        CFBundleVersion: "13"
+        CFBundleVersion: "16"
         # Declares Soma only uses exempt encryption (standard HTTPS via
         # URLSession -- no bundled/custom crypto) so every future archive
         # skips the "Missing Compliance" App Store Connect dialog
@@ -206,6 +206,7 @@ targets:
       - path: UITests
         excludes:
           - "CASES.md"
+          - "*.xctestplan"
     dependencies:
       - target: Soma
     settings:
@@ -268,5 +269,12 @@ schemes:
       config: Debug
       targets:
         - SomaUITests
+      # Screenshots-only capture: Xcode's default per-test screen RECORDING
+      # slowly exhausts simulator memory over a 14-launch suite, and the OS
+      # starts SIGKILLing the app mid-test (then relaunches it WITHOUT the
+      # fixture launch args -- the "assert failures" that follow are noise).
+      testPlans:
+        - path: UITests/SomaUITests.xctestplan
+          defaultPlan: true
     run:
       config: Debug

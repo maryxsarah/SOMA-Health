@@ -12,8 +12,13 @@ struct GoalJourneyProgress {
     /// still sees a full bar (not >100%), with daysElapsed itself telling
     /// the honest story if they check the exact numbers.
     let fraction: Double
+    /// False when the delta is too small to responsibly estimate a timeline --
+    /// likely a stale weight target that was never updated to match the goal photo.
+    let hasReliableEstimate: Bool
 
     private static let averageDaysPerMonth = 30
+    /// Below this, a weight-only estimate is more likely stale than honest.
+    private static let minReliableDeltaKg = 3.0
 
     /// nil when any required input is missing -- weightKg/desiredWeightKg/
     /// goalPace are all optional profile fields (goalPace especially: only
@@ -35,8 +40,12 @@ struct GoalJourneyProgress {
 
         let daysElapsed = max(0, Calendar.current.dateComponents([.day], from: startDate, to: Date()).day ?? 0)
         let fraction = min(1.0, Double(daysElapsed) / Double(estimatedTotalDays))
+        let hasReliableEstimate = abs(deltaKg) >= minReliableDeltaKg
 
-        return GoalJourneyProgress(daysElapsed: daysElapsed, estimatedTotalDays: estimatedTotalDays, fraction: fraction)
+        return GoalJourneyProgress(
+            daysElapsed: daysElapsed, estimatedTotalDays: estimatedTotalDays, fraction: fraction,
+            hasReliableEstimate: hasReliableEstimate
+        )
     }
 
     /// Postgres timestamptz comes back as ISO8601 with fractional seconds

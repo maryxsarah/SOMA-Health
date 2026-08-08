@@ -14,6 +14,7 @@ struct HomeView: View {
     @State private var selectedDay: String?
     @State private var todaysWorkoutLog: WorkoutLogEntry?
     @State private var completedDates: Set<String> = []
+    @State private var goalTrainingDates: Set<String> = []
     // Manual activity logging (real feedback: users want to log a sport
     // session -- soccer, volleyball, hot yoga -- outside the AI plan).
     // showManualWorkoutDetail routes "see today's workout" to
@@ -148,7 +149,12 @@ struct HomeView: View {
             await appState.refreshReferralBonus()
             await loadRecentRecommendations()
             await loadTodaysWorkoutLog()
-            await loadCompletedDates()
+            // Independent fetches feeding the calendar strip's two separate
+            // badges (crown/star) -- no data dependency between them.
+            async let completedDatesFetch: Void = loadCompletedDates()
+            async let goalTrainingDatesFetch: Void = loadGoalTrainingDates()
+            await completedDatesFetch
+            await goalTrainingDatesFetch
             await loadTimeline()
             await autoLogDeviceDetectedWorkoutIfNeeded()
             await loadTodaysAIPlan()
@@ -161,7 +167,12 @@ struct HomeView: View {
             await checkNow()
             await loadRecentRecommendations()
             await loadTodaysWorkoutLog()
-            await loadCompletedDates()
+            // Independent fetches feeding the calendar strip's two separate
+            // badges (crown/star) -- no data dependency between them.
+            async let completedDatesFetch: Void = loadCompletedDates()
+            async let goalTrainingDatesFetch: Void = loadGoalTrainingDates()
+            await completedDatesFetch
+            await goalTrainingDatesFetch
             await loadTimeline()
             await autoLogDeviceDetectedWorkoutIfNeeded()
             await loadTodaysAIPlan()
@@ -172,7 +183,10 @@ struct HomeView: View {
         .sheet(isPresented: $showDetail, onDismiss: {
             Task {
                 await loadTodaysWorkoutLog()
-                await loadCompletedDates()
+                async let completedDatesFetch: Void = loadCompletedDates()
+                async let goalTrainingDatesFetch: Void = loadGoalTrainingDates()
+                await completedDatesFetch
+                await goalTrainingDatesFetch
                 await loadTimeline()
                 await loadTodaysAIPlan()
             }
@@ -273,7 +287,10 @@ struct HomeView: View {
             pendingGymPlan = nil
             Task {
                 await loadTodaysWorkoutLog()
-                await loadCompletedDates()
+                async let completedDatesFetch: Void = loadCompletedDates()
+                async let goalTrainingDatesFetch: Void = loadGoalTrainingDates()
+                await completedDatesFetch
+                await goalTrainingDatesFetch
                 await loadTimeline()
                 await loadTodaysAIPlan()
             }
@@ -384,6 +401,8 @@ struct HomeView: View {
                     .font(.title3)
                     .foregroundStyle(Theme.pillFill)
             }
+            // Stable hook for XCUITest (see UITests/CASES.md).
+            .accessibilityIdentifier("profile-button")
         }
         .padding(.top, 2)
     }
@@ -412,6 +431,7 @@ struct HomeView: View {
             CalendarStripView(
                 recommendations: recentRecommendations,
                 completedDates: completedDates,
+                goalTrainingDates: goalTrainingDates,
                 selectedDate: selectedDay,
                 onSelectDay: { selectedDay = $0 }
             )
@@ -1105,6 +1125,13 @@ struct HomeView: View {
     /// as the other plain reads.
     private func loadCompletedDates() async {
         completedDates = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates()) ?? completedDates
+    }
+
+    /// Feeds the calendar strip's star badge -- silent on failure, same as
+    /// the other plain reads.
+    private func loadGoalTrainingDates() async {
+        guard Config.enableSportGoals else { return }
+        goalTrainingDates = (try? await SupabaseClient.shared.fetchGoalTrainingDates()) ?? goalTrainingDates
     }
 
     /// Feeds the "Take a Picture of Your Gym" disable gate and the

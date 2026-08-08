@@ -20,6 +20,12 @@ struct GoalStartView: View {
     /// Set when the goal was created but its baseline insert failed --
     /// the next tap retries only the baseline (see GoalCreationFlow).
     @State private var pendingBaselineGoal: UserGoal?
+    // Scheduling -- same fields/UI as CustomGoalFormView's, minus the
+    // duration-weeks stepper (presets get their horizon from the band).
+    @State private var frequencyPerWeek = 3
+    @State private var scheduleRule: GoalScheduleRule?
+    @State private var scheduleDays: Set<Int> = []
+    @State private var courtDays: Set<Int> = []
 
     /// `seedStage` is for SomaSnapshotTests only -- renders the milestone
     /// target block without a tap.
@@ -66,6 +72,7 @@ struct GoalStartView: View {
                 entryCard
                 if hasBaseline {
                     targetBlock
+                    scheduleCard
                 }
                 if !conflicts.isEmpty {
                     GoalConflictWarningView(conflicts: conflicts) {
@@ -198,6 +205,11 @@ struct GoalStartView: View {
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(SomaTokens.ink3)
+                if let programName = band.programName {
+                    Text(programName)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(SomaTokens.ink)
+                }
                 Text(SportGoalFormat.gainRange(low: gainLow, high: gainHigh, unit: goal.unit))
                     .font(Theme.display)
                     .foregroundStyle(SomaTokens.accent)
@@ -278,6 +290,32 @@ struct GoalStartView: View {
         return SportGoalFormat.dateRange(lo, hi)
     }
 
+    // MARK: - Schedule
+
+    private var scheduleCard: some View {
+        CardView {
+            Text("Schedule")
+                .font(.body.bold())
+            ScheduleFrequencyPicker(
+                frequencyPerWeek: $frequencyPerWeek,
+                scheduleRule: $scheduleRule,
+                scheduleDays: $scheduleDays,
+                courtDays: $courtDays
+            )
+        }
+    }
+
+    private var effectiveFrequency: Int {
+        ScheduleFrequencyPicker.effectiveFrequency(
+            frequencyPerWeek: frequencyPerWeek,
+            scheduleRule: scheduleRule,
+            scheduleDays: scheduleDays,
+            courtDays: courtDays
+        )
+    }
+
+    // MARK: - Create
+
     private func create(acknowledged: Bool) async {
         isCreating = true
         errorMessage = nil
@@ -294,6 +332,10 @@ struct GoalStartView: View {
         case .qualitative: request.targetText = qualitativeTarget
         case .unknown: break
         }
+        request.frequencyPerWeek = effectiveFrequency
+        request.scheduleRule = scheduleRule
+        if scheduleRule == .weekdays { request.scheduleDays = scheduleDays.sorted() }
+        if scheduleRule == .beforeCourtDays { request.courtDays = courtDays.sorted() }
 
         do {
             switch try await GoalCreationFlow.start(request, retrying: pendingBaselineGoal, onCreated: onCreated) {

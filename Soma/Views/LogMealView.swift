@@ -35,6 +35,17 @@ struct LogMealView: View {
         !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isEstimating && !speechRecognizer.isListening
     }
 
+    /// Same bounds as meal_log's CHECK constraints. Optional fields pass when blank.
+    private static func isInRange(_ value: Int?, max: Int) -> Bool {
+        guard let value else { return true }
+        return value >= 0 && value <= max
+    }
+
+    private var macrosInRange: Bool {
+        Self.isInRange(calories, max: 5000) && Self.isInRange(protein, max: 500)
+            && Self.isInRange(Int(carbsText), max: 500) && Self.isInRange(Int(fatText), max: 500)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -172,6 +183,10 @@ struct LogMealView: View {
 
     private func save() async {
         guard let calories, let protein else { return }
+        guard macrosInRange else {
+            errorMessage = "Calories should be 0-5000 and macros 0-500g -- check your numbers."
+            return
+        }
         isSaving = true
         errorMessage = nil
         defer { isSaving = false }
