@@ -99,6 +99,13 @@ enum ExperienceLevel: String, Codable, CaseIterable, Identifiable {
 /// display-only profile info -- the app still signs in only via Sign in
 /// with Apple, this never becomes a password/login credential.
 struct UserProfile: Codable, Equatable {
+    /// Read-only here -- set at onboarding, never edited from ProfileView.
+    /// Exists on this model only to gate the cycle-tracking row's
+    /// visibility (Phase 5: see docs/coaching-personalization-plan.md) to
+    /// the same `sex == "female"` population the underlying guidance
+    /// (sexAwareGuidance.ts) actually uses -- never sent back by
+    /// updateProfile, so it can't accidentally get overwritten from here.
+    var sex: Sex? = nil
     var contactEmail: String?
     var goals: [GoalTag]
     var otherGoalNotes: String?
@@ -123,6 +130,16 @@ struct UserProfile: Codable, Equatable {
     /// Optional, only meaningful when `pregnancy == true`. Drives
     /// trimester-scaled guidance -- see pregnancyGuidance.ts.
     var pregnancyWeek: Int?
+    /// Opt-in cycle-phase tracking (Phase 5: see
+    /// docs/coaching-personalization-plan.md) -- same "self-reported only,
+    /// never assumed" rule as pregnancy above, and same ProfileView-only
+    /// collection point (never onboarding). nil = not opted in. "yyyy-MM-dd",
+    /// same wire format as dateOfBirth.
+    var lastPeriodStartDate: String?
+    /// Optional, only meaningful when `lastPeriodStartDate` is set --
+    /// server falls back to a 28-day population default when absent (see
+    /// _shared/cyclePhaseGuidance.ts).
+    var typicalCycleLengthDays: Int?
     /// Real, user-set weekly session-count goal, shown against actual
     /// progress (workouts logged this week) on the Profile screen. Purely
     /// a personal-tracking display -- not read by any recommendation logic.
@@ -206,6 +223,7 @@ struct UserProfile: Codable, Equatable {
     var createdAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
+        case sex
         case contactEmail = "contact_email"
         case goals
         case otherGoalNotes = "other_goal_notes"
@@ -219,6 +237,8 @@ struct UserProfile: Codable, Equatable {
         case experienceLevel = "experience_level"
         case pregnancy
         case pregnancyWeek = "pregnancy_week"
+        case lastPeriodStartDate = "last_period_start_date"
+        case typicalCycleLengthDays = "typical_cycle_length_days"
         case weeklySessionTarget = "weekly_session_target"
         case country
         case city
@@ -259,6 +279,8 @@ struct UserProfile: Codable, Equatable {
         experienceLevel: nil,
         pregnancy: nil,
         pregnancyWeek: nil,
+        lastPeriodStartDate: nil,
+        typicalCycleLengthDays: nil,
         weeklySessionTarget: nil,
         goalBodyPhotoPath: nil,
         currentBodyPhotoPath: nil

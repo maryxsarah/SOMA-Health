@@ -41,6 +41,15 @@ struct ProfileView: View {
     @State private var experienceLevel: ExperienceLevel?
     @State private var pregnancy: Bool?
     @State private var pregnancyWeek: Int?
+    /// Read-only pass-through -- see UserProfile.sex's own doc comment.
+    /// Gates the cycle-tracking row's visibility only, never edited here.
+    @State private var sex: Sex?
+    /// Opt-in cycle-phase tracking (Phase 5: see
+    /// docs/coaching-personalization-plan.md) -- Date here (not the wire
+    /// string) for DatePicker, same convention as dateOfBirthDate below;
+    /// converted via Self.dobFormatter (identical "yyyy-MM-dd" wire format).
+    @State private var lastPeriodStartDate: Date?
+    @State private var typicalCycleLengthDays: Int?
     @State private var weeklySessionTarget: Int?
     /// Text, not Double, per pattern -- same "let the user type freely,
     /// parse on save" reasoning as LogMealView's numeric fields. A blank
@@ -733,6 +742,21 @@ struct ProfileView: View {
 
     // MARK: - Health & Safety tab
 
+    /// Gated on sex, not just the kill switch -- sexAwareGuidance.ts's
+    /// underlying guidance only ever fires for sex == "female" (see
+    /// describeSexAwareConsiderations), so showing this row to anyone else
+    /// would just be collecting sensitive data that can never affect
+    /// anything -- worse for data minimization than not showing it at all.
+    private var cycleTrackingRowVisible: Bool {
+        Config.enableCyclePhaseTracking && sex == .female
+    }
+
+    private var cycleTrackingRowValue: String {
+        guard let lastPeriodStartDate else { return "Not set" }
+        let lengthLabel = typicalCycleLengthDays.map { "\($0)d cycle" } ?? "~28d cycle"
+        return "\(Self.dobFormatter.string(from: lastPeriodStartDate)) · \(lengthLabel)"
+    }
+
     private var healthSafetySection: some View {
         VStack(spacing: 10) {
             groupEyebrow("SAFETY")
@@ -749,6 +773,14 @@ struct ProfileView: View {
                 consequence: "Withholds generated workouts until confirmed",
                 value: pregnancy == true ? (pregnancyWeek.map { "Week \($0)" } ?? "Yes") : "Not set"
             ) { activeSheet = .pregnancy }
+
+            if cycleTrackingRowVisible {
+                summaryRow(
+                    title: "Cycle tracking",
+                    consequence: "Adds one general training consideration -- opt-in, never assumed",
+                    value: cycleTrackingRowValue
+                ) { activeSheet = .cycleTracking }
+            }
 
             if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
                 summaryRow(
@@ -974,6 +1006,7 @@ struct ProfileView: View {
                     case .dateOfBirth: dateOfBirthEditor
                     case .knownLifts: knownLiftsEditor
                     case .anchorSession: anchorSessionEditor
+                    case .cycleTracking: cycleTrackingEditor
                     }
                 }
                 .padding(20)
@@ -1177,6 +1210,41 @@ struct ProfileView: View {
         }
     }
 
+    /// Same field pair + "clear resets both" behavior as pregnancyEditor
+    /// just above -- Phase 5 (see docs/coaching-personalization-plan.md).
+    /// Only ever reachable when sex == .female (see cycleTrackingRowVisible),
+    /// so there's no sex picker/gate needed inside the editor itself.
+    private var cycleTrackingEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Optional, and never assumed -- only set if you tell us. Soma will factor your cycle phase into training suggestions as one general consideration among others. This is general guidance only, not medical advice, and not a fertility or ovulation tracker.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DatePicker(
+                "Last period start date",
+                selection: Binding(
+                    get: { lastPeriodStartDate ?? Date() },
+                    set: { lastPeriodStartDate = $0 }
+                ),
+                in: ...Date(),
+                displayedComponents: .date
+            )
+            if lastPeriodStartDate != nil {
+                Stepper(
+                    "Typical cycle length: \(typicalCycleLengthDays.map { "\($0) days" } ?? "not set (defaults to 28)")",
+                    value: Binding(get: { typicalCycleLengthDays ?? 28 }, set: { typicalCycleLengthDays = $0 }),
+                    in: 21...35
+                )
+                .font(.caption)
+                Button("Clear") {
+                    lastPeriodStartDate = nil
+                    typicalCycleLengthDays = nil
+                }
+                .font(.caption)
+                .foregroundStyle(SomaTokens.danger)
+            }
+        }
+    }
+
     private var contactEmailEditor: some View {
         TextField("you@example.com", text: $contactEmailText)
             .textInputAutocapitalization(.never)
@@ -1335,6 +1403,9 @@ struct ProfileView: View {
         experienceLevel = profile.experienceLevel
         pregnancy = profile.pregnancy
         pregnancyWeek = profile.pregnancyWeek
+        sex = profile.sex
+        lastPeriodStartDate = profile.lastPeriodStartDate.flatMap(Self.dobFormatter.date(from:))
+        typicalCycleLengthDays = profile.typicalCycleLengthDays
         weeklySessionTarget = profile.weeklySessionTarget
         knownLiftsText = Dictionary(uniqueKeysWithValues: (profile.knownLifts ?? [:]).compactMap { key, value in
             LiftPattern(rawValue: key).map { ($0, String(Int(value))) }
@@ -1522,6 +1593,8 @@ struct ProfileView: View {
             experienceLevel: experienceLevel,
             pregnancy: pregnancy,
             pregnancyWeek: pregnancy == true ? pregnancyWeek : nil,
+            lastPeriodStartDate: lastPeriodStartDate.map(Self.dobFormatter.string(from:)),
+            typicalCycleLengthDays: lastPeriodStartDate != nil ? typicalCycleLengthDays : nil,
             weeklySessionTarget: weeklySessionTarget,
             country: countryCode,
             city: cityText.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cityText.trimmingCharacters(in: .whitespaces),
@@ -1588,7 +1661,7 @@ private enum ProfileSection: String, CaseIterable, Identifiable {
 }
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession
+    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession, cycleTracking
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -1603,6 +1676,7 @@ private enum ProfileSheet: String, Identifiable {
         case .knownLifts: "Your current lifts"
         case .dateOfBirth: "Date of birth"
         case .anchorSession: "Weekly anchor session"
+        case .cycleTracking: "Cycle tracking"
         }
     }
 }

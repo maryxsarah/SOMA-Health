@@ -38,6 +38,7 @@ import { describeRirGuidance } from "./rirGuidance.ts";
 import { decideShapingGoalGuidance } from "./shapingGoalGuidance.ts";
 import { describeAnchorSession } from "./anchorSessionGuidance.ts";
 import { describeSexAwareConsiderations } from "./sexAwareGuidance.ts";
+import { type CyclePhaseResult, deriveCyclePhase } from "../_shared/cyclePhaseGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
@@ -218,6 +219,12 @@ interface UserRow {
   /// anchorSessionGuidance.ts for how these two feed the prompt.
   anchor_session_name: string | null;
   anchor_session_days: number[] | null;
+  /// Phase 5 (docs/coaching-personalization-plan.md): opt-in cycle-phase
+  /// tracking, set only from ProfileView (never onboarding, same posture
+  /// as pregnancy/pregnancy_week). Null date = not opted in. See
+  /// _shared/cyclePhaseGuidance.ts for the derivation this feeds.
+  last_period_start_date: string | null;
+  typical_cycle_length_days: number | null;
 }
 
 interface SnapshotRow {
@@ -423,7 +430,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_session_name, anchor_session_days")
+      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_session_name, anchor_session_days, last_period_start_date, typical_cycle_length_days")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -568,6 +575,16 @@ Deno.serve(async (req: Request) => {
       date,
     });
 
+    // Phase 5 (docs/coaching-personalization-plan.md): null whenever the
+    // user hasn't opted in (no last_period_start_date) or the projection
+    // is too stale to trust -- describeSexAwareConsiderations treats null
+    // identically to "not opted in" either way, same fallback line.
+    const cyclePhase = deriveCyclePhase(
+      (userRow as UserRow | null)?.last_period_start_date ?? null,
+      (userRow as UserRow | null)?.typical_cycle_length_days ?? null,
+      date,
+    );
+
     const prompt = buildPrompt(
       category,
       resolvedSelection,
@@ -580,6 +597,7 @@ Deno.serve(async (req: Request) => {
       notes,
       upcomingGoalLine,
       anchorSessionLine,
+      cyclePhase,
     );
 
     // Goal-mapped exercise ids join the closed vocabulary inside, under
@@ -818,6 +836,7 @@ function buildPrompt(
   notes: string | undefined,
   upcomingGoalLine: string | null,
   anchorSessionLine: string | null,
+  cyclePhase: CyclePhaseResult | null,
 ): string {
   const goals = userRow?.goals?.length ? userRow.goals.join(", ") : "general fitness";
   // A secondary, lower-confidence signal from comparing the user's stored
@@ -868,7 +887,7 @@ function buildPrompt(
   const experienceLevel = experience as ExperienceLevel;
   const volumeGuidanceLine = describeVolumeGuidance(experienceLevel, category);
   const rirGuidanceLine = describeRirGuidance(goals, experienceLevel, category);
-  const sexAwareLine = describeSexAwareConsiderations(userRow?.sex ?? null, category);
+  const sexAwareLine = describeSexAwareConsiderations(userRow?.sex ?? null, category, cyclePhase);
 
   // Phase 3 (docs/coaching-personalization-plan.md): deterministic goal-
   // specific rep-range + recurring-foundation-movement guidance -- decided

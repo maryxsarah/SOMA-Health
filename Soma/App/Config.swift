@@ -87,6 +87,18 @@ enum Config {
     /// switch is server-side (`sports.status` via RLS): empty catalog = off.
     static let enableSportGoals = true
 
+    /// Opt-in cycle-phase tracking (Phase 5: see
+    /// docs/coaching-personalization-plan.md) -- gates whether ProfileView's
+    /// "Cycle tracking" row/editor even appears. Dark-launchable kill
+    /// switch, same reasoning as enableBodyPhotoVisionAnalysis/
+    /// enableSportGoals above, for data this sensitive. No server-side
+    /// gate needed alongside it: unlike analyze-body-photo, nothing in
+    /// this feature calls a vendor API there's a key/cost to protect --
+    /// generate-workout-plan's own deriveCyclePhase already fails closed to
+    /// "no guidance" for anyone with no last_period_start_date on file,
+    /// which is exactly what disabling this flag client-side achieves.
+    static let enableCyclePhaseTracking = true
+
     private static func string(for key: String) -> String {
         Bundle.main.object(forInfoDictionaryKey: key) as? String ?? ""
     }

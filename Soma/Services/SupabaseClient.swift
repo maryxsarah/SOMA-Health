@@ -283,7 +283,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_session_name,anchor_session_days&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_session_name,anchor_session_days,last_period_start_date,typical_cycle_length_days&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -312,6 +312,11 @@ final class SupabaseClient {
         body["experience_level"] = profile.experienceLevel?.rawValue ?? NSNull()
         body["pregnancy"] = profile.pregnancy ?? NSNull()
         body["pregnancy_week"] = profile.pregnancy == true ? (profile.pregnancyWeek ?? NSNull()) : NSNull()
+        // Same "clearing the primary field also clears its dependent
+        // detail" rule as pregnancy/pregnancy_week just above -- a cleared
+        // start date leaves no length to anchor to either.
+        body["last_period_start_date"] = profile.lastPeriodStartDate ?? NSNull()
+        body["typical_cycle_length_days"] = profile.lastPeriodStartDate != nil ? (profile.typicalCycleLengthDays ?? NSNull()) : NSNull()
         body["weekly_session_target"] = profile.weeklySessionTarget ?? NSNull()
         body["country"] = profile.country ?? NSNull()
         body["city"] = profile.city ?? NSNull()
