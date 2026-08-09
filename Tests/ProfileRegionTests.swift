@@ -7,8 +7,8 @@ final class ProfileRegionTests: XCTestCase {
 
     func testDecodesRegionFieldsWhenPresent() throws {
         let profile = try JSONDecoder().decode(UserProfile.self, from: Data("""
-        {"goals": [], "equipment": [], "injury_tags": [], "injury_severity": {},
-         "injury_type": {}, "injury_pain_level": {}, "country": "US", "city": "Austin"}
+        {"goals": [], "equipment": [], "household_equipment": [], "injury_tags": [], "injury_severity": {},
+         "injury_type": {}, "injury_pain_level": {}, "anchor_session_days": [], "country": "US", "city": "Austin"}
         """.utf8))
         XCTAssertEqual(profile.country, "US")
         XCTAssertEqual(profile.city, "Austin")
@@ -16,8 +16,8 @@ final class ProfileRegionTests: XCTestCase {
 
     func testRegionFieldsAbsentDecodeAsNil() throws {
         let profile = try JSONDecoder().decode(UserProfile.self, from: Data("""
-        {"goals": [], "equipment": [], "injury_tags": [], "injury_severity": {},
-         "injury_type": {}, "injury_pain_level": {}}
+        {"goals": [], "equipment": [], "household_equipment": [], "injury_tags": [], "injury_severity": {},
+         "injury_type": {}, "injury_pain_level": {}, "anchor_session_days": []}
         """.utf8))
         XCTAssertNil(profile.country)
         XCTAssertNil(profile.city)
