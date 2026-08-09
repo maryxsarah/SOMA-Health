@@ -1,0 +1,18 @@
+-- Freeform "why this workout today" text, resolved once and cached on the
+-- row rather than re-derived live every time CompletedWorkoutView opens.
+-- Two reasons this is captured, not computed on the fly forever:
+--   1. daily_recommendation is upserted per (user_id, date) -- a later
+--      same-day "Check now" re-run can overwrite the row a workout's
+--      reasoning was originally built from. Caching the resolved text the
+--      first time it's read freezes what was true when the user actually
+--      saw/logged the session, instead of silently drifting to whatever
+--      the recommendation says now.
+--   2. manual/device_detected logs have no direct daily_recommendation
+--      tie-in at all -- the resolved text there is either that day's real
+--      readiness explanation (with a note that this specific session
+--      wasn't the suggested plan) or, if no recommendation row exists for
+--      that date, an honest fallback ("you logged this yourself..."). See
+--      WorkoutReasonResolver.swift.
+--
+-- Nil for every row until CompletedWorkoutView's lazy backfill runs once.
+alter table workout_log add column reason_snapshot text;
