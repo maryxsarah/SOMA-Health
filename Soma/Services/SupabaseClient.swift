@@ -699,6 +699,42 @@ final class SupabaseClient {
         return try JSONDecoder().decode([MealLogEntry].self, from: data)
     }
 
+    /// Cheap existence check (limit=1, no row body needed) for the daily
+    /// checklist's "log breakfast" item -- distinct from fetchMealLogs,
+    /// which the Nutrition screen uses and actually needs the full rows.
+    func hasMealLoggedToday(date: String) async throws -> Bool {
+        let path = "rest/v1/meal_log?date=eq.\(date)&select=id&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Row: Decodable { let id: String }
+        return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
+    }
+
+    /// Same shape as hasMealLoggedToday, no date filter -- the onboarding
+    /// checklist's "log your first meal" item.
+    func hasEverLoggedMeal() async throws -> Bool {
+        let path = "rest/v1/meal_log?select=id&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Row: Decodable { let id: String }
+        return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
+    }
+
+    /// Onboarding checklist's "log your first workout" item -- same
+    /// limit=1 existence-check shape, distinct from
+    /// fetchRecentWorkoutLogDates (which is genuinely day-windowed for the
+    /// calendar strip).
+    func hasEverLoggedWorkout() async throws -> Bool {
+        let path = "rest/v1/workout_log?select=id&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Row: Decodable { let id: String }
+        return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
+    }
+
     /// `source` defaults to "manual" (typed numbers directly); pass
     /// "text_ai" when the numbers came from a parseMealText(_:) estimate
     /// the user reviewed/saved as-is or after editing -- both land in the
@@ -1045,6 +1081,47 @@ final class SupabaseClient {
         struct Row: Decodable { let date: String }
         let rows = try JSONDecoder().decode([Row].self, from: data)
         return Set(rows.map(\.date))
+    }
+
+    // MARK: - daily_checklist_state
+
+    /// Plain read via RLS. `scope` is "daily" or "onboarding" -- see the
+    /// migration's own comment on the two. `sinceDate` is ignored for
+    /// "onboarding" (that scope is never date-scoped; the table only has
+    /// ~8 such rows per user total, so an unfiltered fetch is cheap).
+    func fetchDailyChecklistState(scope: String, sinceDate: String? = nil) async throws -> [DailyChecklistStateRow] {
+        var path = "rest/v1/daily_checklist_state?scope=eq.\(scope)&select=item_key,date"
+        if scope == "daily", let sinceDate {
+            path += "&date=gte.\(sinceDate)"
+        }
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([DailyChecklistStateRow].self, from: data)
+    }
+
+    /// Idempotent -- the table's (user_id, item_key, date) unique
+    /// constraint means checking an already-checked item twice is a no-op,
+    /// not a duplicate row or an error.
+    func upsertDailyChecklistState(scope: String, itemKey: String, date: String) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/daily_checklist_state", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId, "scope": scope, "item_key": itemKey, "date": date,
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// Un-checks a manual item -- only ever called for "daily" scope rows
+    /// (onboarding items, once checked, stay checked: there's no UX path
+    /// that un-does "you've connected a health source").
+    func deleteDailyChecklistState(itemKey: String, date: String) async throws {
+        let path = "rest/v1/daily_checklist_state?item_key=eq.\(itemKey)&date=eq.\(date)"
+        let request = try await authorizedRequest(path: path, method: "DELETE")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
     }
 
     /// Which of the last N days had a real sport-goal training session --

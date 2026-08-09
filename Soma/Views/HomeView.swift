@@ -4,6 +4,7 @@ import SwiftUI
 /// Screen 4 -- Home. No text input, no chat history, no voice button.
 struct HomeView: View {
     @EnvironmentObject private var appState: AppState
+    @ObservedObject private var checklistRouter = ChecklistDeepLinkRouter.shared
 
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -108,6 +109,8 @@ struct HomeView: View {
                 greetingBlock
 
                 weekCard
+
+                dailyChecklistCard
 
                 if showSportGoalPromo {
                     sportGoalPromoCard
@@ -312,6 +315,20 @@ struct HomeView: View {
                 DayDetailView(date: selectedDay, recentRecommendations: recentRecommendations)
             }
         }
+        .onChange(of: checklistRouter.pending) { _, newValue in
+            guard let newValue else { return }
+            handleChecklistDeepLink(newValue)
+            checklistRouter.pending = nil
+        }
+        .onAppear {
+            // Covers the cold-launch case (app wasn't already running when
+            // the notification was tapped) -- onChange alone only fires
+            // for a value that changes while this view already exists.
+            if let pending = checklistRouter.pending {
+                handleChecklistDeepLink(pending)
+                checklistRouter.pending = nil
+            }
+        }
     }
 
     /// The Home card (today's category + message) always stays free --
@@ -439,6 +456,46 @@ struct HomeView: View {
             Divider().overlay(SomaTokens.hairline)
 
             weeklyProgress
+        }
+    }
+
+    /// Reuses signals HomeView already loads for its own cards (mood,
+    /// workout log, connected providers, today's recommendation) rather
+    /// than having the checklist card re-fetch them independently -- see
+    /// DailyChecklistCardView's own doc comment on why.
+    private var dailyChecklistCard: some View {
+        DailyChecklistCardView(
+            date: Self.todayDateString(),
+            signals: DailyChecklistCardView.SharedSignals(
+                moodLoggedToday: todaysMood != nil,
+                workoutLoggedToday: todaysWorkoutLog != nil,
+                healthKitConnected: !appState.connectedProviders.isEmpty,
+                hasReviewedFirstPlan: appState.currentRecommendation != nil
+            ),
+            onDeepLink: handleChecklistDeepLink
+        )
+    }
+
+    private func handleChecklistDeepLink(_ deepLink: ChecklistDeepLink) {
+        switch deepLink {
+        case .logMeal:
+            showNutrition = true
+        case .healthDashboard:
+            showHealthDashboard = true
+        case .moodCheckIn:
+            break // Already visible on Home itself -- nothing further to open.
+        case .startWorkout:
+            openTodaysWorkoutDetail()
+        case .progressPicture:
+            showGoalBodyProgress = true
+        case .profileGoals, .profileKitchenEquipment, .connectDevices:
+            // Profile owns all three editors (Training tab, kitchen
+            // equipment row, device connections) -- one entry point,
+            // same as tapping the gear icon, rather than plumbing a
+            // second way into each individual sub-sheet.
+            showProfile = true
+        case .enableNotifications:
+            Task { try? await NotificationManager.shared.requestAuthorization() }
         }
     }
 
