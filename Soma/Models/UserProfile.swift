@@ -111,6 +111,13 @@ struct UserProfile: Codable, Equatable {
     var otherGoalNotes: String?
     var equipment: [EquipmentTag]
     var otherEquipmentNotes: String?
+    /// What the user can cook with -- a hard input to
+    /// generate-meal-recommendation, same "collect once, edit forever"
+    /// shape as `equipment`/`otherEquipmentNotes` above. See
+    /// KitchenEquipmentTag's own doc comment for why this is a separate
+    /// field rather than folded into `equipment`.
+    var householdEquipment: [KitchenEquipmentTag]
+    var otherHouseholdEquipmentNotes: String?
     var injuryTags: [InjuryTag]
     var injuryNotes: String?
     /// Keyed by InjuryTag.rawValue. A tag present in `injuryTags` with no
@@ -229,6 +236,8 @@ struct UserProfile: Codable, Equatable {
         case otherGoalNotes = "other_goal_notes"
         case equipment
         case otherEquipmentNotes = "other_equipment_notes"
+        case householdEquipment = "household_equipment"
+        case otherHouseholdEquipmentNotes = "other_household_equipment_notes"
         case injuryTags = "injury_tags"
         case injuryNotes = "injury_notes"
         case injurySeverity = "injury_severity"
@@ -274,6 +283,8 @@ struct UserProfile: Codable, Equatable {
         otherGoalNotes: nil,
         equipment: [],
         otherEquipmentNotes: nil,
+        householdEquipment: [],
+        otherHouseholdEquipmentNotes: nil,
         injuryTags: [],
         injuryNotes: nil,
         experienceLevel: nil,

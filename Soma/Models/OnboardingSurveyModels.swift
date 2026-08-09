@@ -296,5 +296,13 @@ struct OnboardingSurveyAnswers: Equatable {
     /// getUTCDay), and the same WeekdayMiniPicker component.
     var anchorSessionName: String?
     var anchorSessionDays: Set<Int> = []
+    /// Kitchen equipment for "What can I make?" (generate-meal-
+    /// recommendation) -- always skippable, same "structured field,
+    /// freely optional" rule as blockersNotes/anchorSessionName. An empty
+    /// selection here is a real, valid answer (it means the app falls
+    /// back to KitchenEquipmentTag.skipDefault the first time the feature
+    /// is used), not a validation failure.
+    var householdEquipment: Set<KitchenEquipmentTag> = []
+    var otherHouseholdEquipmentNotes: String?
     var marketingOptIn = false
 }

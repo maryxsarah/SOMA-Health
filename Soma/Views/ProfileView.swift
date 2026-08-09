@@ -30,6 +30,7 @@ struct ProfileView: View {
     // when loading/saving.
     @State private var goals: Set<GoalTag> = []
     @State private var equipment: Set<EquipmentTag> = []
+    @State private var householdEquipment: Set<KitchenEquipmentTag> = []
     @State private var injuryTags: Set<InjuryTag> = []
     @State private var injurySeverity: [InjuryTag: InjurySeverity] = [:]
     @State private var injuryType: [InjuryTag: InjuryType] = [:]
@@ -37,6 +38,7 @@ struct ProfileView: View {
     @State private var contactEmailText = ""
     @State private var otherGoalText = ""
     @State private var otherEquipmentText = ""
+    @State private var otherHouseholdEquipmentText = ""
     @State private var injuryNotesText = ""
     @State private var experienceLevel: ExperienceLevel?
     @State private var pregnancy: Bool?
@@ -683,8 +685,14 @@ struct ProfileView: View {
             summaryRow(
                 title: "Equipment & access",
                 consequence: "Only suggests workouts you can actually do",
-                value: equipment.isEmpty ? "Not set" : equipment.map(\.displayName).joined(separator: ", ")
+                value: equipment.isEmpty ? "Not set" : EquipmentTag.allCases.filter(equipment.contains).map(\.displayName).joined(separator: ", ")
             ) { activeSheet = .equipment }
+
+            summaryRow(
+                title: "Kitchen equipment",
+                consequence: "Only suggests recipes you can actually cook",
+                value: householdEquipment.isEmpty ? "Not set" : KitchenEquipmentTag.allCases.filter(householdEquipment.contains).map(\.displayName).joined(separator: ", ")
+            ) { activeSheet = .kitchenEquipment }
 
             summaryRow(
                 title: "Weekly target",
@@ -998,6 +1006,7 @@ struct ProfileView: View {
                     case .experience: experienceEditor
                     case .goals: goalsEditor
                     case .equipment: equipmentEditor
+                    case .kitchenEquipment: kitchenEquipmentEditor
                     case .weeklyTarget: weeklyTargetEditor
                     case .injuries: injuriesEditor
                     case .pregnancy: pregnancyEditor
@@ -1070,6 +1079,25 @@ struct ProfileView: View {
             }
             if equipment.contains(.other) {
                 TextField("What else do you have access to?", text: $otherEquipmentText)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private var kitchenEquipmentEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("So we only ever suggest recipes you can actually cook.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FlowLayout {
+                ForEach(KitchenEquipmentTag.allCases) { tag in
+                    ChipToggle(title: tag.displayName, isSelected: householdEquipment.contains(tag)) {
+                        toggle(tag, in: &householdEquipment)
+                    }
+                }
+            }
+            if householdEquipment.contains(.other) {
+                TextField("What else? (comma-separated)", text: $otherHouseholdEquipmentText)
                     .textFieldStyle(.roundedBorder)
             }
         }
@@ -1389,6 +1417,8 @@ struct ProfileView: View {
         otherGoalText = profile.otherGoalNotes ?? ""
         equipment = Set(profile.equipment)
         otherEquipmentText = profile.otherEquipmentNotes ?? ""
+        householdEquipment = Set(profile.householdEquipment)
+        otherHouseholdEquipmentText = profile.otherHouseholdEquipmentNotes ?? ""
         injuryTags = Set(profile.injuryTags)
         injurySeverity = Dictionary(uniqueKeysWithValues: profile.injurySeverity.compactMap { key, value in
             InjuryTag(rawValue: key).map { ($0, value) }
@@ -1589,6 +1619,8 @@ struct ProfileView: View {
             otherGoalNotes: otherGoalText.isEmpty ? nil : otherGoalText,
             equipment: Array(equipment),
             otherEquipmentNotes: otherEquipmentText.isEmpty ? nil : otherEquipmentText,
+            householdEquipment: Array(householdEquipment),
+            otherHouseholdEquipmentNotes: otherHouseholdEquipmentText.isEmpty ? nil : otherHouseholdEquipmentText,
             injuryTags: Array(injuryTags),
             injuryNotes: injuryNotesText.isEmpty ? nil : injuryNotesText,
             experienceLevel: experienceLevel,
@@ -1662,13 +1694,14 @@ private enum ProfileSection: String, CaseIterable, Identifiable {
 }
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession, cycleTracking
+    case experience, goals, equipment, kitchenEquipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession, cycleTracking
     var id: String { rawValue }
     var title: String {
         switch self {
         case .experience: "Experience"
         case .goals: "Goals"
         case .equipment: "Equipment & access"
+        case .kitchenEquipment: "Kitchen equipment"
         case .weeklyTarget: "Weekly target"
         case .injuries: "Injuries"
         case .pregnancy: "Pregnancy"

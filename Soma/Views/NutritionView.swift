@@ -13,6 +13,7 @@ struct NutritionView: View {
     @State private var errorMessage: String?
     @State private var showLogSheet = false
     @State private var showGoalBodyProgress = false
+    @State private var showMealRecommendation = false
     @State private var selectedEntry: MealLogEntry?
     /// Guards against firing a second rate-meal call for the same entry
     /// while one is already in flight (loadEntries() re-runs the
@@ -30,6 +31,7 @@ struct NutritionView: View {
                     } else if let target {
                         let progress = NutritionDayProgress.compute(entries: entries, target: target)
                         progressSection(progress)
+                        mealIdeaCard(progress)
                         logSection
                     } else {
                         emptyStateSection
@@ -71,6 +73,12 @@ struct NutritionView: View {
             Task { await load() }
         }) {
             GoalBodyProgressView()
+        }
+        .sheet(isPresented: $showMealRecommendation, onDismiss: {
+            // Picks up a meal logged via "Log this meal" in there.
+            Task { await loadEntries() }
+        }) {
+            MealRecommendationView(remaining: target.map { NutritionDayProgress.compute(entries: entries, target: $0) })
         }
         .sheet(item: $selectedEntry, onDismiss: {
             // Picks up a score/rationale MealDetailView may have just
@@ -140,6 +148,38 @@ struct NutritionView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// "What can I make?" entry point -- sits right under today's bars so
+    /// the remaining-macro numbers it feeds MealRecommendationView are
+    /// visibly the same ones just shown above, not a disconnected feature.
+    private func mealIdeaCard(_ progress: NutritionDayProgress) -> some View {
+        Button {
+            showMealRecommendation = true
+        } label: {
+            CardView {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill(SomaTokens.accentSoft).frame(width: 40, height: 40)
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(SomaTokens.accent)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("What can I make?")
+                            .font(.system(size: 14.5, weight: .semibold))
+                            .foregroundStyle(SomaTokens.ink)
+                        Text("Tell Soma what's in your fridge -- get one full recipe, sized to what's left today.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private static let proteinColor = Color(red: 0.90, green: 0.35, blue: 0.40)

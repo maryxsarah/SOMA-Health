@@ -257,6 +257,16 @@ final class SupabaseClient {
         }
         if let diet = answers.dietType { body["diet_type"] = diet.rawValue }
         if !answers.accomplishmentGoals.isEmpty { body["accomplishment_goals"] = answers.accomplishmentGoals.map(\.rawValue) }
+        // Always skippable (KitchenEquipmentQuestionView's Continue is
+        // never gated on a selection) -- an empty selection here just
+        // means the household_equipment column keeps its '{}' default,
+        // the same "not set yet" state "What can I make?"'s first-use
+        // prompt checks for.
+        if !answers.householdEquipment.isEmpty { body["household_equipment"] = answers.householdEquipment.map(\.rawValue) }
+        if let otherHouseholdEquipmentNotes = answers.otherHouseholdEquipmentNotes,
+           !otherHouseholdEquipmentNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["other_household_equipment_notes"] = otherHouseholdEquipmentNotes
+        }
         // Name is the primary signal -- a day picked with no name isn't
         // saved (there's nothing to name the day against); a name with no
         // day is still saved as context even though it can't drive
@@ -283,7 +293,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_session_name,anchor_session_days,last_period_start_date,typical_cycle_length_days&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,household_equipment,other_household_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_session_name,anchor_session_days,last_period_start_date,typical_cycle_length_days&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -302,12 +312,14 @@ final class SupabaseClient {
             "id": id,
             "goals": profile.goals.map(\.rawValue),
             "equipment": profile.equipment.map(\.rawValue),
+            "household_equipment": profile.householdEquipment.map(\.rawValue),
         ]
         // JSONSerialization can't encode `nil` -- use NSNull so Postgres
         // actually clears these columns rather than leaving them untouched.
         body["contact_email"] = profile.contactEmail ?? NSNull()
         body["other_goal_notes"] = profile.otherGoalNotes ?? NSNull()
         body["other_equipment_notes"] = profile.otherEquipmentNotes ?? NSNull()
+        body["other_household_equipment_notes"] = profile.otherHouseholdEquipmentNotes ?? NSNull()
         body["injury_notes"] = profile.injuryNotes ?? NSNull()
         body["experience_level"] = profile.experienceLevel?.rawValue ?? NSNull()
         body["pregnancy"] = profile.pregnancy ?? NSNull()
@@ -731,6 +743,22 @@ final class SupabaseClient {
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
         return try JSONDecoder().decode(MealEstimate.self, from: data)
+    }
+
+    /// "What can I make?" -- a freeform description of what's in the
+    /// fridge/pantry -> one complete AI-suggested recipe (generate-meal-
+    /// recommendation), scoped to the user's real kitchen equipment,
+    /// remaining daily macros, and goal direction. Never writes anything
+    /// itself -- MealRecommendationView shows the result back and only
+    /// calls logMeal(...) (source "recipe_ai") if the user taps "Log this
+    /// meal", same estimate-then-review shape as parseMealText.
+    func generateMealRecommendation(ingredients: String) async throws -> MealRecommendation {
+        var request = try await authorizedRequest(path: "functions/v1/generate-meal-recommendation", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["ingredients": ingredients])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode(MealRecommendation.self, from: data)
     }
 
     /// Scores an already-logged meal (rate-meal, Claude Haiku) against
