@@ -953,7 +953,7 @@ final class SupabaseClient {
     /// which of today's/yesterday's suggestions are already logged) and
     /// DayDetailView (calendar day drill-down).
     func fetchWorkoutLogs(date: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source&order=completed_at.asc"
+        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source,calories_burned,calories_estimated,reason_snapshot&order=completed_at.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -964,7 +964,7 @@ final class SupabaseClient {
     /// TrainingHistoryView's 30-day list and RecommendationDetailView's
     /// 7-day body-part balancing.
     func fetchWorkoutLogs(fromDate: String, toDate: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source&order=date.desc"
+        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source,calories_burned,calories_estimated,reason_snapshot&order=date.desc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -980,6 +980,24 @@ final class SupabaseClient {
         if let feedback {
             body["feedback"] = feedback.isEmpty ? NSNull() : feedback
         }
+        var request = try await authorizedRequest(path: "rest/v1/workout_log?id=eq.\(id)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// System-computed backfill, not a user edit -- kept separate from
+    /// updateWorkoutLog above (feel rating/feedback, always user-triggered)
+    /// on purpose. CompletedWorkoutView.load() calls this once per log, the
+    /// first time it resolves a missing calorie/reason value, so every
+    /// later open reads the same frozen result instead of recomputing (and
+    /// potentially re-querying HealthKit) every time.
+    func updateWorkoutLogComputedFields(id: String, caloriesBurned: Int?, caloriesEstimated: Bool, reasonSnapshot: String?) async throws {
+        var body: [String: Any] = ["calories_estimated": caloriesEstimated]
+        body["calories_burned"] = caloriesBurned ?? NSNull()
+        body["reason_snapshot"] = reasonSnapshot ?? NSNull()
         var request = try await authorizedRequest(path: "rest/v1/workout_log?id=eq.\(id)", method: "PATCH")
         request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)

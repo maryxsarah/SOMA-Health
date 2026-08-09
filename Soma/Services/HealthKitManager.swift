@@ -418,6 +418,34 @@ final class HealthKitManager {
         }
     }
 
+    /// Active energy burned over an EXACT window -- same "arbitrary
+    /// caller-supplied interval" shape as fetchHeartRateSummary above (a
+    /// logged workout's start/end), not the trailing-24h rate
+    /// fetchCumulativeQuantity's basalEnergyBurned use computes. Feeds
+    /// CompletedWorkoutView's calorie hero stat as the real, measured
+    /// number when one exists; the estimate in WorkoutCalorieEstimator is
+    /// only ever a fallback for when this returns nil. Returns nil (never
+    /// a placeholder) if nothing was recorded in that exact window.
+    func fetchActiveEnergy(start: Date, end: Date) async -> Int? {
+        guard Self.isAvailable, let type = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) else { return nil }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, _ in
+                guard let sum = statistics?.sumQuantity() else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: Int(sum.doubleValue(for: .kilocalorie()).rounded()))
+            }
+            store.execute(query)
+        }
+    }
+
     static func median(_ values: [Double]) -> Double? {
         guard !values.isEmpty else { return nil }
         let sorted = values.sorted()

@@ -34,6 +34,20 @@ struct WorkoutLogEntry: Codable, Identifiable {
     /// LogManualWorkoutView). Decides which detail screen HomeView routes
     /// to when the user taps today's logged workout.
     let source: String
+    /// Calorie hero stat on CompletedWorkoutView -- nil until the lazy
+    /// backfill (CompletedWorkoutView.load()) resolves it, either from a
+    /// real HealthKit/wearable reading over this log's started_at/ended_at
+    /// window, or (see `caloriesEstimated`) a MET-based estimate. Never a
+    /// fabricated placeholder: nil renders as an honest "--", not 0.
+    var caloriesBurned: Int? = nil
+    /// True only when `caloriesBurned` came from WorkoutCalorieEstimator
+    /// rather than a measured device reading -- gates the "Estimated"
+    /// label so an estimate is never shown as if it were measured.
+    var caloriesEstimated: Bool = false
+    /// The resolved "why this workout today" text, frozen the first time
+    /// WorkoutReasonResolver ever ran for this log -- see the
+    /// 20260809020000 migration's comment and WorkoutReasonResolver.swift.
+    var reasonSnapshot: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, date, title, category, feedback, source
@@ -43,6 +57,9 @@ struct WorkoutLogEntry: Codable, Identifiable {
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case feelRating = "feel_rating"
+        case caloriesBurned = "calories_burned"
+        case caloriesEstimated = "calories_estimated"
+        case reasonSnapshot = "reason_snapshot"
     }
 }
 
