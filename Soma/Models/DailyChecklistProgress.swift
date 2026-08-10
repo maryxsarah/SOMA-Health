@@ -85,7 +85,16 @@ struct DailyChecklistProgress {
                 title: "Log your first workout",
                 subtitle: "Follow today's plan, or log your own activity.",
                 isChecked: inputs.hasLoggedFirstWorkout,
-                isManual: false, deepLink: .startWorkout, daysUntilNextAvailable: nil
+                // Was .startWorkout -- identical to "Review your first
+                // plan" above, which routed both through
+                // openTodaysWorkoutDetail()'s "already logged" branches
+                // only. For a new user (todaysWorkoutLog == nil, the
+                // whole premise of this row existing), that fell through
+                // to a CompletedWorkoutView sheet guarded on a log that
+                // doesn't exist -- a blank page. This item's real
+                // destination is the manual-logging form, always
+                // presentable regardless of what's loaded elsewhere.
+                isManual: false, deepLink: .logWorkout, daysUntilNextAvailable: nil
             ),
             DailyChecklistItem(
                 key: "onboarding_first_meal",
@@ -97,9 +106,14 @@ struct DailyChecklistProgress {
             DailyChecklistItem(
                 key: "onboarding_how_soma_works",
                 title: "See how Soma works",
-                subtitle: "A quick look at your Dashboard -- readiness, trends, streaks.",
+                subtitle: "A 6-card tour of what's actually in the app.",
                 isChecked: inputs.hasSeenHowSomaWorks,
-                isManual: true, deepLink: .healthDashboard, daysUntilNextAvailable: nil
+                // Was isManual + .healthDashboard -- tapping used to mark
+                // this complete instantly (before showing anything real)
+                // and just opened the Dashboard. Now opens the actual
+                // tour (HowSomaWorksTourView); completion happens only
+                // once its final card's action fires.
+                isManual: false, deepLink: .howSomaWorks, daysUntilNextAvailable: nil
             ),
         ]
         // Onboarding mode has no daily streak of its own -- it's a

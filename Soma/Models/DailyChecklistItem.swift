@@ -8,7 +8,25 @@ enum ChecklistDeepLink: Equatable {
     case logMeal
     case healthDashboard
     case moodCheckIn
+    /// Review/complete today's plan -- routes through
+    /// HomeView.openTodaysWorkoutDetail()'s full decision tree (nothing
+    /// logged yet -> today's plan; already logged -> the matching
+    /// completed-state screen). Distinct from `logWorkout` below: this is
+    /// "show me what's going on today," not "let me log something new."
     case startWorkout
+    /// Always the manual-logging form (LogManualWorkoutView), regardless
+    /// of whether today's AI plan exists or was already reviewed --
+    /// "Log your first workout"'s whole point is a guaranteed-actionable
+    /// destination, never gated on any other data being loaded first.
+    case logWorkout
+    /// Opens the "How Soma Works" tour sheet -- was previously routed
+    /// straight through .healthDashboard as a `isManual` row, which
+    /// marked the checklist item complete the instant it was tapped
+    /// (before the user had actually seen anything) and never showed any
+    /// actual walkthrough. Now non-manual: tapping just opens the tour,
+    /// and completion happens only once its final card's "Got it --
+    /// let's go" action fires (see HomeView.completeHowSomaWorksItem).
+    case howSomaWorks
     case progressPicture
     case profileGoals
     case profileKitchenEquipment

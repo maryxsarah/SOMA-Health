@@ -105,7 +105,11 @@ struct GeneratingPlanStepView: View {
 
         if let recommendation = try? await SupabaseClient.shared.invokeGenerateRecommendation(date: today, healthkit: snapshot) {
             appState.currentRecommendation = recommendation
-            NotificationManager.shared.markSentToday()
+            // Deliberately no markSentToday() here -- this never schedules
+            // a local notification, so marking "sent" would wrongly
+            // disable Trigger A/B's own guard for the rest of onboarding
+            // day, the same bug fixed in HomeView.checkNow() (see its
+            // doc comment).
         }
     }
 

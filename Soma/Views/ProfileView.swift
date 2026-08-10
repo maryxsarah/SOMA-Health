@@ -21,6 +21,12 @@ struct ProfileView: View {
     @State private var section: ProfileSection = .training
     @State private var activeSheet: ProfileSheet?
     @State private var showReferralCodeSheet = false
+    /// Refresher entry point for the same tour the onboarding checklist's
+    /// "See how Soma works" item opens -- see HowSomaWorksTourView's own
+    /// doc comment. No completion write here: this row exists precisely
+    /// for a user who has already completed onboarding, so there's
+    /// nothing left to mark.
+    @State private var showHowSomaWorks = false
 
     // Plain @State strings bound directly via `$` (not a computed
     // Binding(get:set:) built inline in the view body) -- the latter
@@ -172,6 +178,9 @@ struct ProfileView: View {
         .somaBackground()
         .sheet(item: $activeSheet) { sheet in
             detailSheet(for: sheet)
+        }
+        .sheet(isPresented: $showHowSomaWorks) {
+            HowSomaWorksTourView(onFinish: { showHowSomaWorks = false })
         }
         .sheet(isPresented: $showReferralCodeSheet) {
             ReferralCodeSheet()
@@ -856,6 +865,9 @@ struct ProfileView: View {
             summaryRow(title: "Feedback", consequence: "Spotted a bug, or have an idea?", value: "") {
                 FeedbackPresenter.present()
             }
+            summaryRow(title: "How Soma works", consequence: "A quick refresher on what's in the app", value: "") {
+                showHowSomaWorks = true
+            }
 
             if let errorMessage {
                 Text(errorMessage).font(.caption).foregroundStyle(SomaTokens.danger)
@@ -1501,17 +1513,12 @@ struct ProfileView: View {
         }
     }
 
-    /// Best-effort, server-verified reconnect state -- distinct from
-    /// appState.connectedProviders, which never learns about a dead
-    /// refresh token on its own. A failed fetch just leaves the previous
-    /// (or empty) state, same "degrade to hidden" posture as the rest of
-    /// this load path.
+    /// Server-verified connected/needs-reconnect state for the device
+    /// rows below -- delegates to AppState's shared refresh (also used on
+    /// every sign-in) rather than duplicating the fetch-and-merge logic
+    /// here. See AppState.refreshConnectedProviders's own doc comment.
     private func loadConnectionStatus() async {
-        guard let status = try? await SupabaseClient.shared.fetchConnectionStatus() else { return }
-        var needingReconnect: Set<Provider> = []
-        if status.whoop.needsReconnect { needingReconnect.insert(.whoop) }
-        if status.oura.needsReconnect { needingReconnect.insert(.oura) }
-        appState.providersNeedingReconnect = needingReconnect
+        await appState.refreshConnectedProviders()
     }
 
     /// Best-effort (`try?` throughout): a failed fetch degrades to hidden

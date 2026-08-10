@@ -6,18 +6,46 @@ struct PlanSummaryStepView: View {
     @EnvironmentObject private var appState: AppState
     let onContinue: () -> Void
 
-    /// Same real number OnTrackStepView showed earlier in the survey
-    /// (stashed via UserDefaults at that point) -- falls back to a plain
-    /// "Now"/"Ahead" pair if it's somehow missing rather than a fabricated
-    /// "1 Month/3 Months" guess.
-    private var estimatedMonths: Int? {
-        let stored = UserDefaults.standard.integer(forKey: OnboardingSurveyView.estimatedGoalMonthsKey)
-        return stored > 0 ? stored : nil
+    /// Same real values OnboardingSurveyView.finish() stashed via
+    /// UserDefaults right after the survey submitted -- see its own doc
+    /// comment for why this screen has no other way to reach them
+    /// (constructed later, in PostSetupFlowView, with no direct binding
+    /// to the survey's in-memory `answers`).
+    private var startWeightKg: Double? {
+        let value = UserDefaults.standard.double(forKey: OnboardingSurveyView.startWeightKgKey)
+        return value > 0 ? value : nil
     }
 
-    private var chartLabels: [String] {
-        guard let estimatedMonths else { return ["Now", "Ahead"] }
-        return ["Now", "Halfway", "\(estimatedMonths) month\(estimatedMonths == 1 ? "" : "s")"]
+    private var goalWeightKg: Double? {
+        let value = UserDefaults.standard.double(forKey: OnboardingSurveyView.goalWeightKgKey)
+        return value > 0 ? value : nil
+    }
+
+    /// Falls back to recomputing the same deterministic estimate from the
+    /// stashed weight/pace if the months figure itself is somehow missing
+    /// -- still a real, derived number, never a fabricated one.
+    private var estimatedMonths: Int? {
+        let stored = UserDefaults.standard.integer(forKey: OnboardingSurveyView.estimatedGoalMonthsKey)
+        if stored > 0 { return stored }
+        guard let startWeightKg, let goalWeightKg else { return nil }
+        let pace = UserDefaults.standard.string(forKey: OnboardingSurveyView.goalPaceKey).flatMap(GoalPace.init(rawValue:)) ?? .recommended
+        return GoalPace.estimatedMonths(deltaKg: goalWeightKg - startWeightKg, pace: pace)
+    }
+
+    private var goalTags: Set<GoalTag> {
+        Set((UserDefaults.standard.stringArray(forKey: OnboardingSurveyView.goalTagsKey) ?? []).compactMap(GoalTag.init(rawValue:)))
+    }
+
+    private var journeyStage: JourneyStage? {
+        UserDefaults.standard.string(forKey: OnboardingSurveyView.journeyStageKey).flatMap(JourneyStage.init(rawValue:))
+    }
+
+    private var blockers: Set<BlockerTag> {
+        Set((UserDefaults.standard.stringArray(forKey: OnboardingSurveyView.blockersKey) ?? []).compactMap(BlockerTag.init(rawValue:)))
+    }
+
+    private var dietType: DietType? {
+        UserDefaults.standard.string(forKey: OnboardingSurveyView.dietTypeKey).flatMap(DietType.init(rawValue:))
     }
 
     var body: some View {
@@ -34,7 +62,18 @@ struct PlanSummaryStepView: View {
                 CardView {
                     Text("Estimated progress")
                         .font(.body.bold())
-                    UpwardTrendChartView(xAxisLabels: chartLabels, chartHeight: 110)
+                    GoalTrajectoryChartView(
+                        startWeightKg: startWeightKg, goalWeightKg: goalWeightKg,
+                        estimatedMonths: estimatedMonths ?? 1, chartHeight: 130
+                    )
+                    // Full 4 lines here (unlike OnTrackStepView's 3) --
+                    // this screen already scrolls, and by now every
+                    // source field (goal/journeyStage/blockers/dietType)
+                    // has actually been collected.
+                    PlanHighlightsListView(items: PlanHighlightsListView.build(
+                        goalTags: goalTags, journeyStage: journeyStage,
+                        blockers: blockers, dietType: dietType, maxItems: 4
+                    ))
                 }
 
                 CardView {

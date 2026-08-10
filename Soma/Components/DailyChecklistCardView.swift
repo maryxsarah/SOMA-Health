@@ -22,6 +22,11 @@ struct DailyChecklistCardView: View {
 
     let date: String
     let signals: SharedSignals
+    /// Set (by HomeView) while a tapped row's destination is still
+    /// loading required data -- see HomeView.openTodaysWorkoutDetail's
+    /// own doc comment. Shows a spinner on the matching row instead of
+    /// its usual chevron, rather than the row appearing to do nothing.
+    var loadingDeepLink: ChecklistDeepLink? = nil
     let onDeepLink: (ChecklistDeepLink) -> Void
 
     @State private var progress: DailyChecklistProgress?
@@ -111,7 +116,11 @@ struct DailyChecklistCardView: View {
                         .foregroundStyle(SomaTokens.ink3)
                 }
                 Spacer()
-                if item.deepLink != nil {
+                if item.deepLink != nil, item.deepLink == loadingDeepLink {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.top, 3)
+                } else if item.deepLink != nil {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(SomaTokens.ink4)

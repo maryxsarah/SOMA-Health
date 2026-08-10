@@ -116,11 +116,21 @@ struct OnboardingSurveyView: View {
                         set: { answers.goalPace = $0 }
                     ),
                     weightDeltaKg: weightDelta,
+                    startWeightKg: answers.weightKg,
+                    goalWeightKg: answers.desiredWeightKg,
                     onBack: goBack,
                     onContinue: advance
                 )
             case .comparisonBar:
-                ComparisonStepView(progress: progress, onBack: goBack, onContinue: advance)
+                ComparisonStepView(
+                    progress: progress,
+                    weightDeltaKg: weightDelta,
+                    pace: answers.goalPace ?? .recommended,
+                    startWeightKg: answers.weightKg,
+                    goalWeightKg: answers.desiredWeightKg,
+                    onBack: goBack,
+                    onContinue: advance
+                )
             case .journeyStage:
                 SingleSelectQuestionView(
                     headline: "Where are you on your fitness journey?",
@@ -190,6 +200,12 @@ struct OnboardingSurveyView: View {
                     progress: progress,
                     weightDeltaKg: weightDelta,
                     pace: answers.goalPace ?? .recommended,
+                    startWeightKg: answers.weightKg,
+                    goalWeightKg: answers.desiredWeightKg,
+                    goalTags: answers.goal,
+                    journeyStage: answers.journeyStage,
+                    blockers: answers.blockers,
+                    dietType: answers.dietType,
                     onBack: goBack,
                     onContinue: advance
                 )
@@ -226,12 +242,25 @@ struct OnboardingSurveyView: View {
     private func finish() {
         // Stashed locally (not just sent to the server) so PlanSummaryStepView,
         // several screens later in PostSetupFlowView, can show the same real
-        // timeline without a round-trip fetch -- same one-off UserDefaults
-        // pattern AppState itself uses for onboarding-scoped values.
-        UserDefaults.standard.set(
+        // timeline -- and now the same real weight/goal-context highlights --
+        // without a round-trip fetch. Same one-off UserDefaults pattern
+        // AppState itself uses for onboarding-scoped values; UserProfile
+        // has no dietType/blockers columns to fetch these back from anyway
+        // (diet_type/blockers are write-only from onboarding today), so
+        // stashing here is the only source PlanSummaryStepView has.
+        let defaults = UserDefaults.standard
+        defaults.set(
             GoalPace.estimatedMonths(deltaKg: weightDelta, pace: answers.goalPace ?? .recommended),
             forKey: Self.estimatedGoalMonthsKey
         )
+        if let weightKg = answers.weightKg { defaults.set(weightKg, forKey: Self.startWeightKgKey) } else { defaults.removeObject(forKey: Self.startWeightKgKey) }
+        if let desired = answers.desiredWeightKg { defaults.set(desired, forKey: Self.goalWeightKgKey) } else { defaults.removeObject(forKey: Self.goalWeightKgKey) }
+        if let goalPace = answers.goalPace { defaults.set(goalPace.rawValue, forKey: Self.goalPaceKey) } else { defaults.removeObject(forKey: Self.goalPaceKey) }
+        defaults.set(answers.goal.map(\.rawValue), forKey: Self.goalTagsKey)
+        if let journeyStage = answers.journeyStage { defaults.set(journeyStage.rawValue, forKey: Self.journeyStageKey) } else { defaults.removeObject(forKey: Self.journeyStageKey) }
+        defaults.set(answers.blockers.map(\.rawValue), forKey: Self.blockersKey)
+        if let dietType = answers.dietType { defaults.set(dietType.rawValue, forKey: Self.dietTypeKey) } else { defaults.removeObject(forKey: Self.dietTypeKey) }
+
         Task {
             guard let userId = SupabaseClient.shared.currentUserID else { return }
             try? await SupabaseClient.shared.saveOnboardingSurvey(id: userId, answers: answers)
@@ -240,6 +269,13 @@ struct OnboardingSurveyView: View {
     }
 
     static let estimatedGoalMonthsKey = "com.soma.app.estimatedGoalMonths"
+    static let startWeightKgKey = "com.soma.app.onboardingStartWeightKg"
+    static let goalWeightKgKey = "com.soma.app.onboardingGoalWeightKg"
+    static let goalPaceKey = "com.soma.app.onboardingGoalPace"
+    static let goalTagsKey = "com.soma.app.onboardingGoalTags"
+    static let journeyStageKey = "com.soma.app.onboardingJourneyStage"
+    static let blockersKey = "com.soma.app.onboardingBlockers"
+    static let dietTypeKey = "com.soma.app.onboardingDietType"
 
     private static var defaultDateOfBirth: Date {
         Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()

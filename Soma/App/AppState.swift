@@ -67,6 +67,60 @@ final class AppState: ObservableObject {
 
     func markSignedIn() {
         screen = .survey
+        // Fire-and-forget: Whoop/Oura tokens are a persistent per-user
+        // server table and HealthKit's grant is an OS-level install
+        // permission -- neither is affected by a prior sign-out (see
+        // signOut's own doc comment) -- so a returning user's real
+        // connections should already show as connected by the time they
+        // reach Connect Device, without blocking this screen transition
+        // on the network round trip. See refreshConnectedProviders.
+        Task { await refreshConnectedProviders() }
+    }
+
+    /// Server-verified refresh of `connectedProviders`/`providersNeedingReconnect`
+    /// -- the fix for a real bug: `connectedProviders` was a local cache
+    /// written once at connect time and wiped by signOut() below, with
+    /// nothing on the next sign-in ever re-deriving it from the real
+    /// source of truth. That made every returning user's already-connected
+    /// Whoop/Oura/HealthKit look disconnected on Connect Device, even
+    /// though nothing about the actual connection had changed --
+    /// Whoop/Oura tokens live in wearable_tokens (a persistent per-user
+    /// server table, confirmed in generate-recommendation/index.ts) and
+    /// HealthKit's authorization is an OS-level install grant this app's
+    /// sign-out can't touch even if it wanted to.
+    ///
+    /// Called on every sign-in (markSignedIn) and defensively again
+    /// whenever Connect Device or Profile's device rows appear, so this
+    /// is never stale regardless of which screen the user lands on.
+    func refreshConnectedProviders() async {
+        async let statusFetch: SupabaseClient.ConnectionStatus? = try? await SupabaseClient.shared.fetchConnectionStatus()
+        async let healthKitAuthorized: Bool = {
+            guard HealthKitManager.isAvailable else { return false }
+            return await HealthKitManager.shared.isAuthorized()
+        }()
+
+        var connected: Set<Provider> = []
+        var needingReconnect: Set<Provider> = []
+
+        if let status = await statusFetch {
+            if status.whoop.connected { connected.insert(.whoop) }
+            if status.whoop.needsReconnect { needingReconnect.insert(.whoop) }
+            if status.oura.connected { connected.insert(.oura) }
+            if status.oura.needsReconnect { needingReconnect.insert(.oura) }
+        } else {
+            // A failed fetch (network blip) must never erase a Whoop/Oura
+            // connection this app already believed in -- only a
+            // successful, authoritative read is allowed to remove one.
+            connected.formUnion(connectedProviders.intersection([.whoop, .oura]))
+        }
+
+        if await healthKitAuthorized {
+            connected.insert(.appleHealth)
+        }
+
+        connectedProviders = connected
+        UserDefaults.standard.set(connected.map(\.rawValue), forKey: Self.connectedProvidersKey)
+        providersNeedingReconnect = needingReconnect
     }
 
     func markProviderConnected(_ provider: Provider) {
@@ -110,11 +164,23 @@ final class AppState: ObservableObject {
     /// Clears the local session and resets onboarding state so the app
     /// falls straight back to Onboarding -- lets the full signup flow be
     /// re-tested in the same running app, without reinstalling.
+    ///
+    /// Wiping `connectedProviders`/its UserDefaults mirror here is safe,
+    /// NOT a connection loss: `SupabaseClient.shared.signOut()` only
+    /// clears the local Supabase session keychain entry -- it never
+    /// touches `wearable_tokens` (a persistent per-user server table) or
+    /// calls any HealthKit API, so Whoop/Oura/HealthKit all remain
+    /// genuinely connected server/OS-side. This is just the CLIENT's
+    /// cache of that fact being cleared; refreshConnectedProviders()
+    /// (called from markSignedIn on the next sign-in) re-derives the real
+    /// state from wearable_tokens and HKHealthStore rather than ever
+    /// re-inferring it from this now-empty cache.
     func signOut() {
         SupabaseClient.shared.signOut()
         Superwall.shared.reset()
         onboardingComplete = false
         connectedProviders = []
+        providersNeedingReconnect = []
         currentRecommendation = nil
         referralBonusUntil = nil
         UserDefaults.standard.removeObject(forKey: Self.onboardingCompleteKey)

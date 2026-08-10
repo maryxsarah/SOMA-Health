@@ -112,7 +112,14 @@ final class SupabaseClient {
     /// "check your email to confirm" message instead.
     @discardableResult
     func signUpWithEmail(email: String, password: String) async throws -> Bool {
-        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/auth/v1/signup")!)
+        // redirect_to controls where {{ .ConfirmationURL }} in the signup
+        // email lands once Supabase verifies the token -- our universal
+        // link, not Supabase's own bare default page. Must also be on the
+        // Dashboard's Redirect URLs allow-list (see
+        // Config.emailConfirmationRedirectURL's own doc comment).
+        var components = URLComponents(url: Config.supabaseURL.appendingPathComponent("auth/v1/signup"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "redirect_to", value: Config.emailConfirmationRedirectURL)]
+        var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -156,6 +163,74 @@ final class SupabaseClient {
         ))
         try await upsertUser(id: auth.user.id, contactEmail: auth.user.email ?? email)
         return auth.user.id
+    }
+
+    /// Establishes a session from the confirmation email's universal-link
+    /// redirect -- Supabase's hosted /auth/v1/verify checks the token,
+    /// then 302s the browser to Config.emailConfirmationRedirectURL with
+    /// `#access_token=...&refresh_token=...&expires_in=...` in the URL
+    /// FRAGMENT (implicit-grant shape, same as its magic-link/OAuth
+    /// redirects), which is what SomaApp's onOpenURL hands this
+    /// `fragment` param -- there is no JSON response to decode here, this
+    /// is a redirect landing, not an API call.
+    ///
+    /// The fragment carries no user id, only the access token itself, so
+    /// it's decoded locally (no signature verification -- this token just
+    /// arrived from Supabase's own first-party HTTPS redirect, the same
+    /// trust level as any other sign-in response body here) to read the
+    /// `sub`/`email` claims, rather than spending an extra round trip on
+    /// GET /auth/v1/user for the same information.
+    @discardableResult
+    func completeEmailConfirmation(fragment: String) async throws -> String {
+        let params = Self.parseFragmentParams(fragment)
+        guard let accessToken = params["access_token"], let refreshToken = params["refresh_token"] else {
+            throw SupabaseError.requestFailed(status: 0, message: "Confirmation link is missing its tokens")
+        }
+        guard let claims = Self.decodeJWTClaims(accessToken), let userID = claims["sub"] as? String else {
+            throw SupabaseError.requestFailed(status: 0, message: "Couldn't read the confirmation token")
+        }
+        let email = claims["email"] as? String
+        let expiresIn = params["expires_in"].flatMap(Double.init) ?? 3600
+
+        keychain.save(StoredSession(
+            userID: userID,
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: Date().addingTimeInterval(expiresIn)
+        ))
+        // Same "ensure a users row exists" step every other sign-in path
+        // takes (see signInWithApple's own doc comment) -- this is a
+        // brand-new session this app has never upserted for.
+        try await upsertUser(id: userID, contactEmail: email)
+        return userID
+    }
+
+    /// `key1=value1&key2=value2`, percent-decoded -- the shape of a URL
+    /// fragment/query string. `URLComponents.fragment` gives the raw
+    /// string; Foundation has no built-in parser for query-string-shaped
+    /// fragments (only for `.query`), so this is hand-rolled.
+    static func parseFragmentParams(_ fragment: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for pair in fragment.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            result[String(parts[0])] = String(parts[1]).removingPercentEncoding ?? String(parts[1])
+        }
+        return result
+    }
+
+    /// Decodes a JWT's middle (payload) segment only -- no signature
+    /// verification, see completeEmailConfirmation's own doc comment for
+    /// why that's an acceptable trust level here.
+    static func decodeJWTClaims(_ token: String) -> [String: Any]? {
+        let segments = token.split(separator: ".")
+        guard segments.count == 3 else { return nil }
+        var base64 = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64 += "=" }
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
     private func refreshSession() async throws {

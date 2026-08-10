@@ -42,6 +42,25 @@ enum Config {
     /// Auth -> URL Configuration -> Redirect URLs allow-list.
     static let googleRedirectURI = "soma://oauth-callback/google"
 
+    /// Where the branded signup-confirmation email's "Commit now to your
+    /// goal" button lands -- a universal link (not the `soma://` custom
+    /// scheme above), so a device without the app installed falls through
+    /// to Safari instead of the link silently doing nothing. Requires:
+    /// 1) the Associated Domains entitlement (Soma.entitlements),
+    /// 2) an apple-app-site-association file hosted at this domain (see
+    ///    deep-linking/README.md), and
+    /// 3) this exact URL added to Supabase Dashboard's Auth -> URL
+    ///    Configuration -> Redirect URLs allow-list, same as
+    ///    googleRedirectURI above. See SomaApp's onOpenURL for the
+    ///    handler and supabase/email-templates/confirm-signup.html for
+    ///    the template that links here via {{ .ConfirmationURL }}.
+    ///
+    /// www, not bare -- soma4health.com 308-redirects to
+    /// www.soma4health.com site-wide, and Apple's swcd does not follow
+    /// redirects when fetching apple-app-site-association, so the bare
+    /// domain would never actually verify. Confirmed 2026-08-10.
+    static let emailConfirmationRedirectURL = "https://www.soma4health.com/auth/confirm"
+
     static let backgroundTaskIdentifier = "com.soma.app.refresh"
 
     /// Goal/current body photo upload, history, and comparison slider.

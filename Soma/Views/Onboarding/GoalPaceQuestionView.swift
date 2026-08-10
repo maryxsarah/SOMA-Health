@@ -8,6 +8,11 @@ struct GoalPaceQuestionView: View {
     let progress: Double
     @Binding var pace: GoalPace
     let weightDeltaKg: Double
+    /// Raw kg values (not just the delta above) so the new trajectory
+    /// chart can label its Today/Goal points with real numbers -- see
+    /// GoalTrajectoryChartView.
+    let startWeightKg: Double?
+    let goalWeightKg: Double?
     let onBack: () -> Void
     let onContinue: () -> Void
 
@@ -30,7 +35,17 @@ struct GoalPaceQuestionView: View {
 
             Spacer()
 
-            VStack(spacing: 28) {
+            VStack(spacing: 20) {
+                // Compact height (matches UpwardTrendChartView's own
+                // "compact call sites... must fit without scrolling" rule)
+                // -- this screen has no ScrollView, so the chart stays
+                // small enough that the slider/card/button below it never
+                // risk getting pushed off a small device's screen.
+                GoalTrajectoryChartView(
+                    startWeightKg: startWeightKg, goalWeightKg: goalWeightKg,
+                    estimatedMonths: estimatedMonths, chartHeight: 90
+                )
+
                 HStack {
                     ForEach(paceOrder) { option in
                         VStack(spacing: 6) {

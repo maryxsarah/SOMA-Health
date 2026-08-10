@@ -36,6 +36,27 @@ final class HealthKitManager {
         try await store.requestAuthorization(toShare: [], read: readTypes)
     }
 
+    /// Whether this install has already completed the read-authorization
+    /// sheet for `readTypes` -- the only signal HealthKit exposes for read
+    /// access (see requestAuthorization's own doc comment: it never
+    /// reports per-type grant/denial). `.unnecessary` means "already
+    /// asked," which this app already treats as "Connected" the moment
+    /// requestAuthorization's sheet completes -- same definition, just
+    /// checked without re-prompting.
+    ///
+    /// This is an OS-level, install-scoped grant -- entirely untouched by
+    /// SOMA sign-out/sign-in, unlike Whoop/Oura's server-stored tokens. So
+    /// unlike AppState.refreshConnectedProviders' Whoop/Oura fetch, a
+    /// `false` here after a prior `true` is never treated as "must have
+    /// been revoked, ignore it" -- it just means never authorized yet.
+    func isAuthorized() async -> Bool {
+        guard Self.isAvailable else { return false }
+        guard let status = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes) else {
+            return false
+        }
+        return status == .unnecessary
+    }
+
     /// Snapshot of today's metrics for the optional `healthkit` payload sent
     /// to generate-recommendation.
     ///
