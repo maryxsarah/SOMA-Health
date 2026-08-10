@@ -21,6 +21,12 @@ struct ProfileView: View {
     @State private var section: ProfileSection = .training
     @State private var activeSheet: ProfileSheet?
     @State private var showReferralCodeSheet = false
+    /// Refresher entry point for the same tour the onboarding checklist's
+    /// "See how Soma works" item opens -- see HowSomaWorksTourView's own
+    /// doc comment. No completion write here: this row exists precisely
+    /// for a user who has already completed onboarding, so there's
+    /// nothing left to mark.
+    @State private var showHowSomaWorks = false
 
     // Plain @State strings bound directly via `$` (not a computed
     // Binding(get:set:) built inline in the view body) -- the latter
@@ -30,6 +36,7 @@ struct ProfileView: View {
     // when loading/saving.
     @State private var goals: Set<GoalTag> = []
     @State private var equipment: Set<EquipmentTag> = []
+    @State private var householdEquipment: Set<KitchenEquipmentTag> = []
     @State private var injuryTags: Set<InjuryTag> = []
     @State private var injurySeverity: [InjuryTag: InjurySeverity] = [:]
     @State private var injuryType: [InjuryTag: InjuryType] = [:]
@@ -37,16 +44,53 @@ struct ProfileView: View {
     @State private var contactEmailText = ""
     @State private var otherGoalText = ""
     @State private var otherEquipmentText = ""
+    @State private var otherHouseholdEquipmentText = ""
     @State private var injuryNotesText = ""
     @State private var experienceLevel: ExperienceLevel?
     @State private var pregnancy: Bool?
     @State private var pregnancyWeek: Int?
+    /// Read-only pass-through -- see UserProfile.sex's own doc comment.
+    /// Gates the cycle-tracking row's visibility only, never edited here.
+    @State private var sex: Sex?
+    /// Opt-in cycle-phase tracking (Phase 5: see
+    /// docs/coaching-personalization-plan.md) -- Date here (not the wire
+    /// string) for DatePicker, same convention as dateOfBirthDate below;
+    /// converted via Self.dobFormatter (identical "yyyy-MM-dd" wire format).
+    @State private var lastPeriodStartDate: Date?
+    @State private var typicalCycleLengthDays: Int?
     @State private var weeklySessionTarget: Int?
+    /// Text, not Double, per pattern -- same "let the user type freely,
+    /// parse on save" reasoning as LogMealView's numeric fields. A blank
+    /// entry for a pattern just means "keep using the estimate for this
+    /// one", not zero.
+    @State private var knownLiftsText: [LiftPattern: String] = [:]
+    /// Pass-through only -- this screen has no editor for these three yet
+    /// (set during onboarding), but updateProfile writes height_cm/
+    /// journey_stage/blockers_notes unconditionally (NSNull if absent).
+    /// Without loading and re-sending them, ANY save from this screen --
+    /// including something as unrelated as changing region -- silently
+    /// wiped all three, which in turn silently broke the Health
+    /// Dashboard's BMI card (needs height) on the next load. Loaded once
+    /// in load(), never mutated by any control here, sent back unchanged.
+    @State private var preservedHeightCm: Double?
+    @State private var preservedJourneyStage: JourneyStage?
+    @State private var preservedBlockersNotes: String?
+    /// Unlike the three above, THIS one now has a real editor
+    /// (dateOfBirthEditor) -- see UserProfile.dateOfBirth's doc comment.
+    /// nil means genuinely unset (an account that predates the onboarding
+    /// DOB step), distinct from "user picked today's date" which the
+    /// DatePicker binding below needs a concrete non-optional default for.
+    @State private var dateOfBirthDate: Date?
     @State private var sessionsDoneThisWeek = 0
     // Region (country ISO code + free-text city) -- powers the future
     // nearby gyms/partners suggestions; saved via the normal profile flow.
     @State private var countryCode: String?
     @State private var cityText = ""
+    // Weekly anchor session (Phase 4: see docs/coaching-personalization-plan.md)
+    // -- a real editor, unlike preservedHeightCm/etc above, so these are
+    // loaded AND sent back live on every save, same as countryCode/cityText.
+    @State private var anchorSessionName = ""
+    @State private var anchorSessionDays: Set<Int> = []
     // Beta opt-in -- reflects the user's own beta_optins row.
     @State private var betaOptIn = false
 
@@ -134,6 +178,9 @@ struct ProfileView: View {
         .somaBackground()
         .sheet(item: $activeSheet) { sheet in
             detailSheet(for: sheet)
+        }
+        .sheet(isPresented: $showHowSomaWorks) {
+            HowSomaWorksTourView(onFinish: { showHowSomaWorks = false })
         }
         .sheet(isPresented: $showReferralCodeSheet) {
             ReferralCodeSheet()
@@ -633,6 +680,12 @@ struct ProfileView: View {
             ) { activeSheet = .experience }
 
             summaryRow(
+                title: "Your current lifts",
+                consequence: "Optional -- a real number beats an estimated one",
+                value: knownLifts.isEmpty ? "Not set" : "\(knownLifts.count) set"
+            ) { activeSheet = .knownLifts }
+
+            summaryRow(
                 title: "Goals",
                 consequence: "Prioritizes which workouts are suggested first",
                 value: goals.isEmpty ? "Not set" : "\(goals.count) selected"
@@ -641,14 +694,26 @@ struct ProfileView: View {
             summaryRow(
                 title: "Equipment & access",
                 consequence: "Only suggests workouts you can actually do",
-                value: equipment.isEmpty ? "Not set" : equipment.map(\.displayName).joined(separator: ", ")
+                value: equipment.isEmpty ? "Not set" : EquipmentTag.allCases.filter(equipment.contains).map(\.displayName).joined(separator: ", ")
             ) { activeSheet = .equipment }
+
+            summaryRow(
+                title: "Kitchen equipment",
+                consequence: "Only suggests recipes you can actually cook",
+                value: householdEquipment.isEmpty ? "Not set" : KitchenEquipmentTag.allCases.filter(householdEquipment.contains).map(\.displayName).joined(separator: ", ")
+            ) { activeSheet = .kitchenEquipment }
 
             summaryRow(
                 title: "Weekly target",
                 consequence: "Personal tracking goal only -- doesn't change suggestions",
                 value: weeklySessionTarget.map { "\($0)/wk · \(sessionsDoneThisWeek) done" } ?? "Not set"
             ) { activeSheet = .weeklyTarget }
+
+            summaryRow(
+                title: "Weekly anchor session",
+                consequence: "The rest of your week is built around it",
+                value: anchorSessionRowValue
+            ) { activeSheet = .anchorSession }
 
             if showSportGoalRow {
                 summaryRow(
@@ -661,6 +726,15 @@ struct ProfileView: View {
                 }
             }
         }
+    }
+
+    /// "Hot Yoga · Tue" / "Hot Yoga" (no day picked yet) / "Not set".
+    private var anchorSessionRowValue: String {
+        let name = anchorSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return "Not set" }
+        guard !anchorSessionDays.isEmpty else { return name }
+        let days = anchorSessionDays.sorted().map(WeekdayMiniPicker.shortName(forValue:)).joined(separator: ", ")
+        return "\(name) · \(days)"
     }
 
     /// Kill switch: the row exists only when the server-gated catalog has
@@ -685,6 +759,21 @@ struct ProfileView: View {
 
     // MARK: - Health & Safety tab
 
+    /// Gated on sex, not just the kill switch -- sexAwareGuidance.ts's
+    /// underlying guidance only ever fires for sex == "female" (see
+    /// describeSexAwareConsiderations), so showing this row to anyone else
+    /// would just be collecting sensitive data that can never affect
+    /// anything -- worse for data minimization than not showing it at all.
+    private var cycleTrackingRowVisible: Bool {
+        Config.enableCyclePhaseTracking && sex == .female
+    }
+
+    private var cycleTrackingRowValue: String {
+        guard let lastPeriodStartDate else { return "Not set" }
+        let lengthLabel = typicalCycleLengthDays.map { "\($0)d cycle" } ?? "~28d cycle"
+        return "\(Self.dobFormatter.string(from: lastPeriodStartDate)) · \(lengthLabel)"
+    }
+
     private var healthSafetySection: some View {
         VStack(spacing: 10) {
             groupEyebrow("SAFETY")
@@ -701,6 +790,14 @@ struct ProfileView: View {
                 consequence: "Withholds generated workouts until confirmed",
                 value: pregnancy == true ? (pregnancyWeek.map { "Week \($0)" } ?? "Yes") : "Not set"
             ) { activeSheet = .pregnancy }
+
+            if cycleTrackingRowVisible {
+                summaryRow(
+                    title: "Cycle tracking",
+                    consequence: "Adds one general training consideration -- opt-in, never assumed",
+                    value: cycleTrackingRowValue
+                ) { activeSheet = .cycleTracking }
+            }
 
             if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
                 summaryRow(
@@ -739,6 +836,12 @@ struct ProfileView: View {
                 value: UserProfile.regionDisplay(country: countryCode, city: cityText) ?? "Not set"
             ) { activeSheet = .region }
 
+            summaryRow(
+                title: "Date of birth",
+                consequence: "Needed to unlock Goal Body progress photos",
+                value: dateOfBirthDate.map { Self.dobFormatter.string(from: $0) } ?? "Not set"
+            ) { activeSheet = .dateOfBirth }
+
             groupEyebrow("EARLY ACCESS")
             betaOptInRow
 
@@ -761,6 +864,9 @@ struct ProfileView: View {
             }
             summaryRow(title: "Feedback", consequence: "Spotted a bug, or have an idea?", value: "") {
                 FeedbackPresenter.present()
+            }
+            summaryRow(title: "How Soma works", consequence: "A quick refresher on what's in the app", value: "") {
+                showHowSomaWorks = true
             }
 
             if let errorMessage {
@@ -912,11 +1018,16 @@ struct ProfileView: View {
                     case .experience: experienceEditor
                     case .goals: goalsEditor
                     case .equipment: equipmentEditor
+                    case .kitchenEquipment: kitchenEquipmentEditor
                     case .weeklyTarget: weeklyTargetEditor
                     case .injuries: injuriesEditor
                     case .pregnancy: pregnancyEditor
                     case .contactEmail: contactEmailEditor
                     case .region: regionEditor
+                    case .dateOfBirth: dateOfBirthEditor
+                    case .knownLifts: knownLiftsEditor
+                    case .anchorSession: anchorSessionEditor
+                    case .cycleTracking: cycleTrackingEditor
                     }
                 }
                 .padding(20)
@@ -985,6 +1096,25 @@ struct ProfileView: View {
         }
     }
 
+    private var kitchenEquipmentEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("So we only ever suggest recipes you can actually cook.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FlowLayout {
+                ForEach(KitchenEquipmentTag.allCases) { tag in
+                    ChipToggle(title: tag.displayName, isSelected: householdEquipment.contains(tag)) {
+                        toggle(tag, in: &householdEquipment)
+                    }
+                }
+            }
+            if householdEquipment.contains(.other) {
+                TextField("What else? (comma-separated)", text: $otherHouseholdEquipmentText)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
     private var weeklyTargetEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("A personal tracking goal -- doesn't change what Soma recommends, just what it shows you here.")
@@ -1000,6 +1130,38 @@ struct ProfileView: View {
                 Text("\(sessionsDoneThisWeek) done this week so far.")
                     .font(.caption.bold())
                     .foregroundStyle(SomaTokens.accent)
+            }
+        }
+    }
+
+    /// Real feedback: a self-described non-powerlifter was prescribed
+    /// 125-135kg for a barbell deadlift from the population-level
+    /// bodyweight-ratio estimate alone. Entirely optional, entirely
+    /// separate from experience level -- filling in even one pattern here
+    /// makes the AI plan use that real number for that pattern specifically,
+    /// leaving the others on the estimate.
+    private var knownLiftsEditor: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("If you know your comfortable working weight for any of these, Soma uses it directly for the AI plan instead of estimating from your bodyweight and experience level. Leave any blank to keep using the estimate.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(LiftPattern.allCases) { pattern in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(pattern.displayName)
+                        .font(.system(size: 14.5, weight: .semibold))
+                    HStack {
+                        TextField(pattern.placeholder, text: Binding(
+                            get: { knownLiftsText[pattern] ?? "" },
+                            set: { knownLiftsText[pattern] = $0 }
+                        ))
+                        .keyboardType(.numberPad)
+                        Text("kg")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous).fill(SomaTokens.surface3))
+                }
             }
         }
     }
@@ -1088,12 +1250,60 @@ struct ProfileView: View {
         }
     }
 
+    /// Same field pair + "clear resets both" behavior as pregnancyEditor
+    /// just above -- Phase 5 (see docs/coaching-personalization-plan.md).
+    /// Only ever reachable when sex == .female (see cycleTrackingRowVisible),
+    /// so there's no sex picker/gate needed inside the editor itself.
+    private var cycleTrackingEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Optional, and never assumed -- only set if you tell us. Soma will factor your cycle phase into training suggestions as one general consideration among others. This is general guidance only, not medical advice, and not a fertility or ovulation tracker.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DatePicker(
+                "Last period start date",
+                selection: Binding(
+                    get: { lastPeriodStartDate ?? Date() },
+                    set: { lastPeriodStartDate = $0 }
+                ),
+                in: ...Date(),
+                displayedComponents: .date
+            )
+            if lastPeriodStartDate != nil {
+                Stepper(
+                    "Typical cycle length: \(typicalCycleLengthDays.map { "\($0) days" } ?? "not set (defaults to 28)")",
+                    value: Binding(get: { typicalCycleLengthDays ?? 28 }, set: { typicalCycleLengthDays = $0 }),
+                    in: 21...35
+                )
+                .font(.caption)
+                Button("Clear") {
+                    lastPeriodStartDate = nil
+                    typicalCycleLengthDays = nil
+                }
+                .font(.caption)
+                .foregroundStyle(SomaTokens.danger)
+            }
+        }
+    }
+
     private var contactEmailEditor: some View {
         TextField("you@example.com", text: $contactEmailText)
             .textInputAutocapitalization(.never)
             .keyboardType(.emailAddress)
             .autocorrectionDisabled()
             .textFieldStyle(.roundedBorder)
+    }
+
+    /// "yyyy-MM-dd", matching UserProfile.dateOfBirth's wire format
+    /// (same as AgeGate.isAdult's parser).
+    private static let dobFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        return formatter
+    }()
+
+    private static var defaultDateOfBirth: Date {
+        Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
     }
 
     /// ISO region codes sorted by their localized display name -- never a
@@ -1118,6 +1328,49 @@ struct ProfileView: View {
             .pickerStyle(.menu)
             TextField("City", text: $cityText)
                 .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    /// Same field pair as onboarding's AnchorSessionQuestionView, same
+    /// WeekdayMiniPicker component -- lets someone who skipped it at
+    /// onboarding set it later, or fix the wrong day.
+    private var anchorSessionEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("A recurring class or activity (e.g. a Tuesday hot yoga class) the rest of your week gets built around.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("e.g. \"Hot Yoga\", \"Tennis league\"", text: $anchorSessionName)
+                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Which day(s) is it usually on?")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                WeekdayMiniPicker(selected: $anchorSessionDays)
+            }
+        }
+    }
+
+    /// Real feedback traced to a missing DOB: an account created before
+    /// the onboarding DOB step existed has no other way to supply one,
+    /// which silently hides the whole Goal Body photo feature -- see
+    /// UserProfile.dateOfBirth's doc comment. Same wheel DatePicker as
+    /// the onboarding step (DateOfBirthQuestionView) for a consistent feel.
+    private var dateOfBirthEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Confirms you're 18+ to unlock Goal Body progress photos. Never shown to other users.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DatePicker(
+                "Date of birth",
+                selection: Binding(
+                    get: { dateOfBirthDate ?? Self.defaultDateOfBirth },
+                    set: { dateOfBirthDate = $0 }
+                ),
+                in: ...Date(),
+                displayedComponents: .date
+            )
+            .datePickerStyle(.wheel)
+            .labelsHidden()
         }
     }
 
@@ -1176,6 +1429,8 @@ struct ProfileView: View {
         otherGoalText = profile.otherGoalNotes ?? ""
         equipment = Set(profile.equipment)
         otherEquipmentText = profile.otherEquipmentNotes ?? ""
+        householdEquipment = Set(profile.householdEquipment)
+        otherHouseholdEquipmentText = profile.otherHouseholdEquipmentNotes ?? ""
         injuryTags = Set(profile.injuryTags)
         injurySeverity = Dictionary(uniqueKeysWithValues: profile.injurySeverity.compactMap { key, value in
             InjuryTag(rawValue: key).map { ($0, value) }
@@ -1190,9 +1445,21 @@ struct ProfileView: View {
         experienceLevel = profile.experienceLevel
         pregnancy = profile.pregnancy
         pregnancyWeek = profile.pregnancyWeek
+        sex = profile.sex
+        lastPeriodStartDate = profile.lastPeriodStartDate.flatMap(Self.dobFormatter.date(from:))
+        typicalCycleLengthDays = profile.typicalCycleLengthDays
         weeklySessionTarget = profile.weeklySessionTarget
+        knownLiftsText = Dictionary(uniqueKeysWithValues: (profile.knownLifts ?? [:]).compactMap { key, value in
+            LiftPattern(rawValue: key).map { ($0, String(Int(value))) }
+        })
         countryCode = profile.country
         cityText = profile.city ?? ""
+        anchorSessionName = profile.anchorSessionName ?? ""
+        anchorSessionDays = Set(profile.anchorSessionDays)
+        preservedHeightCm = profile.heightCm
+        preservedJourneyStage = profile.journeyStage
+        preservedBlockersNotes = profile.blockersNotes
+        dateOfBirthDate = profile.dateOfBirth.flatMap(Self.dobFormatter.date(from:))
         betaOptIn = (try? await SupabaseClient.shared.fetchBetaOptIn()) ?? false
 
         isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
@@ -1246,17 +1513,12 @@ struct ProfileView: View {
         }
     }
 
-    /// Best-effort, server-verified reconnect state -- distinct from
-    /// appState.connectedProviders, which never learns about a dead
-    /// refresh token on its own. A failed fetch just leaves the previous
-    /// (or empty) state, same "degrade to hidden" posture as the rest of
-    /// this load path.
+    /// Server-verified connected/needs-reconnect state for the device
+    /// rows below -- delegates to AppState's shared refresh (also used on
+    /// every sign-in) rather than duplicating the fetch-and-merge logic
+    /// here. See AppState.refreshConnectedProviders's own doc comment.
     private func loadConnectionStatus() async {
-        guard let status = try? await SupabaseClient.shared.fetchConnectionStatus() else { return }
-        var needingReconnect: Set<Provider> = []
-        if status.whoop.needsReconnect { needingReconnect.insert(.whoop) }
-        if status.oura.needsReconnect { needingReconnect.insert(.oura) }
-        appState.providersNeedingReconnect = needingReconnect
+        await appState.refreshConnectedProviders()
     }
 
     /// Best-effort (`try?` throughout): a failed fetch degrades to hidden
@@ -1338,6 +1600,20 @@ struct ProfileView: View {
         return Set(logs.map(\.date)).count
     }
 
+    /// Parses knownLiftsText into the wire shape -- a blank or
+    /// non-positive entry for a pattern is dropped rather than saved as
+    /// 0, so it falls back to the population estimate exactly like never
+    /// having entered anything.
+    private var knownLifts: [String: Double] {
+        var result: [String: Double] = [:]
+        for (pattern, text) in knownLiftsText {
+            if let value = Double(text.trimmingCharacters(in: .whitespaces)), value > 0 {
+                result[pattern.rawValue] = value
+            }
+        }
+        return result
+    }
+
     private func save() {
         guard let userId = SupabaseClient.shared.currentUserID else { return }
         isSaving = true
@@ -1350,14 +1626,25 @@ struct ProfileView: View {
             otherGoalNotes: otherGoalText.isEmpty ? nil : otherGoalText,
             equipment: Array(equipment),
             otherEquipmentNotes: otherEquipmentText.isEmpty ? nil : otherEquipmentText,
+            householdEquipment: Array(householdEquipment),
+            otherHouseholdEquipmentNotes: otherHouseholdEquipmentText.isEmpty ? nil : otherHouseholdEquipmentText,
             injuryTags: Array(injuryTags),
             injuryNotes: injuryNotesText.isEmpty ? nil : injuryNotesText,
             experienceLevel: experienceLevel,
             pregnancy: pregnancy,
             pregnancyWeek: pregnancy == true ? pregnancyWeek : nil,
+            lastPeriodStartDate: lastPeriodStartDate.map(Self.dobFormatter.string(from:)),
+            typicalCycleLengthDays: lastPeriodStartDate != nil ? typicalCycleLengthDays : nil,
             weeklySessionTarget: weeklySessionTarget,
             country: countryCode,
-            city: cityText.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cityText.trimmingCharacters(in: .whitespaces)
+            city: cityText.trimmingCharacters(in: .whitespaces).isEmpty ? nil : cityText.trimmingCharacters(in: .whitespaces),
+            heightCm: preservedHeightCm,
+            journeyStage: preservedJourneyStage,
+            blockersNotes: preservedBlockersNotes,
+            knownLifts: knownLifts,
+            dateOfBirth: dateOfBirthDate.map(Self.dobFormatter.string(from:)),
+            anchorSessionName: anchorSessionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : anchorSessionName,
+            anchorSessionDays: Array(anchorSessionDays)
         )
 
         let currentInjuryTags = Array(injuryTags)
@@ -1369,6 +1656,21 @@ struct ProfileView: View {
             defer { isSaving = false }
             do {
                 try await SupabaseClient.shared.updateProfile(id: userId, profile: profile)
+            } catch {
+                // Distinct from the injury-report failure below -- real
+                // feedback: "when user updates the region, the app showed
+                // an error 'Couldn't save profile. Try again.'" One shared
+                // catch around both calls meant a reportInjury-only
+                // failure (e.g. an invalid legacy severity value) showed
+                // this exact message even when the actual field being
+                // edited -- like region -- had already saved successfully
+                // moments earlier. Bail out here before reportInjury runs,
+                // so a genuine profile-fields failure is reported
+                // accurately and isn't masked by/blamed on injury state.
+                errorMessage = "Couldn't save profile. Try again."
+                return
+            }
+            do {
                 try await SupabaseClient.shared.reportInjury(
                     tags: currentInjuryTags,
                     severity: currentInjurySeverity,
@@ -1377,7 +1679,10 @@ struct ProfileView: View {
                 )
                 savedConfirmation = true
             } catch {
-                errorMessage = "Couldn't save profile. Try again."
+                // Profile fields (region, goals, equipment, etc.) DID save
+                // above -- only the injury-tag write failed, so say that
+                // specifically rather than implying nothing was saved.
+                errorMessage = "Profile saved, but couldn't update injury info. Try again."
             }
         }
     }
@@ -1396,18 +1701,23 @@ private enum ProfileSection: String, CaseIterable, Identifiable {
 }
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region
+    case experience, goals, equipment, kitchenEquipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession, cycleTracking
     var id: String { rawValue }
     var title: String {
         switch self {
         case .experience: "Experience"
         case .goals: "Goals"
         case .equipment: "Equipment & access"
+        case .kitchenEquipment: "Kitchen equipment"
         case .weeklyTarget: "Weekly target"
         case .injuries: "Injuries"
         case .pregnancy: "Pregnancy"
         case .contactEmail: "Contact email"
         case .region: "Region"
+        case .knownLifts: "Your current lifts"
+        case .dateOfBirth: "Date of birth"
+        case .anchorSession: "Weekly anchor session"
+        case .cycleTracking: "Cycle tracking"
         }
     }
 }

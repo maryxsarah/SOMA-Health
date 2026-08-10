@@ -13,6 +13,7 @@ struct NutritionView: View {
     @State private var errorMessage: String?
     @State private var showLogSheet = false
     @State private var showGoalBodyProgress = false
+    @State private var showMealRecommendation = false
     @State private var selectedEntry: MealLogEntry?
     /// Guards against firing a second rate-meal call for the same entry
     /// while one is already in flight (loadEntries() re-runs the
@@ -30,6 +31,7 @@ struct NutritionView: View {
                     } else if let target {
                         let progress = NutritionDayProgress.compute(entries: entries, target: target)
                         progressSection(progress)
+                        mealIdeaCard(progress)
                         logSection
                     } else {
                         emptyStateSection
@@ -72,6 +74,12 @@ struct NutritionView: View {
         }) {
             GoalBodyProgressView()
         }
+        .sheet(isPresented: $showMealRecommendation, onDismiss: {
+            // Picks up a meal logged via "Log this meal" in there.
+            Task { await loadEntries() }
+        }) {
+            MealRecommendationView(remaining: target.map { NutritionDayProgress.compute(entries: entries, target: $0) })
+        }
         .sheet(item: $selectedEntry, onDismiss: {
             // Picks up a score/rationale MealDetailView may have just
             // computed lazily (an older, never-rated entry).
@@ -83,11 +91,16 @@ struct NutritionView: View {
 
     // MARK: - Empty state (no target computed yet)
 
+    /// Reached only once the silent weight-only attempt in load() has
+    /// already come back empty -- i.e. weight/height/goal-weight aren't
+    /// all on file (normally collected at onboarding, so this is the
+    /// rare case, not the common one). Copy reflects that photos are one
+    /// option now, not a requirement.
     private var emptyStateSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Get your daily targets.")
                 .font(Theme.display)
-            Text("Add a goal photo and a current photo -- Soma uses them to work out a calorie and macro target that actually fits where you are today and where you're headed.")
+            Text("Soma computes this from your weight, height, and goal weight -- normally already on file from onboarding. Add goal photos for an even more tailored target, or make sure those numbers are filled in.")
                 .font(.body)
                 .foregroundStyle(.secondary)
             Button {
@@ -135,6 +148,38 @@ struct NutritionView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// "What can I make?" entry point -- sits right under today's bars so
+    /// the remaining-macro numbers it feeds MealRecommendationView are
+    /// visibly the same ones just shown above, not a disconnected feature.
+    private func mealIdeaCard(_ progress: NutritionDayProgress) -> some View {
+        Button {
+            showMealRecommendation = true
+        } label: {
+            CardView {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill(SomaTokens.accentSoft).frame(width: 40, height: 40)
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(SomaTokens.accent)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("What can I make?")
+                            .font(.system(size: 14.5, weight: .semibold))
+                            .foregroundStyle(SomaTokens.ink)
+                        Text("Tell Soma what's in your fridge -- get one full recipe, sized to what's left today.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private static let proteinColor = Color(red: 0.90, green: 0.35, blue: 0.40)
@@ -246,6 +291,18 @@ struct NutritionView: View {
         isLoading = true
         errorMessage = nil
         target = try? await SupabaseClient.shared.fetchNutritionTargets()
+        // No target yet doesn't necessarily mean "never set up goal
+        // photos" -- analyze-body-photo can now also derive a target from
+        // just the weight/goal-weight already collected at onboarding, no
+        // photos required (real feedback: "a lot of users likely won't
+        // want to upload their photos, and calories can already be
+        // estimated roughly from the target weight and the current one").
+        // One silent attempt, then re-check -- a user with neither weight
+        // nor photos on file still lands on the real empty state below.
+        if target == nil {
+            try? await SupabaseClient.shared.analyzeBodyPhotos()
+            target = try? await SupabaseClient.shared.fetchNutritionTargets()
+        }
         if target != nil {
             await loadEntries()
         }

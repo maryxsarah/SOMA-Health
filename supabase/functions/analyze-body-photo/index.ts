@@ -39,7 +39,13 @@ import { extractOutputText } from "../_shared/openai.ts";
 import { GOAL_TAG_VOCABULARY, normalizeGoalTags } from "../_shared/goalTags.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { ADULT_AGE, ageFromDOB } from "../_shared/age.ts";
-import { activityLevelFromWorkoutsPerWeek, computeNutritionTargets, type TrainingEmphasis } from "../_shared/nutritionTargets.ts";
+import {
+  activityLevelFromWorkoutsPerWeek,
+  computeNutritionTargets,
+  isMeasuredBmrFresh,
+  trainingEmphasisFromWeights,
+  type TrainingEmphasis,
+} from "../_shared/nutritionTargets.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MODEL_PRIMARY = "gpt-5.6-luna";
@@ -98,7 +104,7 @@ Deno.serve(async (req: Request) => {
     const { data: userRow, error: readError } = await supabase
       .from("users")
       .select(
-        "goal_body_photo_path, current_body_photo_path, body_photo_emphasis_source_goal_path, body_photo_emphasis_source_current_path, body_photo_emphasis_tags, training_emphasis, body_photo_emphasis_low_confidence, date_of_birth, weight_kg, height_cm, sex, workouts_per_week",
+        "goal_body_photo_path, current_body_photo_path, body_photo_emphasis_source_goal_path, body_photo_emphasis_source_current_path, body_photo_emphasis_tags, training_emphasis, body_photo_emphasis_low_confidence, date_of_birth, weight_kg, desired_weight_kg, height_cm, sex, workouts_per_week",
       )
       .eq("id", userId)
       .maybeSingle();
@@ -112,9 +118,41 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ skipped: true, reason: "not_confirmed_adult" });
     }
 
+    const nutritionInputs: NutritionInputs = {
+      dob,
+      weightKg: userRow?.weight_kg as number | null,
+      heightCm: userRow?.height_cm as number | null,
+      sex: userRow?.sex as string | null,
+      workoutsPerWeek: userRow?.workouts_per_week as string | null,
+    };
+
     const goalPath = userRow?.goal_body_photo_path as string | null;
     const currentPath = userRow?.current_body_photo_path as string | null;
     if (!goalPath || !currentPath) {
+      // No vision comparison possible without both photos -- but
+      // training_emphasis (and therefore nutrition targets) doesn't
+      // actually need one. Real feedback: "a lot of users likely won't
+      // want to upload their photos, and calories can already be
+      // estimated roughly from the target weight and the current one."
+      // Falls back to a deterministic weight-only direction. Never
+      // touches emphasis_tags (a vision-only signal) or overwrites a
+      // training_emphasis a real photo comparison already produced --
+      // once real photos exist, they own this field.
+      if (userRow?.training_emphasis === null) {
+        const fallbackEmphasis = trainingEmphasisFromWeights(
+          nutritionInputs.weightKg,
+          userRow?.desired_weight_kg as number | null,
+        );
+        if (fallbackEmphasis !== null) {
+          const { error: updateError } = await supabase
+            .from("users")
+            .update({ training_emphasis: fallbackEmphasis })
+            .eq("id", userId);
+          if (updateError) throw new Error(`could not write training_emphasis: ${updateError.message}`);
+          await maybeUpdateNutritionTargets(supabase, userId, fallbackEmphasis, nutritionInputs);
+          return jsonResponse({ ok: true, source: "weight_estimate" });
+        }
+      }
       return jsonResponse({ skipped: true, reason: "missing_photo" });
     }
 
@@ -164,13 +202,7 @@ Deno.serve(async (req: Request) => {
     // cycle rather than failing the whole request (the emphasis-tag write
     // above already succeeded and should not be rolled back for this).
     if (trainingEmphasis !== null) {
-      await maybeUpdateNutritionTargets(supabase, userId, trainingEmphasis, {
-        dob,
-        weightKg: userRow?.weight_kg as number | null,
-        heightCm: userRow?.height_cm as number | null,
-        sex: userRow?.sex as string | null,
-        workoutsPerWeek: userRow?.workouts_per_week as string | null,
-      });
+      await maybeUpdateNutritionTargets(supabase, userId, trainingEmphasis, nutritionInputs);
     }
 
     // Deliberately not returning tags/training_emphasis/confidence -- see
@@ -194,6 +226,35 @@ interface NutritionInputs {
   heightCm: number | null;
   sex: string | null;
   workoutsPerWeek: string | null;
+}
+
+/// Most recent HealthKit-sourced basal_energy_kcal for this user, if any
+/// exists and is fresh enough (see nutritionTargets.ts's
+/// MEASURED_BMR_MAX_AGE_DAYS) -- null for a user with no Apple Watch, a
+/// device that's never reported basalEnergyBurned, or a reading too old to
+/// trust. Non-fatal on read error: a measured BMR is a nice-to-have
+/// upgrade to the formula, never a hard requirement for nutrition targets
+/// to compute at all.
+// deno-lint-ignore no-explicit-any
+async function fetchMeasuredBmrKcal(supabase: any, userId: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase
+      .from("daily_snapshot")
+      .select("date, basal_energy_kcal")
+      .eq("user_id", userId)
+      .eq("source", "healthkit")
+      .not("basal_energy_kcal", "is", null)
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    if (!isMeasuredBmrFresh(data.date, today)) return null;
+    return data.basal_energy_kcal as number;
+  } catch (e) {
+    console.error(`measured BMR lookup failed for ${userId}: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
 }
 
 // deno-lint-ignore no-explicit-any
@@ -220,6 +281,8 @@ async function maybeUpdateNutritionTargets(
       return;
     }
 
+    const measuredBmrKcal = await fetchMeasuredBmrKcal(supabase, userId);
+
     const targets = computeNutritionTargets({
       weightKg: inputs.weightKg,
       heightCm: inputs.heightCm,
@@ -227,6 +290,7 @@ async function maybeUpdateNutritionTargets(
       sex,
       activityLevel: activityLevelFromWorkoutsPerWeek(inputs.workoutsPerWeek),
       trainingEmphasis,
+      measuredBmrKcal,
     });
 
     const { error } = await supabase

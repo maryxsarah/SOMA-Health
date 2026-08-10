@@ -17,6 +17,11 @@ export interface HealthKitPayload {
   sleepDeepHours?: number;
   sleepRemHours?: number;
   sleepAwakeHours?: number;
+  // Trailing-24h basalEnergyBurned (kcal) -- persisted to daily_snapshot for
+  // nutritionTargets.ts's measured-BMR override (see
+  // docs/coaching-personalization-plan.md Phase 1), not used by the
+  // band-scoring logic below.
+  basalEnergyKcal?: number;
 }
 
 /**

@@ -115,7 +115,11 @@ function conceptInvolvesHangs(concept: GoalWorkConcept): boolean {
 
 /// Schedule check shared by preset and custom goals (spec: the scheduling
 /// rules are "also available to preset goals"). Category-independent.
-function isScheduledToday(goal: GoalState, date: string, recentGoalBlocks: GoalBlockHistoryEntry[]): boolean {
+/// Exported for describeUpcomingGoalWork below, which reuses it unchanged
+/// against future dates -- the same weekday/every-other-day/court-day math
+/// that governs TODAY'S placement is exactly what makes a future date
+/// predictable at all.
+export function isScheduledToday(goal: GoalState, date: string, recentGoalBlocks: GoalBlockHistoryEntry[]): boolean {
   const dow = utcWeekday(date);
   switch (goal.scheduleRule) {
     case "weekdays":
@@ -222,6 +226,69 @@ export function decideGoalWork(input: GoalWorkInput): GoalWorkBlock | null {
   }
   console.warn(`goalWork: goal ${goal.id} -- exclusions emptied the "${category}" pick, substituting safe concept "${fallback.focus}"`);
   return { kind: "preset", concept: fallback, optional: false, usedSafeFallback: true };
+}
+
+/// Schedule rules whose placement is knowable purely from the calendar --
+/// unlike "readiness" (deferred entirely to a future day's health data,
+/// see isScheduledToday's own case for it) or no rule at all (any day is
+/// fair game, gated only by that day's category). Forward-looking
+/// scheduling only ever fires for these three: saying "scheduled" about a
+/// day whose real placement depends on data that doesn't exist yet would
+/// be a fabricated certainty, not a real forecast.
+const DETERMINISTIC_SCHEDULE_RULES = new Set(["weekdays", "every_other_day", "before_court_days"]);
+
+export interface UpcomingGoalWorkInput {
+  goal: GoalState;
+  /// Today's date, matching decideGoalWork's own `date` for the same call.
+  date: string;
+  recentGoalBlocks: GoalBlockHistoryEntry[];
+  /// Today's own goal-work decision, already computed by decideGoalWork
+  /// for this same date -- folded into the projected history so an
+  /// every_other_day check for TOMORROW correctly counts a block landing
+  /// TODAY, exactly as it would once today is itself yesterday.
+  todaysDecision: GoalWorkBlock | null;
+  /// Human label for a preset goal (e.g. sport_goals.name) -- null degrades
+  /// to a generic phrase rather than fabricating a name. Ignored for
+  /// custom goals, which use goal.coachName instead.
+  sportGoalName: string | null;
+}
+
+/// One advisory sentence about the NEXT day (within a 2-day lookahead)
+/// the user's active goal program has work scheduled, or null when there's
+/// no active goal, it's paused/not visible to this user, or its placement
+/// isn't knowable this far ahead (see DETERMINISTIC_SCHEDULE_RULES).
+/// Feeds buildPrompt as a soft heads-up only -- it never decides anything
+/// itself, and explicitly must never be allowed to override the day's own
+/// category, injury exclusions, or equipment constraints (buildPrompt's own
+/// wording enforces that at the point this gets embedded).
+export function describeUpcomingGoalWork(input: UpcomingGoalWorkInput): string | null {
+  const { goal, date, recentGoalBlocks, todaysDecision, sportGoalName } = input;
+  if (goal.paused || !goal.sportVisible) return null;
+  if (!goal.scheduleRule || !DETERMINISTIC_SCHEDULE_RULES.has(goal.scheduleRule)) return null;
+
+  // Extend the real history with today's own outcome so a tomorrow-check
+  // sees today as "yesterday" the same way isScheduledToday would once
+  // today has actually passed -- without this, every_other_day would
+  // wrongly re-offer tomorrow right after a block landed today.
+  const history = todaysDecision === null
+    ? recentGoalBlocks
+    : [...recentGoalBlocks, {
+      date,
+      text: todaysDecision.kind === "custom" ? todaysDecision.workoutText : todaysDecision.concept.focus,
+    }];
+
+  const who = goal.kind === "custom"
+    ? (goal.coachName ? `a coach-assigned session with ${goal.coachName}` : "a coach-assigned session")
+    : (sportGoalName ? `${sportGoalName} goal work` : "goal-program work");
+
+  for (let daysAhead = 1; daysAhead <= 2; daysAhead++) {
+    const future = addDaysStr(date, daysAhead);
+    if (isScheduledToday(goal, future, history)) {
+      const when = daysAhead === 1 ? "tomorrow" : "in two days";
+      return `Heads up for later: assuming ${when} doesn't turn out to be a rest day, ${who} is scheduled ${when} -- where today's other constraints allow it, avoid needlessly pre-fatiguing the muscles or energy systems that session will need. Never let this override today's actual category, injury exclusions, or equipment above.`;
+    }
+  }
+  return null;
 }
 
 /// Block phase from elapsed time: foundation through week 3, peak for the

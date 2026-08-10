@@ -99,11 +99,25 @@ enum ExperienceLevel: String, Codable, CaseIterable, Identifiable {
 /// display-only profile info -- the app still signs in only via Sign in
 /// with Apple, this never becomes a password/login credential.
 struct UserProfile: Codable, Equatable {
+    /// Read-only here -- set at onboarding, never edited from ProfileView.
+    /// Exists on this model only to gate the cycle-tracking row's
+    /// visibility (Phase 5: see docs/coaching-personalization-plan.md) to
+    /// the same `sex == "female"` population the underlying guidance
+    /// (sexAwareGuidance.ts) actually uses -- never sent back by
+    /// updateProfile, so it can't accidentally get overwritten from here.
+    var sex: Sex? = nil
     var contactEmail: String?
     var goals: [GoalTag]
     var otherGoalNotes: String?
     var equipment: [EquipmentTag]
     var otherEquipmentNotes: String?
+    /// What the user can cook with -- a hard input to
+    /// generate-meal-recommendation, same "collect once, edit forever"
+    /// shape as `equipment`/`otherEquipmentNotes` above. See
+    /// KitchenEquipmentTag's own doc comment for why this is a separate
+    /// field rather than folded into `equipment`.
+    var householdEquipment: [KitchenEquipmentTag]
+    var otherHouseholdEquipmentNotes: String?
     var injuryTags: [InjuryTag]
     var injuryNotes: String?
     /// Keyed by InjuryTag.rawValue. A tag present in `injuryTags` with no
@@ -123,6 +137,16 @@ struct UserProfile: Codable, Equatable {
     /// Optional, only meaningful when `pregnancy == true`. Drives
     /// trimester-scaled guidance -- see pregnancyGuidance.ts.
     var pregnancyWeek: Int?
+    /// Opt-in cycle-phase tracking (Phase 5: see
+    /// docs/coaching-personalization-plan.md) -- same "self-reported only,
+    /// never assumed" rule as pregnancy above, and same ProfileView-only
+    /// collection point (never onboarding). nil = not opted in. "yyyy-MM-dd",
+    /// same wire format as dateOfBirth.
+    var lastPeriodStartDate: String?
+    /// Optional, only meaningful when `lastPeriodStartDate` is set --
+    /// server falls back to a 28-day population default when absent (see
+    /// _shared/cyclePhaseGuidance.ts).
+    var typicalCycleLengthDays: Int?
     /// Real, user-set weekly session-count goal, shown against actual
     /// progress (workouts logged this week) on the Profile screen. Purely
     /// a personal-tracking display -- not read by any recommendation logic.
@@ -152,8 +176,23 @@ struct UserProfile: Codable, Equatable {
     var heightCm: Double? = nil
     var journeyStage: JourneyStage? = nil
     var blockersNotes: String? = nil
-    /// Read-only (set at onboarding, never edited here) -- "yyyy-MM-dd".
-    /// Exists on this model ONLY for the Goal Body adult-only gate
+    /// Optional, user-stated real working weights for the 5 bilateral
+    /// load-guidance patterns generate-workout-plan's loadGuidance.ts
+    /// uses, keyed the same way (squat_pattern/hinge_pattern/
+    /// overhead_press/horizontal_press/row_pull -- see LiftPattern), kg
+    /// values. When present for a pattern, the AI workout plan uses it
+    /// directly instead of estimating from bodyweight -- real feedback: a
+    /// self-described non-powerlifter was prescribed 125-135kg for a
+    /// deadlift from the population estimate alone.
+    var knownLifts: [String: Double]? = nil
+    /// Set at onboarding -- "yyyy-MM-dd". Also now editable from
+    /// ProfileView's Account section (real feedback traced to this: an
+    /// account created before the onboarding DOB step existed has this
+    /// permanently null with no other way to supply it, which silently
+    /// hides the entire Goal Body photo feature behind AgeGate.isAdult's
+    /// fail-closed default -- read as "the progress picture section is
+    /// gone" rather than "add your birthday to unlock it"). Exists on
+    /// this model ONLY for the Goal Body adult-only gate
     /// (bodyPhotosEditor); every other date-of-birth use is server-side.
     var dateOfBirth: String? = nil
     /// Read-only -- written at onboarding (saveOnboardingSurvey), never
@@ -172,6 +211,15 @@ struct UserProfile: Codable, Equatable {
     /// case here for anyone not yet analyzed).
     var bodyPhotoEmphasisTags: [GoalTag]? = nil
     var trainingEmphasis: TrainingEmphasis? = nil
+    /// A recurring class/activity (e.g. "Hot Yoga") the rest of the week
+    /// gets built around -- Phase 4 (see
+    /// docs/coaching-personalization-plan.md). Editable here, unlike
+    /// weightKg/desiredWeightKg above -- there's no reason to lock it once
+    /// set, same reasoning as heightCm. nil name = no anchor session set.
+    var anchorSessionName: String? = nil
+    /// 0=Sun..6=Sat (JS getUTCDay), same convention SportGoals'
+    /// scheduleDays already uses server-side.
+    var anchorSessionDays: [Int] = []
     /// Read-only, server-assigned at account creation -- the journey
     /// "start date" the goal-progress bar counts elapsed days from. Not a
     /// plan-start date (there isn't a separate one), but close enough: for
@@ -182,11 +230,14 @@ struct UserProfile: Codable, Equatable {
     var createdAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
+        case sex
         case contactEmail = "contact_email"
         case goals
         case otherGoalNotes = "other_goal_notes"
         case equipment
         case otherEquipmentNotes = "other_equipment_notes"
+        case householdEquipment = "household_equipment"
+        case otherHouseholdEquipmentNotes = "other_household_equipment_notes"
         case injuryTags = "injury_tags"
         case injuryNotes = "injury_notes"
         case injurySeverity = "injury_severity"
@@ -195,6 +246,8 @@ struct UserProfile: Codable, Equatable {
         case experienceLevel = "experience_level"
         case pregnancy
         case pregnancyWeek = "pregnancy_week"
+        case lastPeriodStartDate = "last_period_start_date"
+        case typicalCycleLengthDays = "typical_cycle_length_days"
         case weeklySessionTarget = "weekly_session_target"
         case country
         case city
@@ -206,11 +259,14 @@ struct UserProfile: Codable, Equatable {
         case heightCm = "height_cm"
         case journeyStage = "journey_stage"
         case blockersNotes = "blockers_notes"
+        case knownLifts = "known_lifts"
         case dateOfBirth = "date_of_birth"
         case goalPace = "goal_pace"
         case createdAt = "created_at"
         case bodyPhotoEmphasisTags = "body_photo_emphasis_tags"
         case trainingEmphasis = "training_emphasis"
+        case anchorSessionName = "anchor_session_name"
+        case anchorSessionDays = "anchor_session_days"
     }
 
     /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.
@@ -227,13 +283,53 @@ struct UserProfile: Codable, Equatable {
         otherGoalNotes: nil,
         equipment: [],
         otherEquipmentNotes: nil,
+        householdEquipment: [],
+        otherHouseholdEquipmentNotes: nil,
         injuryTags: [],
         injuryNotes: nil,
         experienceLevel: nil,
         pregnancy: nil,
         pregnancyWeek: nil,
+        lastPeriodStartDate: nil,
+        typicalCycleLengthDays: nil,
         weeklySessionTarget: nil,
         goalBodyPhotoPath: nil,
         currentBodyPhotoPath: nil
     )
+}
+
+/// The 5 bilateral movement patterns generate-workout-plan's
+/// loadGuidance.ts prices load guidance around -- same raw values as
+/// that file's LOAD_FRACTION_OF_BODYWEIGHT keys, used as the dictionary
+/// keys in UserProfile.knownLifts. Deliberately no unilateral entries:
+/// nobody tracks a "one-arm dumbbell row max" the way they track a
+/// squat/bench/deadlift number.
+enum LiftPattern: String, CaseIterable, Identifiable {
+    case squatPattern = "squat_pattern"
+    case hingePattern = "hinge_pattern"
+    case overheadPress = "overhead_press"
+    case horizontalPress = "horizontal_press"
+    case rowPull = "row_pull"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .squatPattern: "Squat"
+        case .hingePattern: "Deadlift"
+        case .overheadPress: "Overhead press"
+        case .horizontalPress: "Bench press"
+        case .rowPull: "Row"
+        }
+    }
+
+    var placeholder: String {
+        switch self {
+        case .squatPattern: "e.g. back squat, both legs"
+        case .hingePattern: "e.g. barbell deadlift"
+        case .overheadPress: "e.g. barbell or double-dumbbell, both arms"
+        case .horizontalPress: "e.g. barbell or dumbbell bench, both arms"
+        case .rowPull: "e.g. barbell row, both arms"
+        }
+    }
 }

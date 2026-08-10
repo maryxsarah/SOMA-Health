@@ -35,7 +35,10 @@ import { describeContraindications, type InjurySeverityLevel } from "../_shared/
 import { describePregnancyGuidance } from "../_shared/pregnancyGuidance.ts";
 import { describeVolumeGuidance, type ExperienceLevel } from "../_shared/volumeLandmarks.ts";
 import { describeRirGuidance } from "./rirGuidance.ts";
+import { decideShapingGoalGuidance } from "./shapingGoalGuidance.ts";
+import { describeAnchorSession } from "./anchorSessionGuidance.ts";
 import { describeSexAwareConsiderations, describeSexAwareGoalDoseConsideration } from "./sexAwareGuidance.ts";
+import { type CyclePhaseResult, deriveCyclePhase } from "../_shared/cyclePhaseGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
@@ -44,13 +47,33 @@ import { findDuplicateExerciseNames } from "./planValidation.ts";
 import { buildLoadGuidance } from "./loadGuidance.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
 import { resolveFreeTextEquipment } from "../_shared/equipment.ts";
-import { computeEtaShift, conceptFromRow, decideGoalWork, decideSafetyPause, deriveEtaInputs, derivePhase, type GoalBlockHistoryEntry, type GoalWorkBlock, type GoalWorkConcept } from "./goalWork.ts";
+import { fetchOutdoorSafetyForCity, isOutdoorCardioExerciseName } from "../_shared/weatherSafety.ts";
+import {
+  computeEtaShift,
+  conceptFromRow,
+  decideGoalWork,
+  decideSafetyPause,
+  describeUpcomingGoalWork,
+  deriveEtaInputs,
+  derivePhase,
+  type GoalBlockHistoryEntry,
+  type GoalState,
+  type GoalWorkBlock,
+  type GoalWorkConcept,
+} from "./goalWork.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 // Cheap/fast tier -- appropriate for a short, structured, once-a-day
 // generation task like this one.
 const MODEL = "claude-haiku-4-5";
+
+// Mirrors exerciseLibraryMatch.ts's MIN_CANDIDATES_AFTER_FRESHNESS_EXCLUSION
+// -- never shrink the candidate pool so far a weather-unsafe exercise
+// becomes preferable to what's left. In practice this floor is rarely
+// tested: the exercise library is mostly gym/strength content, so outdoor
+// cardio is a small slice of any given candidate pool.
+const MIN_CANDIDATES_AFTER_WEATHER_EXCLUSION = 5;
 
 // Exercise `name` is constrained to a request-scoped closed vocabulary
 // (see _shared/exerciseLibraryMatch.ts) via a JSON-schema enum so every
@@ -67,6 +90,12 @@ function buildExerciseSchema(candidateNames: string[]) {
       weight_guidance: { type: "string" },
       intensity: { type: "string" },
       duration_minutes: { type: "integer" },
+      // How long to rest AFTER this exercise (between sets/before the next
+      // item) in seconds -- 0 for anything with no meaningful rest (a
+      // stretch, a warm-up cardio item). Informational/display-only:
+      // duration_minutes above already includes rest in its total, so this
+      // is never separately summed into the session duration.
+      rest_seconds: { type: "integer" },
       instructions: { type: "string" },
     },
     required: [
@@ -76,6 +105,7 @@ function buildExerciseSchema(candidateNames: string[]) {
       "weight_guidance",
       "intensity",
       "duration_minutes",
+      "rest_seconds",
       "instructions",
     ],
     additionalProperties: false,
@@ -171,6 +201,30 @@ interface UserRow {
   /// finisher selection and to add one more prompt line. Kept separate
   /// from `goals`, same reasoning as body_photo_emphasis_tags.
   training_emphasis: TrainingEmphasis | null;
+  /// Optional, user-stated real working weights (Profile's "your current
+  /// lifts" section) keyed by the same bilateral pattern names as
+  /// loadGuidance.ts's LOAD_FRACTION_OF_BODYWEIGHT -- when present for a
+  /// pattern, buildLoadGuidance uses it instead of the population-level
+  /// bodyweight-ratio estimate. See that function's own comment for the
+  /// bug this exists to fix.
+  known_lifts: Record<string, number> | null;
+  /// Feeds the outdoor-cardio weather safety check (weatherSafety.ts) --
+  /// real feedback: "when the user is in Dubai, and the temperature ...
+  /// is 42 degrees celsius, SOMA should not recommend a run outside."
+  country: string | null;
+  city: string | null;
+  /// Phase 4 (docs/coaching-personalization-plan.md): a recurring class/
+  /// activity the rest of the week gets built around, set at onboarding or
+  /// from ProfileView. Null name = no anchor session set. See
+  /// anchorSessionGuidance.ts for how these two feed the prompt.
+  anchor_session_name: string | null;
+  anchor_session_days: number[] | null;
+  /// Phase 5 (docs/coaching-personalization-plan.md): opt-in cycle-phase
+  /// tracking, set only from ProfileView (never onboarding, same posture
+  /// as pregnancy/pregnancy_week). Null date = not opted in. See
+  /// _shared/cyclePhaseGuidance.ts for the derivation this feeds.
+  last_period_start_date: string | null;
+  typical_cycle_length_days: number | null;
 }
 
 interface SnapshotRow {
@@ -199,6 +253,11 @@ interface GeneratedExercise {
   weight_guidance: string;
   intensity: string;
   duration_minutes: number;
+  // Nullable here (unlike the schema's own required integer, which Claude
+  // always fills in): buildCoachBlock below hand-builds a placeholder
+  // exercise with no parseable rest prescription and needs an honest "not
+  // known" rather than a fabricated number.
+  rest_seconds: number | null;
   instructions: string;
 }
 interface GeneratedBlock {
@@ -251,6 +310,18 @@ Deno.serve(async (req: Request) => {
     if (safety.flagged) {
       return jsonResponse({ date, safety_flag: true, message: safety.message });
     }
+    // The injury state belongs in the cache key -- same fix already applied
+    // to generate-gym-workout (see that function's own comment on this
+    // exact bug), never carried over here. Without it, a plan generated
+    // before the user noted an injury replayed unchanged after they added
+    // one: a "back" tag added mid-morning never invalidated a deadlift
+    // already cached from a generation minutes earlier, because nothing
+    // about the cache-hit path below ever re-consulted injury state. A
+    // severity edit (mild -> severe) must also miss the cache -- it changes
+    // which keywords get excluded, not just whether any do.
+    const injurySignature =
+      (safety.excludeHighImpact ? "no-impact|" : "") +
+      (safety.excludedKeywords.length > 0 ? "kw:" + [...safety.excludedKeywords].sort().join(",") : "");
 
     // Active sport goal (Sport Goal Programs) -- fetched before the cache
     // read because its state hash joins cache identity below.
@@ -300,9 +371,21 @@ Deno.serve(async (req: Request) => {
     const cachedGoalSignature =
       ((cached?.plan as { goal_signature?: string | null } | undefined)?.goal_signature) ?? null;
     const cachedSelectionLogged = (existingLogs ?? []).some((log) => log.title === selection.title);
+    // Deliberately stricter than the goal-signature null-passes rule above:
+    // a cache row from before this column existed (cachedInjurySignature ===
+    // null) only serves as-is when the user currently has NO active
+    // exclusions (injurySignature === "") -- there is nothing it could have
+    // gotten wrong in that case. If the user currently has an injury
+    // exclusion active, an old-format row can never be verified safe and
+    // regenerates, same as an explicit signature mismatch would.
+    const cachedInjurySignature =
+      ((cached?.plan as { injury_signature?: string | null } | undefined)?.injury_signature) ?? null;
+    const injurySignatureOk = cachedSelectionLogged ||
+      (cachedInjurySignature !== null ? cachedInjurySignature === injurySignature : injurySignature === "");
     if (
       cached && cached.selected_title === selection.title &&
-      (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged)
+      (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged) &&
+      injurySignatureOk
     ) {
       return jsonResponse({ date, category: cached.category, source: cached.source, ...cached.plan });
     }
@@ -347,7 +430,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis")
+      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_session_name, anchor_session_days, last_period_start_date, typical_cycle_length_days")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -355,6 +438,18 @@ Deno.serve(async (req: Request) => {
     if (userReadError) {
       throw new Error(`could not read user personalization: ${userReadError.message}`);
     }
+    // Kicked off here (not awaited yet) so the geocode+weather round trip
+    // overlaps with everything else this handler does before candidate
+    // exercises are actually filtered, below -- awaited only once
+    // candidateExerciseNames exists. Real feedback: "when the user is in
+    // Dubai, and the temperature ... is 42 degrees celsius, SOMA should
+    // not recommend a run outside." Best-effort: resolves to null on any
+    // failure (no city on file, geocoding miss, network error/timeout),
+    // treated identically to "safe" by the caller below.
+    const outdoorSafetyPromise = fetchOutdoorSafetyForCity(
+      (userRow as UserRow | null)?.city ?? null,
+      (userRow as UserRow | null)?.country ?? null,
+    );
 
     const { data: snapshots } = await supabase
       .from("daily_snapshot")
@@ -421,41 +516,74 @@ Deno.serve(async (req: Request) => {
     // words it. Custom (coach's task) blocks stay verbatim, injected below.
     let goalDecision: GoalWorkBlock | null = null;
     let goalExerciseIds: string[] = [];
+    // Advisory-only forward-looking hint (Phase 2: see
+    // docs/coaching-personalization-plan.md) -- null whenever there's no
+    // active goal, or its schedule isn't knowable this far ahead.
+    let upcomingGoalLine: string | null = null;
     if (goalRow) {
       // Independent fetches, so they run in parallel; the safety pause
       // above already settled the goal state they all read against.
       const fromCatalog = goalRow.kind === "preset" && goalRow.goal_id ? goalRow.goal_id : null;
-      const [sportVisible, concepts, recentGoalBlocks, exerciseIds] = await Promise.all([
+      const [sportVisibility, concepts, recentGoalBlocks, exerciseIds] = await Promise.all([
         isGoalSportVisible(supabase, goalRow, userId),
         fromCatalog ? fetchGoalConcepts(supabase, fromCatalog) : Promise.resolve([]),
         fetchRecentGoalBlocks(supabase, userId, date),
         fromCatalog ? fetchGoalExerciseIds(supabase, fromCatalog) : Promise.resolve([]),
       ]);
       goalExerciseIds = exerciseIds;
+      const goalState: GoalState = {
+        id: goalRow.id,
+        kind: goalRow.kind === "custom" ? "custom" : "preset",
+        targetKind: (goalRow.target_kind ?? "metric") as "metric" | "milestone" | "qualitative" | "commitment",
+        phase: goalRow.phase ?? null,
+        paused: goalRow.status === "paused",
+        sportVisible: sportVisibility.visible,
+        // deno-lint-ignore no-explicit-any
+        scheduleRule: (goalRow.schedule_rule ?? null) as any,
+        scheduleDays: goalRow.schedule_days ?? null,
+        courtDays: goalRow.court_days ?? null,
+        workoutText: goalRow.workout_text ?? null,
+        coachName: goalRow.coach_name ?? null,
+      };
       goalDecision = decideGoalWork({
         category,
         date,
-        goal: {
-          id: goalRow.id,
-          kind: goalRow.kind === "custom" ? "custom" : "preset",
-          targetKind: (goalRow.target_kind ?? "metric") as "metric" | "milestone" | "qualitative" | "commitment",
-          phase: goalRow.phase ?? null,
-          paused: goalRow.status === "paused",
-          sportVisible,
-          // deno-lint-ignore no-explicit-any
-          scheduleRule: (goalRow.schedule_rule ?? null) as any,
-          scheduleDays: goalRow.schedule_days ?? null,
-          courtDays: goalRow.court_days ?? null,
-          workoutText: goalRow.workout_text ?? null,
-          coachName: goalRow.coach_name ?? null,
-        },
+        goal: goalState,
         concepts,
         excludedKeywords: goalExcludedKeywords,
         recentGoalBlocks,
       });
+      upcomingGoalLine = describeUpcomingGoalWork({
+        goal: goalState,
+        date,
+        recentGoalBlocks,
+        todaysDecision: goalDecision,
+        sportGoalName: sportVisibility.name,
+      });
       const profilePerWeek = Number.parseInt((userRow as UserRow | null)?.workouts_per_week ?? "", 10);
       await maybeUpdateEtaSlip(supabase, goalRow, userId, date, Number.isFinite(profilePerWeek) ? profilePerWeek : null);
     }
+
+    // Phase 4 (docs/coaching-personalization-plan.md): purely advisory,
+    // same "never overrides safety/category" framing as upcomingGoalLine --
+    // independent of the goal-work machinery above (no user_goal row
+    // needed), so it's computed here rather than inside that `if (goalRow)`
+    // block.
+    const anchorSessionLine = describeAnchorSession({
+      name: (userRow as UserRow | null)?.anchor_session_name ?? null,
+      days: (userRow as UserRow | null)?.anchor_session_days ?? [],
+      date,
+    });
+
+    // Phase 5 (docs/coaching-personalization-plan.md): null whenever the
+    // user hasn't opted in (no last_period_start_date) or the projection
+    // is too stale to trust -- describeSexAwareConsiderations treats null
+    // identically to "not opted in" either way, same fallback line.
+    const cyclePhase = deriveCyclePhase(
+      (userRow as UserRow | null)?.last_period_start_date ?? null,
+      (userRow as UserRow | null)?.typical_cycle_length_days ?? null,
+      date,
+    );
 
     const prompt = buildPrompt(
       category,
@@ -467,6 +595,9 @@ Deno.serve(async (req: Request) => {
       (snapshots ?? []) as SnapshotRow[],
       (recentLogs ?? []) as WorkoutLogRow[],
       notes,
+      upcomingGoalLine,
+      anchorSessionLine,
+      cyclePhase,
     );
 
     // Goal-mapped exercise ids join the closed vocabulary inside, under
@@ -485,7 +616,7 @@ Deno.serve(async (req: Request) => {
     // same workout, day after day. Soft-excluded, see
     // MIN_CANDIDATES_AFTER_FRESHNESS_EXCLUSION.
     const recentExerciseNames = await fetchRecentExerciseNames(supabase, userId, selection.title, date);
-    const candidateExerciseNames = await fetchCandidateExerciseNames(
+    let candidateExerciseNames = await fetchCandidateExerciseNames(
       supabase,
       resolvedBodyPart,
       (userRow as UserRow | null)?.equipment ?? [],
@@ -497,6 +628,21 @@ Deno.serve(async (req: Request) => {
       recentExerciseNames,
       freeTextEquipment.cardioLibraryEquipment,
     );
+    // Post-filter rather than folded into fetchCandidateExerciseNames's own
+    // excludedKeywords param -- that mechanism is plain substring matching
+    // with no equipment-awareness, which would also drop safe indoor
+    // equivalents (see weatherSafety.ts's isOutdoorCardioExerciseName doc
+    // comment for why). Same "never shrink to a degenerate pool" guard as
+    // the freshness exclusion in exerciseLibraryMatch.ts.
+    const outdoorSafety = await outdoorSafetyPromise;
+    let weatherUnsafeNote: string | null = null;
+    if (outdoorSafety && !outdoorSafety.safe) {
+      const withoutOutdoorCardio = candidateExerciseNames.filter((name) => !isOutdoorCardioExerciseName(name));
+      if (withoutOutdoorCardio.length >= MIN_CANDIDATES_AFTER_WEATHER_EXCLUSION) {
+        candidateExerciseNames = withoutOutdoorCardio;
+        weatherUnsafeNote = outdoorSafety.reason ?? null;
+      }
+    }
     const workoutSchema = buildWorkoutSchema(candidateExerciseNames);
 
     let plan = await callClaude(prompt, workoutSchema);
@@ -570,11 +716,20 @@ Deno.serve(async (req: Request) => {
       // Cache identity (see the cache read above) + tomorrow's goal-block
       // history (hangs-never-consecutive-days rule in goalWork.ts).
       goal_signature: goalSignature,
+      // Cache identity -- see the injurySignature comment near the top of
+      // this handler for why this exists at all.
+      injury_signature: injurySignature,
       goal_block: goalBlockMeta(goalDecision),
       // Drives the "Optional finisher -- you're well recovered today"
       // badge client-side (AIWorkoutPlanSections.swift) -- only ever true
       // alongside a block whose is_finisher is also true.
       exceptional_finisher: finisherDecision.exceptional,
+      // Non-null only when outdoor cardio was actually excluded from
+      // today's candidate pool for weather -- surfaced so the client can
+      // say why, same "say it out loud" pattern as every other cap's note.
+      // Cached alongside the plan (not just in the fresh-generation
+      // response) so a same-day cache hit still shows it.
+      weather_note: weatherUnsafeNote,
     };
 
     // A freshly generated plan always starts unconfirmed -- added_to_plan is
@@ -689,6 +844,9 @@ function buildPrompt(
   snapshots: SnapshotRow[],
   recentLogs: WorkoutLogRow[],
   notes: string | undefined,
+  upcomingGoalLine: string | null,
+  anchorSessionLine: string | null,
+  cyclePhase: CyclePhaseResult | null,
 ): string {
   const goals = userRow?.goals?.length ? userRow.goals.join(", ") : "general fitness";
   // A secondary, lower-confidence signal from comparing the user's stored
@@ -721,7 +879,7 @@ function buildPrompt(
   const injuryNotes = userRow?.injury_notes ? ` User's free-text notes: ${userRow.injury_notes}.` : "";
   const experience = userRow?.experience_level ?? "moderate";
   const experienceGuidance = EXPERIENCE_GUIDANCE[experience] ?? EXPERIENCE_GUIDANCE.moderate;
-  const loadGuidance = buildLoadGuidance(userRow?.weight_kg ?? null, experience);
+  const loadGuidance = buildLoadGuidance(userRow?.weight_kg ?? null, experience, userRow?.known_lifts ?? null);
   const ageLine = userRow?.date_of_birth ? `The user is ${ageFromDOB(userRow.date_of_birth)} years old -- use general caution appropriate to their age, but this is context, not a numeric load rule.` : "";
   const sexLine = userRow?.sex ? `Sex: ${userRow.sex}.` : "";
   // Deterministic, trimester-scaled guidance -- never left to the model to
@@ -739,7 +897,28 @@ function buildPrompt(
   const experienceLevel = experience as ExperienceLevel;
   const volumeGuidanceLine = describeVolumeGuidance(experienceLevel, category);
   const rirGuidanceLine = describeRirGuidance(goals, experienceLevel, category);
-  const sexAwareLine = describeSexAwareConsiderations(userRow?.sex ?? null, category);
+  const sexAwareLine = describeSexAwareConsiderations(userRow?.sex ?? null, category, cyclePhase);
+
+  // Phase 3 (docs/coaching-personalization-plan.md): deterministic goal-
+  // specific rep-range + recurring-foundation-movement guidance -- decided
+  // entirely from the user's own goals/body_photo_emphasis_tags/
+  // training_emphasis (same precedence those signals already carry
+  // elsewhere in this prompt), never left to the LLM. Null whenever none
+  // of the three give a recognized shaping goal, or today's category/body
+  // part doesn't call for one -- see decideShapingGoalGuidance's own
+  // "omit rather than fabricate" doc comment.
+  const shapingGoalGuidance = decideShapingGoalGuidance(
+    userRow?.goals ?? null,
+    userRow?.body_photo_emphasis_tags ?? null,
+    userRow?.training_emphasis ?? null,
+    selection.bodyPart,
+    category,
+  );
+  const shapingGoalLine = shapingGoalGuidance
+    ? `\nGoal-specific rep-range guidance for today's working sets (${shapingGoalGuidance.repRangeRationale}): aim for ${shapingGoalGuidance.repRangeLabel} reps on the main movements. Build today's session around these recurring foundation movement patterns for this goal -- reuse the SAME patterns session to session (progressing load/reps over time per the recent-workout history below) rather than inventing new ones each time: ${
+      shapingGoalGuidance.foundationMovements.join("; ")
+    }.${shapingGoalGuidance.hardConstraint ? ` ${shapingGoalGuidance.hardConstraint}` : ""}`
+    : "";
 
   // Free, real signal already collected at onboarding but not previously
   // threaded into this prompt.
@@ -816,8 +995,11 @@ ${sexLine}${ageLine ? `\n${ageLine}` : ""}${pregnancyLine}
 ${loadGuidance}
 ${volumeGuidanceLine ? `\n${volumeGuidanceLine}` : ""}
 ${rirGuidanceLine ? `\n${rirGuidanceLine}` : ""}
+${shapingGoalLine}
 ${sexAwareLine ? `\n${sexAwareLine}` : ""}
 ${workoutsPerWeekLine ? `\n${workoutsPerWeekLine}` : ""}${dietLine ? `\n${dietLine}` : ""}${goalPaceLine ? `\n${goalPaceLine}` : ""}${blockersLine ? `\n${blockersLine}` : ""}${accomplishmentLine ? `\n${accomplishmentLine}` : ""}
+${upcomingGoalLine ? `\n${upcomingGoalLine}` : ""}
+${anchorSessionLine ? `\n${anchorSessionLine}` : ""}
 
 Recent logged workouts (last 14 days, oldest first) -- use this for progressive overload: if the user has repeated an exercise, suggest a sensible progression (more reps, more weight, or more sets) rather than repeating the exact same prescription. If an exercise is new, prescribe a safe, moderate starting point.
 ${historyLines}
@@ -835,7 +1017,7 @@ Return the full session as:
 - blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). VARIETY IS REQUIRED: use each specific named exercise AT MOST ONCE across the ENTIRE session (warm_up + every block + cool_down combined) -- never repeat the same exercise in multiple blocks or rounds of a superset. Like a real strength coach programming a session, deliberately spread the work across different specific muscles within the target body part (e.g. a lower-body day should mix quad-, hamstring-, glute-, and calf-dominant movements, not four variations of the same squat pattern) and different movement patterns (push/pull/hinge/squat/carry/isolation as relevant), not near-duplicates of one exercise. ${finisherInstruction}${goalInstruction}
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
-For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, and instructions (2-3 sentences, plain and easy to follow, describing exact form/technique). Also give a one-line "focus" summarizing today's session.`;
+For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, rest_seconds (integer, real prescriptive rest AFTER this exercise before the next -- roughly 0 for a stretch/warm-up cardio item, 30-60s for lighter accessory/circuit work, 60-90s for standard working sets, 120-180s for heavy compound lifts near the top of the day's intensity; scale it with today's intensity and the user's experience level like a real coach would, don't default to the same number every time), and instructions -- 2-3 plain, easy-to-follow sentences giving EXACT form/technique PLUS one concrete, specific coaching cue for this exact movement (e.g. "brace your core like you're about to be punched in the stomach" or "drive through your mid-foot, not your toes" or "keep your ribs stacked over your hips throughout"). A generic filler cue that could apply to any exercise (e.g. "maintain good form", "focus on technique", "go at your own pace") is NOT acceptable -- the cue must be specific enough that it wouldn't make sense pasted onto a different exercise. Also give a one-line "focus" summarizing today's session.`;
 }
 
 /// Turns whichever provider(s) reported today into a plain-language health
@@ -1142,22 +1324,33 @@ function goalSignatureOf(goalRow: UserGoalRow | null): string | null {
 /// Per-sport server gate (spec, gating 3): live for everyone, internal for
 /// testers, beta for opt-ins (and testers) -- the same rule as the
 /// sport_status_visible() RLS helper. Fails closed on any unknown state.
-// deno-lint-ignore no-explicit-any
-async function isGoalSportVisible(supabase: any, goalRow: UserGoalRow, userId: string): Promise<boolean> {
-  if (goalRow.kind === "custom" || !goalRow.goal_id) return true;
+/// Visibility gate, PLUS (new, Phase 2) the sport_goal's own catalog name --
+/// piggybacked onto this same existing round trip rather than adding a
+/// second query just to label describeUpcomingGoalWork's advisory line.
+/// `name` is null for a custom goal (no catalog row to name) or on any
+/// read failure; callers must treat that as "no human label available",
+/// never fabricate one.
+async function isGoalSportVisible(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  goalRow: UserGoalRow,
+  userId: string,
+): Promise<{ visible: boolean; name: string | null }> {
+  if (goalRow.kind === "custom" || !goalRow.goal_id) return { visible: true, name: null };
   const { data, error } = await supabase
     .from("sport_goals")
-    .select("id, sports(status)")
+    .select("id, name, sports(status)")
     .eq("id", goalRow.goal_id)
     .maybeSingle();
   if (error || !data) {
     if (error) console.error(`could not read sport_goals for gating: ${error.message}`);
-    return false;
+    return { visible: false, name: null };
   }
+  const name = ((data as { name?: string }).name as string | undefined) ?? null;
   // deno-lint-ignore no-explicit-any
   const status = ((data as any).sports?.status as string | undefined) ?? null;
-  if (status === "live") return true;
-  if (status !== "internal" && status !== "beta") return false;
+  if (status === "live") return { visible: true, name };
+  if (status !== "internal" && status !== "beta") return { visible: false, name };
   // Roster table, not a users column -- users can edit their own users row
   // and could self-grant (see the internal_testers migration comment).
   const { data: tester, error: testerError } = await supabase
@@ -1167,10 +1360,10 @@ async function isGoalSportVisible(supabase: any, goalRow: UserGoalRow, userId: s
     .maybeSingle();
   if (testerError) {
     console.error(`could not read internal_testers for gating: ${testerError.message}`);
-    return false;
+    return { visible: false, name };
   }
-  if (tester !== null) return true;
-  if (status !== "beta") return false;
+  if (tester !== null) return { visible: true, name };
+  if (status !== "beta") return { visible: false, name };
   // Beta is a self-service opt-in (beta_optins is user-writable by design).
   const { data: optin, error: optinError } = await supabase
     .from("beta_optins")
@@ -1179,9 +1372,9 @@ async function isGoalSportVisible(supabase: any, goalRow: UserGoalRow, userId: s
     .maybeSingle();
   if (optinError) {
     console.error(`could not read beta_optins for gating: ${optinError.message}`);
-    return false;
+    return { visible: false, name };
   }
-  return optin !== null;
+  return { visible: optin !== null, name };
 }
 
 // deno-lint-ignore no-explicit-any
@@ -1281,6 +1474,10 @@ function buildCoachBlock(decision: Extract<GoalWorkBlock, { kind: "custom" }>): 
       // Nominal goal-block midpoint (spec: 10-20 min) -- the coach's text
       // carries no parseable duration in v1.
       duration_minutes: 15,
+      // Same "carries no parseable X in v1" reasoning as duration_minutes
+      // above -- the coach's free text has no parseable rest prescription,
+      // so this is an honest "not known" (null), never a fabricated number.
+      rest_seconds: null,
       instructions: decision.workoutText,
     }],
     is_finisher: false,

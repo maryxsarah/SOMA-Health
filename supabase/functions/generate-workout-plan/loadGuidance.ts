@@ -18,12 +18,25 @@
 // left bilateral-only: a goblet squat or single-kettlebell deadlift still
 // loads the body symmetrically even holding one implement, so the
 // bilateral-total framing already applies correctly there.
+// BUG report: a self-described non-powerlifter ("has nothing to do with
+// powerlifting") was prescribed 125-135kg for a barbell deadlift -- near
+// the OLD "advanced" ceiling of 1.75x bodyweight, which is genuinely
+// elite/competitive-lifter territory for a working set, not just what
+// "several years of consistent training" implies. A simple 3-tier
+// newbie/moderate/advanced self-report has no way to distinguish a
+// serious recreational lifter from an actual competitor, so the
+// "advanced" ceiling was recalibrated down across every bilateral
+// pattern to a more defensible default -- still meaningfully heavier
+// than "moderate", just not assuming elite numbers by default. A user
+// who genuinely knows their own working weight can now say so directly
+// (see buildLoadGuidance's knownLifts param) and that real number always
+// wins over this population-level estimate.
 const LOAD_FRACTION_OF_BODYWEIGHT: Record<string, Record<string, [number, number]>> = {
-  squat_pattern: { newbie: [0.3, 0.6], moderate: [0.5, 1.0], advanced: [0.75, 1.5] },
-  hinge_pattern: { newbie: [0.4, 0.7], moderate: [0.6, 1.2], advanced: [0.9, 1.75] },
-  overhead_press: { newbie: [0.15, 0.3], moderate: [0.25, 0.45], advanced: [0.35, 0.6] },
-  horizontal_press: { newbie: [0.25, 0.5], moderate: [0.4, 0.7], advanced: [0.55, 1.0] },
-  row_pull: { newbie: [0.2, 0.4], moderate: [0.35, 0.6], advanced: [0.5, 0.85] },
+  squat_pattern: { newbie: [0.3, 0.6], moderate: [0.5, 1.0], advanced: [0.7, 1.25] },
+  hinge_pattern: { newbie: [0.4, 0.7], moderate: [0.6, 1.1], advanced: [0.8, 1.4] },
+  overhead_press: { newbie: [0.15, 0.3], moderate: [0.25, 0.45], advanced: [0.32, 0.55] },
+  horizontal_press: { newbie: [0.25, 0.5], moderate: [0.4, 0.7], advanced: [0.5, 0.9] },
+  row_pull: { newbie: [0.2, 0.4], moderate: [0.35, 0.6], advanced: [0.45, 0.75] },
   // Per-implement weight for a ONE-ARM/ONE-SIDE-AT-A-TIME variant (e.g.
   // "Alternating Kettlebell Row", "One-Arm Dumbbell Row", "Single-Arm
   // Overhead Press", "One-Arm Floor Press") -- NOT half of the bilateral
@@ -42,12 +55,34 @@ export function loadFractionRange(pattern: string, level: string): [number, numb
 /// Guideline load ranges for today's experience level, as a prompt-ready
 /// paragraph -- omitted entirely when bodyweight is unknown rather than
 /// guessing a number.
-export function buildLoadGuidance(weightKg: number | null, experience: string): string {
+///
+/// `knownLifts` is optional, per-pattern real working weights the user
+/// stated themselves (Profile's "your current lifts" section, keyed by
+/// the same 5 bilateral pattern names as LOAD_FRACTION_OF_BODYWEIGHT
+/// above) -- when present for a pattern, it always replaces the
+/// population-level bodyweight-ratio estimate for THAT pattern, since an
+/// actual number beats any estimate. Unilateral variants have no
+/// equivalent -- nobody tracks a "one-arm dumbbell row max" -- so those
+/// always stay population-based.
+export function buildLoadGuidance(
+  weightKg: number | null,
+  experience: string,
+  knownLifts?: Record<string, number> | null,
+): string {
   if (weightKg === null) {
     return "The user's bodyweight isn't on file -- for any barbell/dumbbell/kettlebell working set, use conservative, experience-appropriate language ('start light and build') instead of a specific number.";
   }
   const level = LOAD_FRACTION_OF_BODYWEIGHT.squat_pattern[experience] ? experience : "moderate";
   const range = (pattern: string) => {
+    const known = knownLifts?.[pattern];
+    if (typeof known === "number" && known > 0) {
+      // A real stated working weight, not an estimate -- +/-10% band
+      // around it rather than a bare single number, same "a range, not a
+      // strict ceiling" framing as the population estimate below.
+      const low = known * 0.9;
+      const high = known * 1.1;
+      return `${low.toFixed(0)}-${high.toFixed(0)}kg (the user told us this directly -- use it as-is, do not second-guess it against bodyweight)`;
+    }
     const [low, high] = loadFractionRange(pattern, level);
     return `${(low * weightKg).toFixed(0)}-${(high * weightKg).toFixed(0)}kg`;
   };

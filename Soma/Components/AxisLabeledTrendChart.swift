@@ -130,7 +130,10 @@ struct AxisLabeledTrendChart: View {
 /// closed down to the bottom edge -- the shape a gradient fill needs.
 /// Kept separate from TrendLineShape rather than modifying it, since that
 /// shape is shared with onboarding's own (stroke-only) trend visuals.
-private struct TrendAreaShape: Shape {
+/// Internal (not file-private): OnboardingCharts.swift's
+/// GoalTrajectoryChartView reuses it for the exact same gradient-fill
+/// purpose rather than duplicating this shape a second time.
+struct TrendAreaShape: Shape {
     var points: [CGPoint]
 
     func path(in rect: CGRect) -> Path {

@@ -50,10 +50,20 @@ struct SomaApp: App {
             }
             // Whoop/Oura/Google OAuth all complete via ASWebAuthenticationSession's
             // own in-process callback, not a deep link back into the app, so
-            // this is exclusively for Superwall paywall previews/campaign
-            // deep links -- no risk of double-handling an OAuth callback.
+            // this remains Superwall's alone -- except the one universal
+            // link this app owns (the signup-confirmation email's "Commit
+            // now to your goal" button), handled separately below rather
+            // than forwarded to Superwall.
             .onOpenURL { url in
-                Superwall.handleDeepLink(url)
+                // www, not bare -- must match Config.emailConfirmationRedirectURL
+                // and the Associated Domains entitlement exactly. See
+                // either's doc comment for why (soma4health.com
+                // redirects to www, which breaks Apple's AASA fetch).
+                if url.host == "www.soma4health.com", url.path == "/auth/confirm" {
+                    handleEmailConfirmation(url)
+                } else {
+                    Superwall.handleDeepLink(url)
+                }
             }
             // The visual design (white cards, pale-blue gradient, navy
             // pills) is a fixed light aesthetic per spec, not an adaptive
@@ -61,6 +71,40 @@ struct SomaApp: App {
             // invert to white in Dark Mode and become unreadable against
             // the still-light background.
             .preferredColorScheme(.light)
+        }
+    }
+
+    /// Universal-link landing for the branded signup-confirmation email
+    /// (supabase/email-templates/confirm-signup.html's "Commit now to
+    /// your goal" button, via {{ .ConfirmationURL }} -> Supabase's hosted
+    /// verify endpoint -> this URL). Establishes the session and advances
+    /// exactly like markSignedIn() -- the same next screen (.survey) the
+    /// user would have reached had email confirmation not been required
+    /// in between, rather than app launch/Home.
+    ///
+    /// A tapped-twice or expired link fails here (Supabase redirects an
+    /// invalid token to this same URL with `error_description` in the
+    /// query instead of tokens in the fragment) -- surfaced via
+    /// sessionManager.errorMessage, the same slot OnboardingView already
+    /// shows sign-in failures in, since that's where this always lands
+    /// (screen is still .onboarding until a session is actually
+    /// established).
+    private func handleEmailConfirmation(_ url: URL) {
+        guard let fragment = url.fragment else {
+            let description = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "error_description" }?.value
+            sessionManager.errorMessage = description?.removingPercentEncoding
+                ?? "That confirmation link has expired. Sign up again to get a new one."
+            return
+        }
+        Task {
+            do {
+                try await SupabaseClient.shared.completeEmailConfirmation(fragment: fragment)
+                AnalyticsManager.shared.signupCompleted()
+                appState.markSignedIn()
+            } catch {
+                sessionManager.errorMessage = "That confirmation link didn't work. Try signing up again."
+            }
         }
     }
 }

@@ -43,4 +43,10 @@ struct NutritionDayProgress {
     var fatFraction: Double { Self.fraction(consumed: consumedFatG, target: targetFatG) }
 
     var caloriesRemaining: Int { max(0, targetCalories - consumedCalories) }
+    /// Same "clamp to 0, never show a negative remaining" rule as
+    /// caloriesRemaining -- feeds MealRecommendationView's "does this
+    /// meal fit what's left today" comparison.
+    var proteinRemainingG: Int { max(0, targetProteinG - consumedProteinG) }
+    var carbsRemainingG: Int { max(0, targetCarbsG - consumedCarbsG) }
+    var fatRemainingG: Int { max(0, targetFatG - consumedFatG) }
 }

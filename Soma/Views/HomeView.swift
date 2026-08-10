@@ -4,6 +4,7 @@ import SwiftUI
 /// Screen 4 -- Home. No text input, no chat history, no voice button.
 struct HomeView: View {
     @EnvironmentObject private var appState: AppState
+    @ObservedObject private var checklistRouter = ChecklistDeepLinkRouter.shared
 
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -15,6 +16,28 @@ struct HomeView: View {
     @State private var todaysWorkoutLog: WorkoutLogEntry?
     @State private var completedDates: Set<String> = []
     @State private var goalTrainingDates: Set<String> = []
+    // Manual activity logging (real feedback: users want to log a sport
+    // session -- soccer, volleyball, hot yoga -- outside the AI plan).
+    // showManualWorkoutDetail routes "see today's workout" to
+    // CompletedWorkoutView instead of RecommendationDetailView whenever
+    // todaysWorkoutLog.source == "manual", since that view has no
+    // suggestion titles to match a manually-logged activity against.
+    @State private var showLogManualWorkout = false
+    @State private var showManualWorkoutDetail = false
+
+    // Daily "how are you feeling?" check-in -- real feedback: "some
+    // human-level metric that the app optimizes ... showing that the
+    // metric improves with app usage." Trend view lives on the Health
+    // Dashboard's Overview tab; this card is just the daily capture.
+    @State private var todaysMood: DailyMoodEntry?
+    @State private var isSavingMood = false
+    /// Real feedback: "when the user taps on one of the emojis ... nothing
+    /// happens." logMood used to fail completely silently (the daily_mood
+    /// table not existing yet on a given backend was one real cause, but
+    /// ANY failure -- network, auth -- looked identical to the user: a tap
+    /// that visibly did nothing). Surfacing this turns a mystery bug report
+    /// into something the user can see and retry.
+    @State private var moodError: String?
     @State private var timelineEntries: [WorkoutTimelineEntry] = []
 
     @State private var showGymPhotoFlow = false
@@ -73,6 +96,26 @@ struct HomeView: View {
     @State private var showRestDayOptions = false
     @State private var isSettingRestDayRequest = false
 
+    /// Set while openTodaysWorkoutDetail() is loading today's
+    /// recommendation before it can present anything -- see that
+    /// function's own doc comment. Only the checklist's "Review your
+    /// first plan" row can actually trigger this (the readiness card's
+    /// own buttons never exist until a recommendation is already
+    /// showing); DailyChecklistCardView shows a spinner on the matching
+    /// row instead of its usual chevron while this is set, rather than
+    /// presenting an empty sheet.
+    @State private var checklistLoadingDeepLink: ChecklistDeepLink?
+
+    /// The "How Soma Works" tour, opened from the checklist's "See how
+    /// Soma works" row (first time) -- see handleChecklistDeepLink.
+    @State private var showHowSomaWorks = false
+    /// DailyChecklistCardView owns its own private load() behind a
+    /// .task, with no external refresh hook -- bumping this and applying
+    /// it as the card's .id() is how HomeView forces a reload after the
+    /// tour's completion write, the same way changing a List row's id
+    /// forces SwiftUI to recreate (and thus re-.task) that row.
+    @State private var checklistRefreshToken = 0
+
     var body: some View {
         ScrollView {
             // Guide 03 order: nav pill → greeting → week card → readiness
@@ -86,6 +129,8 @@ struct HomeView: View {
                 greetingBlock
 
                 weekCard
+
+                dailyChecklistCard
 
                 if showSportGoalPromo {
                     sportGoalPromoCard
@@ -104,6 +149,8 @@ struct HomeView: View {
                 } else if let todaysAIPlan, todaysAIPlan.addedToPlan {
                     aiGeneratedWorkoutCard(todaysAIPlan)
                 }
+
+                moodCheckInRow
 
                 scanRow
 
@@ -132,10 +179,12 @@ struct HomeView: View {
             await completedDatesFetch
             await goalTrainingDatesFetch
             await loadTimeline()
+            await autoLogDeviceDetectedWorkoutIfNeeded()
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
             await loadGoalBodyPhotoState()
             await loadNutritionState()
+            await loadTodaysMood()
         }
         .refreshable {
             await checkNow()
@@ -148,9 +197,11 @@ struct HomeView: View {
             await completedDatesFetch
             await goalTrainingDatesFetch
             await loadTimeline()
+            await autoLogDeviceDetectedWorkoutIfNeeded()
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
             await loadNutritionState()
+            await loadTodaysMood()
         }
         .sheet(isPresented: $showDetail, onDismiss: {
             Task {
@@ -184,8 +235,30 @@ struct HomeView: View {
         }) {
             NutritionView()
         }
+        .sheet(isPresented: $showLogManualWorkout, onDismiss: {
+            Task {
+                await loadTodaysWorkoutLog()
+                await loadCompletedDates()
+                await loadWeeklyProgressAndStreak()
+            }
+        }) {
+            LogManualWorkoutView()
+        }
+        .sheet(isPresented: $showManualWorkoutDetail) {
+            if let todaysWorkoutLog {
+                CompletedWorkoutView(log: todaysWorkoutLog, isBestReadinessDay: isBestReadinessDay) { updated in
+                    self.todaysWorkoutLog = updated
+                }
+            }
+        }
         .sheet(isPresented: $showHealthDashboard) {
             HealthDashboardView()
+        }
+        .sheet(isPresented: $showHowSomaWorks) {
+            HowSomaWorksTourView(onFinish: {
+                showHowSomaWorks = false
+                Task { await completeHowSomaWorksItem() }
+            })
         }
         .sheet(isPresented: $showSportGoalScreen, onDismiss: {
             Task { await loadSportGoal() }
@@ -268,6 +341,20 @@ struct HomeView: View {
                 DayDetailView(date: selectedDay, recentRecommendations: recentRecommendations)
             }
         }
+        .onChange(of: checklistRouter.pending) { _, newValue in
+            guard let newValue else { return }
+            handleChecklistDeepLink(newValue)
+            checklistRouter.pending = nil
+        }
+        .onAppear {
+            // Covers the cold-launch case (app wasn't already running when
+            // the notification was tapped) -- onChange alone only fires
+            // for a value that changes while this view already exists.
+            if let pending = checklistRouter.pending {
+                handleChecklistDeepLink(pending)
+                checklistRouter.pending = nil
+            }
+        }
     }
 
     /// The Home card (today's category + message) always stays free --
@@ -283,6 +370,68 @@ struct HomeView: View {
             return
         }
         Superwall.shared.register(placement: "detail_access", feature: action)
+    }
+
+    /// The single routing decision for "what does today's workout look
+    /// like right now" -- the readiness card's own "Start workout"/"Check
+    /// workout details" buttons both call this (see readinessCard) rather
+    /// than each re-implementing the branch, and the checklist's
+    /// "Review your first plan" deep link (.startWorkout) reuses it too,
+    /// which is the fix this doc comment exists to explain:
+    ///
+    /// Previously this function ONLY handled the "something is already
+    /// logged" case (the two branches below) -- correct for the readiness
+    /// card, since its "Check workout details" button only ever exists
+    /// once todaysWorkoutLog is non-nil. But the checklist's "Review your
+    /// first plan" row is tappable for a brand-new user with NO log yet
+    /// (that's the entire premise of the row), and calling this same
+    /// function unconditionally fell into the `else` branch below,
+    /// presenting CompletedWorkoutView with a nil log -- a blank sheet
+    /// (its own `if let todaysWorkoutLog` guard just rendered nothing).
+    ///
+    /// Three real destinations now:
+    ///   - Nothing logged yet -> today's plan/"why" (RecommendationDetailView),
+    ///     same content the readiness card's "Start workout" button shows.
+    ///     Needs appState.currentRecommendation loaded first -- unlike the
+    ///     readiness card (which never renders its buttons until a
+    ///     recommendation already exists), the checklist card can be
+    ///     tapped before HomeView's own load finishes, so this loads it
+    ///     on demand (with checklistLoadingDeepLink driving a spinner on
+    ///     the tapped row) rather than presenting an empty sheet.
+    ///   - Logged via the AI plan -> the same RecommendationDetailView,
+    ///     which renders its own "already completed" state.
+    ///   - Logged manually or auto-detected -> CompletedWorkoutView, the
+    ///     generic completed-activity screen (no AI suggestion titles to
+    ///     match against). Same paywall gate in every case.
+    private func openTodaysWorkoutDetail() {
+        guard todaysWorkoutLog != nil else {
+            guard appState.currentRecommendation != nil else {
+                guard checklistLoadingDeepLink == nil else { return } // already loading
+                checklistLoadingDeepLink = .startWorkout
+                Task {
+                    await loadTodaysRecommendation()
+                    checklistLoadingDeepLink = nil
+                    if appState.currentRecommendation != nil {
+                        requestDetailAccess { showDetail = true }
+                    }
+                    // A failed load leaves currentRecommendation nil and
+                    // simply does nothing further here -- no worse than
+                    // the row not responding, never an empty sheet.
+                }
+                return
+            }
+            requestDetailAccess { showDetail = true }
+            return
+        }
+        if todaysWorkoutLog?.source == "ai_plan" {
+            requestDetailAccess { showDetail = true }
+        } else {
+            requestDetailAccess { showManualWorkoutDetail = true }
+        }
+    }
+
+    private var isBestReadinessDay: Bool {
+        CalendarStripView.bestReadinessDate(among: recentRecommendations) == Self.todayDateString()
     }
 
     /// guide 02: pill top-left (opposite the gear), badge top-right --
@@ -376,6 +525,70 @@ struct HomeView: View {
         }
     }
 
+    /// Reuses signals HomeView already loads for its own cards (mood,
+    /// workout log, connected providers, today's recommendation) rather
+    /// than having the checklist card re-fetch them independently -- see
+    /// DailyChecklistCardView's own doc comment on why.
+    private var dailyChecklistCard: some View {
+        DailyChecklistCardView(
+            date: Self.todayDateString(),
+            signals: DailyChecklistCardView.SharedSignals(
+                moodLoggedToday: todaysMood != nil,
+                workoutLoggedToday: todaysWorkoutLog != nil,
+                healthKitConnected: !appState.connectedProviders.isEmpty,
+                hasReviewedFirstPlan: appState.currentRecommendation != nil
+            ),
+            loadingDeepLink: checklistLoadingDeepLink,
+            onDeepLink: handleChecklistDeepLink
+        )
+        .id(checklistRefreshToken)
+    }
+
+    /// Persists the "How Soma Works" tour's completion the exact same way
+    /// every other onboarding checklist item is persisted --
+    /// DailyChecklistCardView.toggleManual's own call, just invoked from
+    /// here instead since this row is non-manual (tapping opens the tour,
+    /// not an instant toggle). Only ever called from the tour's own
+    /// final-card action (see the showHowSomaWorks sheet below) -- never
+    /// from a plain swipe-to-dismiss, so backing out early never falsely
+    /// credits having seen it.
+    private func completeHowSomaWorksItem() async {
+        try? await SupabaseClient.shared.upsertDailyChecklistState(
+            scope: "onboarding", itemKey: "onboarding_how_soma_works", date: Self.todayDateString()
+        )
+        checklistRefreshToken += 1
+    }
+
+    private func handleChecklistDeepLink(_ deepLink: ChecklistDeepLink) {
+        switch deepLink {
+        case .logMeal:
+            showNutrition = true
+        case .healthDashboard:
+            showHealthDashboard = true
+        case .moodCheckIn:
+            break // Already visible on Home itself -- nothing further to open.
+        case .startWorkout:
+            openTodaysWorkoutDetail()
+        case .logWorkout:
+            // Always the manual-logging form -- see ChecklistDeepLink's
+            // own doc comment on why this is deliberately separate from
+            // .startWorkout above.
+            showLogManualWorkout = true
+        case .howSomaWorks:
+            showHowSomaWorks = true
+        case .progressPicture:
+            showGoalBodyProgress = true
+        case .profileGoals, .profileKitchenEquipment, .connectDevices:
+            // Profile owns all three editors (Training tab, kitchen
+            // equipment row, device connections) -- one entry point,
+            // same as tapping the gear icon, rather than plumbing a
+            // second way into each individual sub-sheet.
+            showProfile = true
+        case .enableNotifications:
+            Task { try? await NotificationManager.shared.requestAuthorization() }
+        }
+    }
+
     /// "4 of 5 sessions this week" + a target-count segment bar + "1 to go"
     /// pill. Filled segments must equal filled hearts, and both must equal
     /// Profile's weekly target -- so both derive from the same
@@ -435,13 +648,16 @@ struct HomeView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 8) {
-                    Text("TODAY")
-                        .font(.system(size: 10.5, weight: .bold))
-                        .tracking(0.5)
-                        .foregroundStyle(SomaTokens.accent)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(SomaTokens.accentSoft))
+                    HStack(spacing: 6) {
+                        readinessRefreshButton
+                        Text("TODAY")
+                            .font(.system(size: 10.5, weight: .bold))
+                            .tracking(0.5)
+                            .foregroundStyle(SomaTokens.accent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(SomaTokens.accentSoft))
+                    }
                 }
             }
 
@@ -465,16 +681,64 @@ struct HomeView: View {
                 // Today's session is already logged -- reviewing it is the
                 // action now; the detail sheet shows the completed state.
                 SomaButton(title: "Check workout details", size: .lg, variant: .secondary) {
-                    requestDetailAccess { showDetail = true }
+                    openTodaysWorkoutDetail()
                 }
             } else {
+                // Same routing call as "Check workout details" above --
+                // openTodaysWorkoutDetail() branches on todaysWorkoutLog
+                // itself, so both buttons can share one implementation
+                // instead of this one re-inlining the nil-case directly.
                 SomaButton(title: "Start workout", size: .lg, variant: .primary) {
-                    requestDetailAccess { showDetail = true }
+                    openTodaysWorkoutDetail()
                 }
             }
 
+            // Always available, regardless of whether today's AI workout
+            // is logged -- a user might do this INSTEAD of (or in
+            // addition to) the AI plan. Free, no paywall: this is basic
+            // tracking, same posture as manual meal logging.
+            Button {
+                showLogManualWorkout = true
+            } label: {
+                Text("Log a different activity")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(SomaTokens.accent)
+            }
+            .buttonStyle(.plain)
+
             restDayRequestControl(recommendation)
         }
+    }
+
+    /// Always-visible manual refresh, independent of needsDataCard (which
+    /// disappears the instant ANY recommendation exists, even a stale/thin
+    /// one from a pre-sleep open -- see checkNow()'s doc comment on why
+    /// that matters). Same checkNow() path as pull-to-refresh, just
+    /// reachable without needing to pull, and reachable at all once
+    /// today's card already has content. isLoading is shared with the
+    /// rest of Home's refresh affordances, so this spins in lockstep with
+    /// pull-to-refresh/"Check now" if either is triggered instead.
+    private var readinessRefreshButton: some View {
+        Button {
+            Task { await checkNow() }
+        } label: {
+            Group {
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.65)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .foregroundStyle(SomaTokens.accent)
+            .frame(width: 26, height: 26)
+            .background(Circle().fill(SomaTokens.accentSoft))
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoading)
+        .animation(.easeInOut(duration: 0.2), value: isLoading)
+        .accessibilityLabel("Refresh today's readiness")
     }
 
     /// Lets the user directly ask for a rest/active-recovery day regardless
@@ -673,6 +937,54 @@ struct HomeView: View {
         return .available
     }
 
+    /// Real feedback: "some human-level metric that the app optimizes ...
+    /// showing that the metric improves with app usage." Once answered,
+    /// collapses to a compact confirmation rather than staying an
+    /// always-visible 5-button row -- it's a one-tap daily habit, not a
+    /// permanent fixture competing with the actual workout content.
+    private var moodCheckInRow: some View {
+        CardView {
+            if let todaysMood, let rating = MoodRating(rawValue: todaysMood.rating) {
+                HStack(spacing: 10) {
+                    Text(rating.emoji)
+                        .font(.system(size: 22))
+                    Text("You're feeling \(rating.displayName.lowercased()) today")
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink2)
+                    Spacer()
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("How are you feeling today?")
+                        .font(.system(size: 14.5, weight: .semibold))
+                    HStack(spacing: 8) {
+                        ForEach(MoodRating.allCases) { rating in
+                            Button {
+                                Task { await logMood(rating) }
+                            } label: {
+                                VStack(spacing: 3) {
+                                    Text(rating.emoji)
+                                        .font(.system(size: 22))
+                                    Text(rating.displayName)
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    if let moodError {
+                        Text(moodError)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.red)
+                    }
+                }
+                .disabled(isSavingMood)
+            }
+        }
+    }
+
     @ViewBuilder
     private var scanRow: some View {
         switch scanState {
@@ -770,6 +1082,29 @@ struct HomeView: View {
                 }
             }
             .buttonStyle(.plain)
+        } else if Config.enableBodyPhotoUpload {
+            // Real feedback: "the progress picture section is gone now."
+            // Traced to accounts with no date_of_birth on record (e.g.
+            // created before the onboarding DOB step existed) --
+            // AgeGate.isAdult fails closed on a missing DOB, so the row
+            // above vanished entirely with no explanation. Same two-state
+            // "CTA vs. hidden" pattern as everywhere else on this screen:
+            // say what's missing and how to fix it, don't just disappear.
+            Button {
+                AnalyticsManager.shared.featureUsed(name: "goal_progress_dob_prompt")
+                showProfile = true
+            } label: {
+                scanRowBody(
+                    plate: SomaTokens.accentSoft, icon: "person.fill.questionmark", iconColor: SomaTokens.accent,
+                    title: "Add your date of birth",
+                    subtitle: "Confirms you're 18+ to unlock Goal Body progress photos"
+                ) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -833,12 +1168,12 @@ struct HomeView: View {
     /// destination as the readiness card's "Check workout details" CTA.
     private func todaysWorkoutCard(_ log: WorkoutLogEntry) -> some View {
         Button {
-            requestDetailAccess { showDetail = true }
+            openTodaysWorkoutDetail()
         } label: {
             CardView {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Today's workout")
+                        Text(Self.todaysWorkoutCardEyebrow(for: log.source))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text(log.title)
@@ -851,6 +1186,14 @@ struct HomeView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private static func todaysWorkoutCardEyebrow(for source: String) -> String {
+        switch source {
+        case "manual": "Today's activity"
+        case "device_detected": "Detected automatically"
+        default: "Today's workout"
+        }
     }
 
     /// Shown once a plan is added to today's plan but not yet completed --
@@ -1031,6 +1374,26 @@ struct HomeView: View {
         nutritionProgress = NutritionDayProgress.compute(entries: entries, target: target)
     }
 
+    private func loadTodaysMood() async {
+        todaysMood = try? await SupabaseClient.shared.fetchTodaysMood(date: Self.todayDateString())
+    }
+
+    private func logMood(_ rating: MoodRating) async {
+        isSavingMood = true
+        moodError = nil
+        defer { isSavingMood = false }
+        do {
+            try await SupabaseClient.shared.logMood(date: Self.todayDateString(), rating: rating.rawValue)
+            await loadTodaysMood()
+        } catch {
+            // Visible now instead of silent -- real feedback: "when the
+            // user taps on one of the emojis ... nothing happens." The
+            // row of options stays tappable either way so the user can
+            // retry without leaving the screen.
+            moodError = "Couldn't save that -- check your connection and try again."
+        }
+    }
+
     /// Best-effort: no goal (or a failed fetch) simply means no goal row --
     /// the same natural "off" state the server kill switch produces.
     private func loadSportGoal() async {
@@ -1109,8 +1472,70 @@ struct HomeView: View {
         timelineEntries = merged.sorted { $0.startTime < $1.startTime }
     }
 
-    /// Manual fallback ("Check now" / pull-to-refresh) -- calls the same
-    /// Edge Function the automated morning triggers use.
+    /// Closes a real gap: a workout captured passively by a connected
+    /// health source (Apple Health, Oura, Whoop) never marked today as
+    /// done unless the user ALSO tapped through and logged it explicitly
+    /// -- real feedback: "did a 2h workout, burned 1229 kcal, Soma didn't
+    /// confirm it," even though the timeline card was already showing it.
+    /// Runs after loadTodaysWorkoutLog/loadTimeline; auto-creates a
+    /// workout_log row from today's longest qualifying device-detected
+    /// session once nothing is logged yet, tagged source:
+    /// "device_detected" so it's clearly distinct from something the user
+    /// explicitly logged (openTodaysWorkoutDetail routes it to the
+    /// generic CompletedWorkoutView, same as a manual entry).
+    private func autoLogDeviceDetectedWorkoutIfNeeded() async {
+        guard todaysWorkoutLog == nil else { return }
+        // Real feedback: "I went for a 2k steps walk, but SOMA is not
+        // giving me a workout ... only a real workout should mark the day
+        // done, not just a walk." See qualifyingAutoLogCandidate: a
+        // trivial multi-minute entry (HealthKit logs even a short walk as
+        // its own "workout") shouldn't silently satisfy the whole day,
+        // and neither should a walk of any length -- only a deliberate
+        // workout session should suppress today's generated plan.
+        guard let entry = WorkoutTimelineEntry.qualifyingAutoLogCandidate(from: timelineEntries)
+        else { return }
+
+        let endedAt = Calendar.current.date(byAdding: .minute, value: entry.durationMinutes, to: entry.startTime) ?? entry.startTime
+        let caloriesNote = entry.calories.map { " -- \($0) kcal burned" } ?? ""
+
+        do {
+            try await SupabaseClient.shared.logWorkout(
+                date: Self.todayDateString(),
+                title: entry.title,
+                bodyPart: "full_body",
+                category: entry.inferredCategory,
+                feedback: "Detected automatically from \(entry.sourceDisplayName)\(caloriesNote).",
+                startedAt: entry.startTime,
+                endedAt: endedAt,
+                source: "device_detected"
+            )
+            await loadTodaysWorkoutLog()
+            await loadCompletedDates()
+            await loadWeeklyProgressAndStreak()
+        } catch {
+            // Best-effort -- next app open or pull-to-refresh retries.
+            // Not surfaced as an error banner: the user did nothing wrong
+            // here, there's just nothing yet for them to act on.
+        }
+    }
+
+    /// Manual fallback ("Check now" / pull-to-refresh / the readiness
+    /// card's refresh icon / the cold-open fallback in
+    /// loadTodaysRecommendation) -- calls the same Edge Function the
+    /// automated morning triggers use, but deliberately does NOT call
+    /// markSentToday(). That flag means "a local notification was sent
+    /// today" (see NotificationManager's own doc comment) and gates
+    /// whether Trigger A/B fire at all -- this path never schedules a
+    /// notification, so marking it sent here previously caused a real bug:
+    /// a pre-sleep cold open (before Oura/Whoop have a real reading)
+    /// silently disabled that morning's later automatic re-check, since
+    /// Trigger A/B's own `guard !hasSentToday()` would then skip BOTH the
+    /// notification AND the regenerate call for the rest of the day. The
+    /// stale/thin read then only ever got corrected by the user manually
+    /// reopening or refreshing -- which needsDataCard's "Check now" made
+    /// unreachable anyway the moment any recommendation, even a bad one,
+    /// existed. See readinessCard's refresh icon for the always-visible
+    /// manual escape hatch this fix pairs with.
     private func checkNow() async {
         isLoading = true
         errorMessage = nil

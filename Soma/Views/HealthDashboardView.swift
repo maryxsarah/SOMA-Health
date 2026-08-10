@@ -12,6 +12,7 @@ struct HealthDashboardView: View {
     @State private var recentSnapshots: [DailySnapshotRow] = []
     @State private var completedDates: Set<String> = []
     @State private var profile: UserProfile?
+    @State private var recentMoods: [DailyMoodEntry] = []
     @State private var isLoading = true
     @State private var selectedSection: DashboardSection = .overview
     @State private var openAccordionTitle: String?
@@ -123,6 +124,8 @@ struct HealthDashboardView: View {
         ])
 
         trendCard(title: "Recovery", series: series { $0.recoveryScore ?? $0.readinessScore }, format: "%.0f")
+
+        moodTrendCard
 
         accordionCard(items: [
             ("Recovery / Readiness", todaysValueText(format: "%.0f", unit: "") { $0.recoveryScore ?? $0.readinessScore }, "A single score blending your heart rate variability, resting heart rate, and sleep from last night -- Whoop calls it Recovery, Oura calls it Readiness. Higher generally means your body is better prepared for a harder effort today."),
@@ -244,6 +247,49 @@ struct HealthDashboardView: View {
                 Text("From your profile — Soma doesn't track weight over time yet.")
                     .font(.caption)
                     .foregroundStyle(SomaTokens.ink4)
+            }
+
+            if let bmi = BodyMetrics.bmi(weightKg: weight, heightCm: profile?.heightCm) {
+                CardView {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("BMI")
+                            .font(.subheadline.bold())
+                        Spacer()
+                        Text(String(format: "%.1f", bmi))
+                            .font(.system(size: 22, design: .serif).italic())
+                    }
+                    Text(BodyMetrics.bmiCategory(bmi))
+                        .font(.caption.bold())
+                        .foregroundStyle(SomaTokens.ink2)
+                    Text("A general population screening measure, not a fitness or body-composition score -- it doesn't distinguish muscle from fat.")
+                        .font(.caption2)
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+            }
+
+            if let journey = GoalJourneyProgress.compute(
+                createdAt: profile?.createdAt,
+                weightKg: profile?.weightKg,
+                desiredWeightKg: profile?.desiredWeightKg,
+                goalPace: profile?.goalPace
+            ) {
+                CardView {
+                    Text("Progress toward your goal")
+                        .font(.subheadline.bold())
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(SomaTokens.surface3)
+                            Capsule()
+                                .fill(SomaTokens.accent)
+                                .frame(width: max(0, geo.size.width * journey.fraction))
+                        }
+                    }
+                    .frame(height: 10)
+                    .clipShape(Capsule())
+                    Text("Day \(journey.daysElapsed) of roughly \(journey.estimatedTotalDays), at your chosen pace.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         } else {
             CardView {
@@ -375,6 +421,49 @@ struct HealthDashboardView: View {
         }
     }
 
+    /// Real feedback: "some human-level metric that the app optimizes ...
+    /// showing that the metric improves with app usage." Home's daily
+    /// check-in card feeds this -- shown only once there's more than one
+    /// day logged (a single point has no trend to draw).
+    @ViewBuilder
+    private var moodTrendCard: some View {
+        if recentMoods.count > 1 {
+            let values = recentMoods.map { (date: $0.date, value: Double($0.rating)) }
+            CardView {
+                Text("How you've been feeling")
+                    .font(.body.bold())
+                AxisLabeledTrendChart(values: values, showAverageLine: true)
+                if let comparison = Self.moodComparisonText(recentMoods) {
+                    Text(comparison)
+                        .font(.caption)
+                        .foregroundStyle(SomaTokens.ink3)
+                        .padding(.top, 2)
+                }
+            }
+        }
+    }
+
+    /// Splits the logged range in half and compares averages -- real
+    /// numbers only, never a fabricated "you're improving!" line. Needs
+    /// at least 3 entries on each side to say anything meaningful; below
+    /// that the chart speaks for itself with no added sentence.
+    private static func moodComparisonText(_ moods: [DailyMoodEntry]) -> String? {
+        guard moods.count >= 6 else { return nil }
+        let midpoint = moods.count / 2
+        let earlier = moods.prefix(midpoint)
+        let recent = moods.suffix(moods.count - midpoint)
+        guard !earlier.isEmpty, !recent.isEmpty else { return nil }
+        let earlierAvg = Double(earlier.reduce(0) { $0 + $1.rating }) / Double(earlier.count)
+        let recentAvg = Double(recent.reduce(0) { $0 + $1.rating }) / Double(recent.count)
+        let delta = recentAvg - earlierAvg
+        if abs(delta) < 0.3 {
+            return "Holding steady around \(String(format: "%.1f", recentAvg))/5 lately."
+        }
+        return delta > 0
+            ? "Averaging \(String(format: "%.1f", recentAvg))/5 lately, up from \(String(format: "%.1f", earlierAvg))/5 earlier."
+            : "Averaging \(String(format: "%.1f", recentAvg))/5 lately, down from \(String(format: "%.1f", earlierAvg))/5 earlier."
+    }
+
     /// Guide 08's "What these mean": one open at a time, collapsed rows
     /// still show their value so the section is useful even shut.
     private func accordionCard(items: [(title: String, value: String?, text: String)]) -> some View {
@@ -484,11 +573,13 @@ struct HealthDashboardView: View {
             guard let userId = SupabaseClient.shared.currentUserID else { return nil }
             return try? await SupabaseClient.shared.fetchProfile(id: userId)
         }()
+        async let moodsFetch: [DailyMoodEntry] = (try? await SupabaseClient.shared.fetchRecentMoods(days: 30)) ?? []
 
         todaysSnapshots = await todayFetch
         recentSnapshots = await recentFetch
         completedDates = await completedFetch
         profile = await profileFetch
+        recentMoods = await moodsFetch
         isLoading = false
     }
 }

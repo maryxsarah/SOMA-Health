@@ -16,9 +16,24 @@ port = 54323
 enabled = true
 # soma:// is the custom URL scheme the iOS app registers for OAuth
 # callbacks (Whoop, Oura) and for the Sign in with Apple redirect.
+#
+# https://www.soma4health.com/auth/confirm is a universal link, not a
+# custom scheme -- it's where the branded signup-confirmation email's
+# "Commit now to your goal" button lands once Supabase's own
+# /auth/v1/verify checks the token (see Config.emailConfirmationRedirectURL
+# and supabase/email-templates/confirm-signup.html). Also passed as
+# signUpWithEmail's own `redirect_to` query param -- both must match this
+# entry, or Supabase rejects the redirect outright. This local list mirrors
+# what must ALSO be added to the real Dashboard's Auth -> URL Configuration
+# -> Redirect URLs allow-list (dashboard-only, not something this file
+# controls in production -- see the Sign in with Apple note just below).
+# www, not bare -- soma4health.com redirects to www site-wide, and
+# Apple's swcd won't follow that redirect when checking the
+# apple-app-site-association file. Confirmed 2026-08-10.
 additional_redirect_urls = [
   "soma://oauth-callback/whoop",
   "soma://oauth-callback/oura",
+  "https://www.soma4health.com/auth/confirm",
 ]
 
 # Sign in with Apple is configured directly in the Supabase Dashboard

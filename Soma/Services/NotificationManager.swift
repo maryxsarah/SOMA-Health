@@ -11,6 +11,13 @@ final class NotificationManager {
         _ = try await center.requestAuthorization(options: [.alert, .sound, .badge])
     }
 
+    /// Read-only status check -- the daily checklist's "enable
+    /// notifications" onboarding item uses this instead of re-prompting.
+    func isAuthorized() async -> Bool {
+        let settings = await center.notificationSettings()
+        return settings.authorizationStatus == .authorized
+    }
+
     /// Fires immediately (nil trigger) with the day's fixed category/message.
     func scheduleImmediateNotification(category: RecommendationCategory, message: String) async {
         let content = UNMutableNotificationContent()
@@ -178,6 +185,73 @@ final class NotificationManager {
         await withCheckedContinuation { continuation in
             center.add(request) { _ in continuation.resume() }
         }
+    }
+
+    // MARK: - Daily checklist nudges
+    //
+    // Distinct from the 3 engagement notifications above (which predate
+    // the checklist and fire unconditionally except the evening workout
+    // one) -- these three are ALL gated on real, freshly-read state and
+    // simply don't get scheduled at all when the item's already checked,
+    // so "never nudge for an already-checked item" holds by construction
+    // rather than by a completion-time cancel. Capped at 3/day by having
+    // exactly 3 possible nudges, one per daypart, each independently
+    // skippable -- a fully-on-track day schedules zero of them.
+
+    private static let checklistBreakfastHour = 10
+    private static let checklistStepsHour = 15
+    private static let checklistEveningRecapHour = 20
+    private static let checklistEveningRecapMinute = 30
+
+    /// Deep-link identifiers carried in each notification's userInfo --
+    /// AppDelegate reads this on tap and forwards it to AppState, which
+    /// HomeView observes to open the right sheet directly instead of just
+    /// landing on Home. Raw strings (not ChecklistDeepLink itself) because
+    /// UNNotificationContent.userInfo is [AnyHashable: Any], not Codable.
+    enum ChecklistNudgeDeepLink: String {
+        case logMeal, healthDashboard, startWorkout
+    }
+
+    /// Single call site (HomeView's checklist card, once per day it's
+    /// computed) -- scheduling is naturally idempotent via the day-stamped
+    /// identifiers scheduleToday already uses, and any nudge whose item is
+    /// already checked is simply never scheduled to begin with.
+    func scheduleChecklistNudges(mealLoggedToday: Bool, stepsOnTrack: Bool, workoutLoggedToday: Bool, openItemTitles: [String]) async {
+        let date = todayKey()
+        if !mealLoggedToday {
+            await scheduleChecklistNudge(
+                hour: Self.checklistBreakfastHour, minute: 0, identifier: "checklist-breakfast-\(date)",
+                title: "Log breakfast?", body: "A quick log now keeps today's nutrition bars on track.",
+                deepLink: .logMeal
+            )
+        }
+        if !stepsOnTrack {
+            await scheduleChecklistNudge(
+                hour: Self.checklistStepsHour, minute: 0, identifier: "checklist-steps-\(date)",
+                title: "Behind on steps today", body: "A short walk this afternoon closes most of the gap.",
+                deepLink: .healthDashboard
+            )
+        }
+        if !openItemTitles.isEmpty {
+            let recap = openItemTitles.count == 1
+                ? "Still open: \(openItemTitles[0])."
+                : "Still open: \(openItemTitles.prefix(2).joined(separator: ", "))\(openItemTitles.count > 2 ? ", and more" : "")."
+            await scheduleChecklistNudge(
+                hour: Self.checklistEveningRecapHour, minute: Self.checklistEveningRecapMinute,
+                identifier: "checklist-recap-\(date)",
+                title: "Today's checklist", body: recap,
+                deepLink: workoutLoggedToday ? .healthDashboard : .startWorkout
+            )
+        }
+    }
+
+    private func scheduleChecklistNudge(hour: Int, minute: Int, identifier: String, title: String, body: String, deepLink: ChecklistNudgeDeepLink) async {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.userInfo = ["checklistDeepLink": deepLink.rawValue]
+        await scheduleToday(hour: hour, minute: minute, identifier: identifier, content: content)
     }
 
     // MARK: - "Already sent today" flag

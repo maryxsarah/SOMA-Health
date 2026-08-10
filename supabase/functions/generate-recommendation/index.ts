@@ -19,6 +19,8 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { assessHealthKit } from "./healthkitBand.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
+import { computeInjuryProtocolRestApplied, computeMoodCapApplied } from "../_shared/independentCaps.ts";
+import { buildReasoningMessage } from "./reasoningMessage.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -42,16 +44,6 @@ const WHOOP_HIGH_STRAIN_THRESHOLD = 15;
 import type { Band, DataConfidence, HealthKitPayload } from "./healthkitBand.ts";
 type Category = "rest" | "light" | "moderate" | "push_hard";
 type Source = "whoop" | "oura" | "healthkit";
-
-const MESSAGES: Record<Category, string> = {
-  push_hard:
-    "You're well recovered — today's a good day to push. Go for a hard workout or high-intensity session.",
-  moderate:
-    "You're in decent shape today. A moderate cardio session or a solid strength workout (30-45 min) is a good call.",
-  light:
-    "Take it easier today — a short walk, mobility work, or light yoga (20-30 min) is ideal.",
-  rest: "Today's a recovery day. Keep movement light and let your body rest — a gentle walk is plenty.",
-};
 
 interface WearableTokenRow {
   id: string;
@@ -181,6 +173,7 @@ Deno.serve(async (req: Request) => {
         sleep_deep_hours: healthkit.sleepDeepHours,
         sleep_rem_hours: healthkit.sleepRemHours,
         sleep_awake_hours: healthkit.sleepAwakeHours,
+        basal_energy_kcal: healthkit.basalEnergyKcal,
       });
     }
 
@@ -189,7 +182,7 @@ Deno.serve(async (req: Request) => {
     // today, same merge shape as sleep already used.
     const { data: todaysRows } = await supabase
       .from("daily_snapshot")
-      .select("source, sleep_hours, hrv_ms, stress_score")
+      .select("source, sleep_hours, hrv_ms, stress_score, resting_hr, strain_score")
       .eq("user_id", userId)
       .eq("date", date);
 
@@ -198,6 +191,12 @@ Deno.serve(async (req: Request) => {
     // Oura-only signal (see fetchOuraStress) -- no Whoop/HealthKit source
     // reports one today, so this naturally resolves to null for them.
     const todaysStress = pickTodaysMetric(todaysRows ?? [], "stress_score", undefined);
+    // Two more merged-source picks (Phase 2: see
+    // docs/coaching-personalization-plan.md), same shape as the two above --
+    // feed reasoningMessage.ts's degrade-gracefully number citations, not
+    // the band/cap decisions themselves.
+    const todaysRestingHr = pickTodaysMetric(todaysRows ?? [], "resting_hr", healthkit?.restingHr);
+    const todaysStrain = pickTodaysMetric(todaysRows ?? [], "strain_score", undefined);
 
     // Injury-based intensity cap: any noted injury caps the category at
     // moderate max for the day, same safety-first pattern as the sleep cap.
@@ -221,7 +220,7 @@ Deno.serve(async (req: Request) => {
     // creates a recovery-state row for mild severity in the first place).
     const { data: injuryProtocolRows } = await supabase
       .from("injury_recovery_state")
-      .select("severity, status")
+      .select("severity, status, protocol_started_at, consecutive_bad_days")
       .eq("user_id", userId)
       .in("status", ["active", "recovering"]);
     const hasSevereInjuryProtocol = (injuryProtocolRows ?? []).some(
@@ -230,6 +229,17 @@ Deno.serve(async (req: Request) => {
     const hasModerateInjuryProtocol = (injuryProtocolRows ?? []).some(
       (r: { severity: string }) => r.severity === "moderate",
     );
+    // Real feedback: "when the user shared a specific injury, if needed a
+    // rest day needs to be recommended" -- today's severe-injury cap only
+    // ever reaches "light" (see injuryProtocolCapApplied below), never
+    // "rest", however acute or worsening the injury. See
+    // computeInjuryProtocolRestApplied's own doc comment (_shared/independentCaps.ts)
+    // for the two cases this covers and why -- pulled into a pure,
+    // unit-tested module given how explicitly safety-critical this one is.
+    const severeInjuryRows = (injuryProtocolRows ?? []).filter(
+      (r: { severity: string }) => r.severity === "severe",
+    );
+    const injuryProtocolRestApplied = computeInjuryProtocolRestApplied(severeInjuryRows, Date.now());
 
     let band: Band;
     let source: Source;
@@ -350,6 +360,23 @@ Deno.serve(async (req: Request) => {
     const stressCapApplied = todaysStress !== null && todaysStress >= HIGH_STRESS_MINUTES &&
       (bandCategory === "moderate" || bandCategory === "push_hard");
 
+    // Mood cap: real feedback: "when the user taps one of the emojis 'How
+    // you feeling today?', ... all the customization the user provides
+    // needs to be considered for the workout." daily_mood was previously
+    // recorded and shown as a trend but never read back into generation.
+    // See computeMoodCapApplied's doc comment (_shared/independentCaps.ts)
+    // for the asymmetric-caution reasoning. Only today's own check-in
+    // counts -- no trend/rolling window, unlike HRV's baseline, since a
+    // single bad day is exactly what this is meant to catch.
+    const { data: todaysMoodRow } = await supabase
+      .from("daily_mood")
+      .select("rating")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .maybeSingle();
+    const todaysMoodRating = (todaysMoodRow?.rating as number | null) ?? null;
+    const moodCapApplied = computeMoodCapApplied(todaysMoodRating, bandCategory);
+
     // Consecutive-training-days cap: unlike the three caps above (which act
     // on the recovery band before the category is chosen), this acts on the
     // FINAL category -- deliberately a different mechanism, since it's about
@@ -399,10 +426,15 @@ Deno.serve(async (req: Request) => {
     // moderate and one severe injury simultaneously -- severe wins.
     const injuryProtocolModerateCapApplied = !hasSevereInjuryProtocol &&
       hasModerateInjuryProtocol && bandCategory === "push_hard";
-    const computedCategory: Category = consecutiveDaysRestEscalated
+    // injuryProtocolRestApplied is NOT gated on bandCategory the way the
+    // caps above are -- a fresh/worsening severe injury forces rest even
+    // on a day the wearable band alone would only have called "light"
+    // (band reflects recovery signals like sleep/HRV, not injury status,
+    // so a good band score must never talk an acute injury back down).
+    const computedCategory: Category = consecutiveDaysRestEscalated || injuryProtocolRestApplied
       ? "rest"
       : (consecutiveDaysCapApplied || injuryProtocolCapApplied || volumeCapApplied ||
-          sleepCapApplied || hrvCapApplied || stressCapApplied)
+          sleepCapApplied || hrvCapApplied || stressCapApplied || moodCapApplied)
       ? "light"
       : injuryProtocolModerateCapApplied
       ? "moderate"
@@ -411,7 +443,37 @@ Deno.serve(async (req: Request) => {
     // computed cap above -- see the comment where userRequestedCategory is
     // read, near the top of this handler.
     const category: Category = userRequestedCategory ?? computedCategory;
-    const message = MESSAGES[category];
+    // Phase 2 (docs/coaching-personalization-plan.md): a short reasoning
+    // string citing today's actual numbers, replacing the old fixed
+    // MESSAGES[category] lookup. Deterministic (see reasoningMessage.ts's
+    // own header) -- the category decision above is never recomputed here.
+    const message = buildReasoningMessage({
+      category,
+      userRequestedCategory,
+      source,
+      band,
+      insufficientData,
+      dataConfidence,
+      recoveryScore: whoopRecovery?.recoveryScore ?? null,
+      readinessScore: ouraReadiness,
+      hrvMs: todaysHrv,
+      sleepHours,
+      restingHr: todaysRestingHr,
+      strainScore: todaysStrain,
+      stressMinutes: todaysStress,
+      caps: {
+        sleep: sleepCapApplied,
+        hrv: hrvCapApplied,
+        stress: stressCapApplied,
+        mood: moodCapApplied,
+        consecutiveDays: consecutiveDaysCapApplied,
+        consecutiveDaysRestEscalated,
+        volume: volumeCapApplied,
+        injury: injuryProtocolCapApplied,
+        injuryModerate: injuryProtocolModerateCapApplied,
+        injuryRest: injuryProtocolRestApplied,
+      },
+    });
 
     await supabase
       .from("daily_recommendation")
@@ -430,8 +492,10 @@ Deno.serve(async (req: Request) => {
           consecutive_days_cap_applied: consecutiveDaysCapApplied,
           injury_protocol_cap_applied: injuryProtocolCapApplied,
           injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+          injury_protocol_rest_applied: injuryProtocolRestApplied,
           hrv_cap_applied: hrvCapApplied,
           stress_cap_applied: stressCapApplied,
+          mood_cap_applied: moodCapApplied,
           // The uncapped category, so a later client re-fetch (after any
           // cap has been applied) still has access to what the
           // recommendation would have been -- the override affordance in
@@ -463,8 +527,10 @@ Deno.serve(async (req: Request) => {
       consecutive_days_cap_applied: consecutiveDaysCapApplied,
       injury_protocol_cap_applied: injuryProtocolCapApplied,
       injury_protocol_moderate_cap_applied: injuryProtocolModerateCapApplied,
+      injury_protocol_rest_applied: injuryProtocolRestApplied,
       hrv_cap_applied: hrvCapApplied,
       stress_cap_applied: stressCapApplied,
+      mood_cap_applied: moodCapApplied,
       pre_cap_category: bandCategory,
       data_confidence: dataConfidence,
       user_requested_category: userRequestedCategory,
@@ -627,10 +693,17 @@ function pickSleepHours(
 }
 
 /// Same merge shape as pickSleepHours, generalized to any daily_snapshot
-/// numeric column -- used for today's HRV/stress cap inputs.
+/// numeric column -- used for today's HRV/stress cap inputs, and (Phase 2)
+/// resting_hr/strain_score for reasoningMessage.ts's number citations.
 function pickTodaysMetric(
-  rows: { source: string; hrv_ms?: number | null; stress_score?: number | null }[],
-  column: "hrv_ms" | "stress_score",
+  rows: {
+    source: string;
+    hrv_ms?: number | null;
+    stress_score?: number | null;
+    resting_hr?: number | null;
+    strain_score?: number | null;
+  }[],
+  column: "hrv_ms" | "stress_score" | "resting_hr" | "strain_score",
   healthkitValue: number | null | undefined,
 ): number | null {
   const bySource = (source: string) => rows.find((r) => r.source === source)?.[column] ?? null;

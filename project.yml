@@ -80,7 +80,7 @@ targets:
         # Bump this before every new archive you upload to App Store
         # Connect -- Apple rejects re-uploading the same build number
         # under the same version, even for internal/bug-fix changes.
-        CFBundleVersion: "15"
+        CFBundleVersion: "17"
         # Declares Soma only uses exempt encryption (standard HTTPS via
         # URLSession -- no bundled/custom crypto) so every future archive
         # skips the "Missing Compliance" App Store Connect dialog
@@ -105,6 +105,12 @@ targets:
         # (it runs out-of-process and never grants the app broad library
         # access).
         NSCameraUsageDescription: "Soma uses your camera to see what gym equipment is available so it can build a matching workout."
+        # Dictate-a-meal (LogMealView's mic button) -- both keys required
+        # together by Speech framework: microphone captures the audio,
+        # speech recognition transcribes it. Nothing is sent anywhere
+        # until the user reviews the transcribed text and taps Estimate.
+        NSMicrophoneUsageDescription: "Soma uses your microphone so you can dictate what you ate instead of typing it."
+        NSSpeechRecognitionUsageDescription: "Soma transcribes your dictated meal description on-device so you don't have to type it."
         # Background Modes: "fetch" is what BGAppRefreshTaskRequest relies
         # on; "processing" matches the Xcode capability checklist in the spec.
         UIBackgroundModes:

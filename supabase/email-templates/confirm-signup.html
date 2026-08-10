@@ -1,0 +1,243 @@
+<!--
+  Supabase Auth "Confirm signup" email template.
+
+  Paste from <!DOCTYPE html> down (not this comment block) into Supabase
+  Dashboard -> Authentication -> Email Templates -> Confirm signup.
+
+  Brand values below are copied from https://www.soma4health.com's actual
+  computed CSS (via getComputedStyle), not guessed -- pulled 2026-08-10:
+    - Wordmark: "SOMA", Manrope 700, #101315, tight tracking.
+    - Serif accent (e.g. "best day"): Newsreader italic 400, #101315.
+    - Body copy / eyebrow: #565F66, Manrope.
+    - Primary button: #3E6A8C background, white text, fully rounded.
+    - Page background: #F6F7F7.
+    - Orb graphic: the site's orb (`.ld-orb-halo`) is a perfect circle --
+      NOT a blob -- with a soft outer glow (radial-gradient(circle,
+      #FFFFFF 0%, #EAF1F7 58%, transparent 74%)) around a vivid inner
+      gradient (radial-gradient(circle at 32% 28%, #FFFFFF 0%, #D2E1EE
+      32%, #86ABCB 62%, #2B4A63 100%)), animated with a 5.5s ease-in-out
+      infinite alternate "breathe" (scale) -- confirmed via
+      getComputedStyle, not guessed. Recreated here as one radial-gradient
+      with an extra transparent-fade stop at the edge (fakes the glow
+      falloff without needing 2 overlapping absolutely-positioned layers,
+      which most email clients render inconsistently) + a real @keyframes
+      breathe animation in <style> (progressive enhancement: Apple
+      Mail/iOS -- most of this app's own users -- renders it; Outlook and
+      most webmail silently ignore <style> animations and just show the
+      static gradient, which still looks intentional on its own).
+  If the live site's palette/animation changes, re-pull these values
+  rather than hand-editing -- that's the whole point of sourcing them
+  from the site instead of guessing.
+
+  Deliberately NOT included, and why:
+    - A stats/comparison chart (the "50% more likely to succeed" style
+      graphic some competitor confirmation emails use) -- Soma has no
+      real number to cite yet, and this codebase's own convention (see
+      the app's onboarding chart work) is to never present a fabricated
+      claim as if it were data. The 3-step row below explains the value
+      prop honestly instead: what Soma does, not an invented stat.
+    - A lifestyle photo -- the one supplied during design review carried
+      a competitor's ("BetterMe") watermark and can't be used. Swap in
+      real, rights-cleared photography by adding one <img> under the
+      3-step row once you have a hosted URL; nothing else needs to change.
+
+  Template variables used (Supabase's standard set for this template):
+    {{ .ConfirmationURL }} -- required, the button/fallback-link target.
+    {{ .SiteURL }} -- unused directly; the footer instead links the real,
+      verified soma4health.com/privacy and /terms URLs (pulled from the
+      live site's footer, not invented).
+
+  Both the button AND the fallback text link point to the exact same
+  {{ .ConfirmationURL }} -- this is deliberate, not an oversight: they
+  need to behave identically, and they will, automatically, once the
+  deep-linking setup in deep-linking/README.md is fully live (hosted
+  apple-app-site-association + Supabase's redirect_to allow-list entry +
+  an app build that includes the Associated Domains entitlement). Neither
+  link needs any extra "open in app" wrapper -- that's what a universal
+  link IS: tapping either one hands off straight to the app if it's
+  installed (any tap surface, button or plain link, behaves the same),
+  and falls through to Safari if it isn't. See SomaApp.handleEmailConfirmation
+  for the client-side landing logic.
+
+  Table-based layout + inline styles throughout for Outlook/Gmail/Apple
+  Mail compatibility -- see the original template's doc comment (git
+  history) for the fuller rationale if this file is revised again.
+-->
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Confirm your Soma account</title>
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+  <style>
+    /* Matches the site's real .ld-orb-halo animation (5.5s ease-in-out
+       infinite alternate). Ignored (not stripped/erroring) by clients
+       that don't support <style> animations -- the orb just stays at its
+       resting frame, which reads fine on its own. */
+    @keyframes soma-orb-breathe {
+      0%   { transform: scale(1); }
+      100% { transform: scale(1.08); }
+    }
+    .soma-orb {
+      animation: soma-orb-breathe 5.5s ease-in-out infinite alternate;
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#F6F7F7; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;">
+  <!-- Preheader: shown by Mail/Gmail as the inbox preview, hidden on open. -->
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0; font-size:1px; line-height:1px; color:#F6F7F7;">
+    Confirm your email -- your first tailored plan is one tap away.
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F6F7F7;">
+    <tr>
+      <td align="center" style="padding:44px 16px;">
+
+        <!-- Wordmark (real text, not an image -- soma4health.com's own logo is styled text too) -->
+        <div style="font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-weight:700; font-size:18px; letter-spacing:-0.4px; color:#101315; margin-bottom:28px;">
+          SOMA
+        </div>
+
+        <!-- Card -->
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="max-width:480px; width:100%; background-color:#FFFFFF; border-radius:20px; overflow:hidden;">
+          <tr>
+            <td style="padding:40px 36px 8px 36px; text-align:center;">
+
+              <!-- Eyebrow -- exact copy from the site's own hero -->
+              <div style="font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; letter-spacing:0.2px; color:#565F66; margin-bottom:16px;">
+                ( your health journey starts now )
+              </div>
+
+              <!-- Orb graphic -- same gradient + "breathe" animation as
+                   the site's real .ld-orb-halo (see doc comment above).
+                   The extra transparent-fade stop at the edge fakes the
+                   site's separate soft-glow layer in one gradient. -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 20px auto;">
+                <tr>
+                  <td class="soma-orb" style="width:140px; height:140px; border-radius:70px; background-color:#86ABCB; background-image:radial-gradient(circle at 32% 28%, #FFFFFF 0%, #D2E1EE 28%, #86ABCB 52%, #2B4A63 78%, rgba(43,74,99,0.35) 92%, rgba(43,74,99,0) 100%); font-size:0; line-height:0;">
+                    &nbsp;
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Headline -- "best day" in the site's real Newsreader italic accent -->
+              <h1 style="margin:0 0 12px 0; font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-weight:700; font-size:27px; line-height:1.3; color:#101315;">
+                Find your next
+                <span style="font-family:Newsreader,Georgia,'Times New Roman',serif; font-style:italic; font-weight:400;">best day</span>
+              </h1>
+
+              <p style="margin:0 0 28px 0; font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:15px; line-height:1.6; color:#565F66;">
+                One tap confirms your email and picks up right where you left off -- your first tailored plan is waiting on the other side.
+              </p>
+
+              <!-- Button -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
+                <tr>
+                  <td style="border-radius:999px; background-color:#3E6A8C;">
+                    <a href="{{ .ConfirmationURL }}"
+                       target="_blank"
+                       style="display:inline-block; padding:15px 36px; font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:16px; font-weight:700; color:#FFFFFF; text-decoration:none; border-radius:999px;">
+                      Commit now to your goal
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:20px 0 32px 0; font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:12.5px; line-height:1.5; color:#9A9AA6;">
+                This link expires soon and can only be used once.
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:0 36px;">
+              <div style="border-top:1px solid #E6E6EC;"></div>
+            </td>
+          </tr>
+
+          <!-- "How it works" -- 3 real steps, not an invented stat -->
+          <tr>
+            <td style="padding:28px 28px 32px 28px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td width="33%" align="center" style="padding:0 6px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 10px auto;">
+                      <tr><td style="width:32px; height:32px; border-radius:16px; background-color:#EAF1F7; text-align:center; font-family:Manrope,Helvetica,Arial,sans-serif; font-weight:700; font-size:14px; color:#3E6A8C; line-height:32px;">1</td></tr>
+                    </table>
+                    <div style="font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:12.5px; font-weight:700; color:#101315;">Your goal</div>
+                  </td>
+                  <td width="33%" align="center" style="padding:0 6px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 10px auto;">
+                      <tr><td style="width:32px; height:32px; border-radius:16px; background-color:#EAF1F7; text-align:center; font-family:Manrope,Helvetica,Arial,sans-serif; font-weight:700; font-size:14px; color:#3E6A8C; line-height:32px;">2</td></tr>
+                    </table>
+                    <div style="font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:12.5px; font-weight:700; color:#101315;">Soma reads it</div>
+                  </td>
+                  <td width="33%" align="center" style="padding:0 6px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 10px auto;">
+                      <tr><td style="width:32px; height:32px; border-radius:16px; background-color:#EAF1F7; text-align:center; font-family:Manrope,Helvetica,Arial,sans-serif; font-weight:700; font-size:14px; color:#3E6A8C; line-height:32px;">3</td></tr>
+                    </table>
+                    <div style="font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:12.5px; font-weight:700; color:#101315;">Clear daily plan</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td style="padding:0 36px;">
+              <div style="border-top:1px solid #E6E6EC;"></div>
+            </td>
+          </tr>
+
+          <!-- Fallback link -- same {{ .ConfirmationURL }} href as the
+               button above (so it opens the app the same way, see doc
+               comment on "automatic app return" up top), just with clean
+               display text instead of the raw URL. -->
+          <tr>
+            <td style="padding:20px 36px 32px 36px; text-align:center;">
+              <p style="margin:0; font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:12.5px; color:#9A9AA6;">
+                Button not working?
+                <a href="{{ .ConfirmationURL }}" style="color:#3E6A8C; font-weight:700; text-decoration:none;">Confirm your email &rarr;</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+        <!-- /Card -->
+
+        <!-- Footer -- real, verified links from soma4health.com's own footer -->
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="max-width:480px; width:100%;">
+          <tr>
+            <td style="padding:24px 36px 0 36px; text-align:center;">
+              <p style="margin:0 0 6px 0; font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:11.5px; line-height:1.6; color:#9A9AA6;">
+                <a href="https://www.soma4health.com" style="color:#9A9AA6; text-decoration:underline;">soma4health.com</a>
+                &nbsp;&middot;&nbsp;
+                <a href="https://www.soma4health.com/privacy" style="color:#9A9AA6; text-decoration:underline;">Privacy</a>
+                &nbsp;&middot;&nbsp;
+                <a href="https://www.soma4health.com/terms" style="color:#9A9AA6; text-decoration:underline;">Terms</a>
+              </p>
+              <p style="margin:0; font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; font-size:11.5px; color:#9A9AA6;">
+                &copy; 2026 SOMA. If you didn't create this account, you can safely ignore this email.
+              </p>
+            </td>
+          </tr>
+        </table>
+        <!-- /Footer -->
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
