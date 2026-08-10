@@ -72,6 +72,7 @@ struct ReferralCodeSheet: View {
             defer { isRedeeming = false }
             do {
                 let bonusUntil = try await SupabaseClient.shared.redeemReferralCode(code)
+                AnalyticsManager.shared.referralCodeRedeemed(surface: "profile")
                 appState.referralBonusUntil = bonusUntil
                 await NotificationManager.shared.scheduleUpgradeReminder(bonusUntil: bonusUntil)
                 redeemSuccessMessage = "Applied! Free access extended."

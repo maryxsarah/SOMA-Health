@@ -72,6 +72,7 @@ struct ConnectDeviceView: View {
                     Task { await SupabaseClient.shared.backfillRecentHistory() }
                 }
                 appState.markProviderConnected(provider)
+                AnalyticsManager.shared.deviceConnected(provider: provider.rawValue)
             } catch {
                 errorMessage = "Couldn't connect \(provider.displayName): \(error.localizedDescription)"
             }

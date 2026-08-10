@@ -63,6 +63,7 @@ struct ReferralCodeEntryStepView: View {
             defer { isRedeeming = false }
             do {
                 _ = try await SupabaseClient.shared.redeemReferralCode(trimmed)
+                AnalyticsManager.shared.referralCodeRedeemed(surface: "onboarding")
                 onRedeemed()
             } catch {
                 errorMessage = "That code didn't work. Check it and try again."

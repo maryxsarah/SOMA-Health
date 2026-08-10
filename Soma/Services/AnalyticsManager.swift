@@ -21,6 +21,10 @@ final class AnalyticsManager {
         log(.appOpened)
     }
 
+    func onboardingStarted() {
+        log(.onboardingStarted)
+    }
+
     func onboardingCompleted() {
         log(.onboardingCompleted)
     }
@@ -33,6 +37,16 @@ final class AnalyticsManager {
 
     func loginCompleted() {
         log(.loginCompleted)
+    }
+
+    // MARK: - Onboarding funnel
+
+    func deviceConnected(provider: String) {
+        log(.deviceConnected, parameters: [Parameter.provider: provider])
+    }
+
+    func notificationsEnabled() {
+        log(.notificationsEnabled)
     }
 
     // MARK: - Core product usage
@@ -57,10 +71,32 @@ final class AnalyticsManager {
         log(.aiResponseReceived)
     }
 
+    func recommendationRequested() {
+        log(.recommendationRequested)
+    }
+
+    func recommendationGenerated() {
+        log(.recommendationGenerated)
+    }
+
+    func recommendationFailed() {
+        log(.recommendationFailed)
+    }
+
+    // MARK: - Referral
+
+    func referralCodeRedeemed(surface: String) {
+        log(.referralCodeRedeemed, parameters: [Parameter.surface: surface])
+    }
+
     // MARK: - Monetization
 
     func paywallViewed() {
         log(.paywallViewed)
+    }
+
+    func trialStarted(plan: String) {
+        log(.trialStarted, parameters: [Parameter.plan: plan])
     }
 
     func subscriptionStarted(plan: String) {
@@ -84,13 +120,21 @@ final class AnalyticsManager {
     /// as inline string literals at every call site above.
     private enum Event: String {
         case appOpened = "app_opened"
+        case onboardingStarted = "onboarding_started"
         case onboardingCompleted = "onboarding_completed"
         case signupCompleted = "signup_completed"
         case loginCompleted = "login_completed"
+        case deviceConnected = "device_connected"
+        case notificationsEnabled = "notifications_enabled"
         case firstPrompt = "first_prompt"
         case promptSubmitted = "prompt_submitted"
         case aiResponseReceived = "ai_response_received"
+        case recommendationRequested = "recommendation_requested"
+        case recommendationGenerated = "recommendation_generated"
+        case recommendationFailed = "recommendation_failed"
+        case referralCodeRedeemed = "referral_code_redeemed"
         case paywallViewed = "paywall_viewed"
+        case trialStarted = "trial_started"
         case subscriptionStarted = "subscription_started"
         case subscriptionCancelled = "subscription_cancelled"
         case featureUsed = "feature_used"
@@ -99,6 +143,8 @@ final class AnalyticsManager {
     private enum Parameter {
         static let plan = "plan"
         static let featureName = "feature_name"
+        static let provider = "provider"
+        static let surface = "surface"
     }
 
     private static let hasSubmittedFirstPromptKey = "com.soma.analytics.hasSubmittedFirstPrompt"
