@@ -1116,6 +1116,7 @@ struct HomeView: View {
         errorMessage = nil
         defer { isLoading = false }
 
+        AnalyticsManager.shared.recommendationRequested()
         do {
             let snapshot = HealthKitManager.isAvailable
                 ? await HealthKitManager.shared.fetchTodaysMetrics()
@@ -1126,10 +1127,12 @@ struct HomeView: View {
             )
             appState.currentRecommendation = recommendation
             NotificationManager.shared.markSentToday()
+            AnalyticsManager.shared.recommendationGenerated()
         } catch {
             // Covers "expired wearable token" / "zero connected devices" --
             // show a clear message instead of crashing.
             errorMessage = "Couldn't fetch today's data. Reconnect a device or try again."
+            AnalyticsManager.shared.recommendationFailed()
         }
     }
 

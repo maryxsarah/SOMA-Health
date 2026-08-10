@@ -46,6 +46,9 @@ struct OnboardingView: View {
             .padding(.bottom, 12)
         }
         .somaBackground()
+        .onAppear {
+            AnalyticsManager.shared.onboardingStarted()
+        }
         // Pinned below the scroll area -- the sign-up CTA must always be
         // reachable without scrolling, even on a compact device where the
         // content above ends up scrollable (guide feedback: "this should

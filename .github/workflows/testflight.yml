@@ -1,9 +1,10 @@
 name: TestFlight on merge to main
 
-# Every merge/push to main builds a new archive and uploads it to TestFlight,
-# then commits the incremented build number back to main. Runs on a
-# self-hosted macOS runner (this Mac) so it has Xcode 26 and the signing
-# keychain locally. See scripts/README-testflight.md for one-time setup.
+# Every merge/push to main builds a Release archive and uploads it to
+# TestFlight, then commits the incremented build number back to main.
+# Runs entirely on GitHub-hosted macOS runners (macos-26 ships Xcode 26.6) --
+# no local machine involved. Secrets come from repo Settings -> Secrets and
+# variables -> Actions (set them with scripts/gh-set-secrets.sh).
 
 on:
   push:
@@ -20,30 +21,48 @@ permissions:
 
 jobs:
   testflight:
-    runs-on: [self-hosted, macOS]
-    env:
-      # Pin Xcode 26 without needing an interactive `sudo xcode-select`.
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-      # Homebrew (xcodegen) is often absent from the runner service PATH.
-      PATH: /opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
-      - name: Restore gitignored secrets from local stash
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Materialize secrets (xcconfig + App Store Connect API key)
+        env:
+          SUPABASE_HOST: ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          WHOOP_CLIENT_ID: ${{ secrets.WHOOP_CLIENT_ID }}
+          OURA_CLIENT_ID: ${{ secrets.OURA_CLIENT_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
         run: |
           set -euo pipefail
-          STASH="$HOME/.soma-ci"
-          if [[ ! -d "$STASH" ]]; then
-            echo "::error::$STASH not found. Run scripts/ci-stash-secrets.sh once (see scripts/README-testflight.md)."
+          # Debug and Release use the same values; write both.
+          printf 'SUPABASE_HOST = %s\nSUPABASE_ANON_KEY = %s\nWHOOP_CLIENT_ID = %s\nOURA_CLIENT_ID = %s\n' \
+            "$SUPABASE_HOST" "$SUPABASE_ANON_KEY" "$WHOOP_CLIENT_ID" "$OURA_CLIENT_ID" \
+            | tee Config/Config-Debug.xcconfig > Config/Config-Release.xcconfig
+          # Decode the .p8 signing key (tolerate any whitespace/line-wrapping).
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          KEYFILE="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_KEY_P8_BASE64" | tr -d '[:space:]' | base64 --decode > "$KEYFILE" 2>/dev/null \
+            || printf '%s' "$ASC_KEY_P8_BASE64" | tr -d '[:space:]' | base64 -D > "$KEYFILE"
+          echo "decoded key: $(wc -c < "$KEYFILE") bytes, sha256 $(shasum -a 256 "$KEYFILE" | awk '{print $1}')"
+          echo "expected sha256 5521d0777dbd2f6b0ca01c43a9ebba64cf93b76e7dc5085a90370b88aa15b004"
+          echo "first line: $(head -1 "$KEYFILE")"
+          if ! grep -q "BEGIN PRIVATE KEY" "$KEYFILE"; then
+            echo "::error::Decoded .p8 is not a valid PEM -- the ASC_KEY_P8_BASE64 secret is corrupted."
             exit 1
           fi
-          cp "$STASH/Config-Debug.xcconfig"    Config/Config-Debug.xcconfig
-          cp "$STASH/Config-Release.xcconfig"  Config/Config-Release.xcconfig
-          cp "$STASH/asc-api.env"              scripts/asc-api.env
-          # Optional: AppDelegate guards Firebase on this file's presence.
-          if [[ -f "$STASH/GoogleService-Info.plist" ]]; then
-            cp "$STASH/GoogleService-Info.plist" Soma/Resources/GoogleService-Info.plist
-          fi
+          # Credentials file consumed by scripts/testflight.sh.
+          printf 'ASC_KEY_ID=%s\nASC_ISSUER_ID=%s\nASC_KEY_PATH=%s\n' \
+            "$ASC_KEY_ID" "$ASC_ISSUER_ID" \
+            "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            > scripts/asc-api.env
 
       - name: Build and upload to TestFlight
         run: scripts/testflight.sh

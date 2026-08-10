@@ -33,6 +33,7 @@ struct NotificationEnablementView: View {
                         do {
                             try await NotificationManager.shared.requestAuthorization()
                             notificationsEnabled = true
+                            AnalyticsManager.shared.notificationsEnabled()
                             // Same-day coverage: the wake-time-triggered
                             // refresh (BackgroundTaskManager) won't run
                             // again until tomorrow morning, so without

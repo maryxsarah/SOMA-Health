@@ -18,6 +18,8 @@ final class SuperwallEventForwarder: NSObject, SuperwallDelegate {
         switch eventInfo.event {
         case .paywallOpen:
             AnalyticsManager.shared.paywallViewed()
+        case .freeTrialStart(let product, _):
+            AnalyticsManager.shared.trialStarted(plan: product.productIdentifier)
         case .transactionComplete(_, let product, _, _):
             AnalyticsManager.shared.subscriptionStarted(plan: product.productIdentifier)
         default:
