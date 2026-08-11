@@ -100,7 +100,7 @@ struct CompletedWorkoutView: View {
         .padding(.bottom, 4)
     }
 
-    private func statusPill(label: String, background: Color, foreground: Color) -> some View {
+    private func statusPill(label: LocalizedStringKey, background: Color, foreground: Color) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "heart.fill").font(.system(size: 10))
             Text(label).font(.system(size: 12, weight: .semibold))
@@ -140,7 +140,7 @@ struct CompletedWorkoutView: View {
         }
     }
 
-    private func metricTile(label: String, value: String) -> some View {
+    private func metricTile(label: LocalizedStringKey, value: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.system(size: 19, weight: .bold))
@@ -236,7 +236,7 @@ struct CompletedWorkoutView: View {
                 .font(.system(size: 15, weight: .bold))
             HStack(spacing: 8) {
                 ForEach(WorkoutFeelRating.allCases) { rating in
-                    SomaChip(title: rating.displayName, isSelected: log.feelRating == rating) {
+                    SomaChip(title: LocalizedStringKey(rating.displayName), isSelected: log.feelRating == rating) {
                         Task { await setFeelRating(rating) }
                     }
                 }
@@ -401,7 +401,7 @@ private struct EditWorkoutLogSheet: View {
                 Section("How it felt") {
                     HStack(spacing: 8) {
                         ForEach(WorkoutFeelRating.allCases) { rating in
-                            SomaChip(title: rating.displayName, isSelected: feelRating == rating) {
+                            SomaChip(title: LocalizedStringKey(rating.displayName), isSelected: feelRating == rating) {
                                 feelRating = feelRating == rating ? nil : rating
                             }
                         }
@@ -442,7 +442,11 @@ private struct EditWorkoutLogSheet: View {
             ))
             dismiss()
         } catch {
-            errorMessage = "Couldn't save. Try again."
+            errorMessage = String(
+                localized: "Couldn't save. Try again.",
+                defaultValue: "Couldn't save. Try again.",
+                comment: "Error shown when saving an edited workout log's feedback fails"
+            )
         }
     }
 }

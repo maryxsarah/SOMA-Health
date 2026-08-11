@@ -41,8 +41,8 @@ final class NotificationManager {
         guard interval > 0 else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Your free access ends in 2 days"
-        content.body = "Subscribe to Soma Premium to keep getting your full daily plan -- workouts, step targets, and more."
+        content.title = String(localized: "notification.upgradeReminder.title", defaultValue: "Your free access ends in 2 days", comment: "Push notification title warning the user their referral bonus access is ending soon")
+        content.body = String(localized: "notification.upgradeReminder.body", defaultValue: "Subscribe to Soma Premium to keep getting your full daily plan -- workouts, step targets, and more.", comment: "Push notification body warning the user their referral bonus access is ending soon")
         content.sound = .default
 
         let request = UNNotificationRequest(
@@ -109,8 +109,8 @@ final class NotificationManager {
     /// claims to know whether the user has moved today.
     private func scheduleMiddayMovementNudge(for date: String) async {
         let content = UNMutableNotificationContent()
-        content.title = "Stay moving"
-        content.body = "Even a short walk supports today's recovery and tomorrow's readiness."
+        content.title = String(localized: "notification.middayMovement.title", defaultValue: "Stay moving", comment: "Push notification title nudging the user to move during the day")
+        content.body = String(localized: "notification.middayMovement.body", defaultValue: "Even a short walk supports today's recovery and tomorrow's readiness.", comment: "Push notification body nudging the user to move during the day")
         content.sound = .default
         await scheduleToday(hour: Self.middayMovementHour, minute: 0, identifier: "midday-movement-\(date)", content: content)
     }
@@ -121,8 +121,8 @@ final class NotificationManager {
     /// reminder; if it is, the pending request is removed before it can.
     private func scheduleEveningWorkoutReminder(for date: String) async {
         let content = UNMutableNotificationContent()
-        content.title = "Still time today"
-        content.body = "Your workout is ready whenever you are -- log it when you're done to keep your streak."
+        content.title = String(localized: "notification.eveningWorkout.title", defaultValue: "Still time today", comment: "Push notification title reminding the user their workout is still open in the evening")
+        content.body = String(localized: "notification.eveningWorkout.body", defaultValue: "Your workout is ready whenever you are -- log it when you're done to keep your streak.", comment: "Push notification body reminding the user their workout is still open in the evening")
         content.sound = .default
         await scheduleToday(
             hour: Self.eveningWorkoutHour, minute: Self.eveningWorkoutMinute,
@@ -137,12 +137,18 @@ final class NotificationManager {
     /// desired weight/pace set yet) rather than fabricating one.
     private func scheduleProgressCheckIn(for date: String, dayNumber: Int?, workoutsThisWeek: Int) async {
         let content = UNMutableNotificationContent()
-        content.title = "Your progress"
+        content.title = String(localized: "notification.progressCheckIn.title", defaultValue: "Your progress", comment: "Push notification title for the evening progress check-in")
         content.sound = .default
         let workoutClause = workoutsThisWeek > 0
-            ? "\(workoutsThisWeek) workout\(workoutsThisWeek == 1 ? "" : "s") logged this week -- keep the momentum."
-            : "Consistency beats intensity. A short session today still counts."
-        content.body = dayNumber.map { "Day \($0) of your journey. \(workoutClause)" } ?? workoutClause
+            ? String(
+                localized: "notification.progress.workoutsLogged",
+                defaultValue: "\(workoutsThisWeek) workouts logged this week -- keep the momentum.",
+                comment: "Weekly progress notification body, pluralized by workout count"
+              )
+            : String(localized: "notification.progressCheckIn.noWorkoutsBody", defaultValue: "Consistency beats intensity. A short session today still counts.", comment: "Push notification body for the evening progress check-in when no workouts were logged this week")
+        content.body = dayNumber.map {
+            String(localized: "notification.progressCheckIn.dayBody", defaultValue: "Day \($0) of your journey. \(workoutClause)", comment: "Push notification body for the evening progress check-in, showing the day number in the user's journey plus a workout summary clause")
+        } ?? workoutClause
         await scheduleToday(hour: Self.progressCheckInHour, minute: 0, identifier: "progress-checkin-\(date)", content: content)
     }
 

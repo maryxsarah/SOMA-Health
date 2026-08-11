@@ -256,12 +256,12 @@ struct GoalHubView: View {
     private var eyebrowText: String {
         let trailing: String = if goal.kind == .custom {
             if let coachName = goal.coachName, !coachName.isEmpty {
-                "COACH \(coachName.uppercased())"
+                String(localized: "goalHub.eyebrow.coachNamed", defaultValue: "COACH \(coachName.uppercased())", comment: "Goal hub eyebrow badge for a custom goal assigned by a named coach, all caps; placeholder is the coach's name, already uppercased")
             } else {
-                "COACH'S TASK"
+                String(localized: "goalHub.eyebrow.coachTask", defaultValue: "COACH'S TASK", comment: "Goal hub eyebrow badge label for a custom goal with no named coach, all caps")
             }
         } else {
-            "GOAL"
+            String(localized: "goalHub.eyebrow.goal", defaultValue: "GOAL", comment: "Goal hub eyebrow badge label for a preset goal, all caps")
         }
         let sport = sportName.uppercased()
         return sport.isEmpty ? trailing : "\(sport) · \(trailing)"
@@ -343,9 +343,9 @@ struct GoalHubView: View {
     /// Neutral, factual, never warn-colored.
     private func slipLine(_ days: Int) -> String {
         if let reason = goal.etaSlipReason, !reason.isEmpty {
-            return "Moved +\(days) days — \(reason)"
+            return String(localized: "goalHub.eta.slipWithReason", defaultValue: "Moved +\(days) days — \(reason)", comment: "ETA slip notice with a reason; first placeholder is days moved (always positive), second is a free-text reason")
         }
-        return "Moved +\(days) days."
+        return String(localized: "goalHub.eta.slip", defaultValue: "Moved +\(days) days.", comment: "ETA slip notice with no reason given; placeholder is number of days moved (always positive)")
     }
 
     // MARK: - Banners
@@ -397,7 +397,7 @@ struct GoalHubView: View {
         .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
     }
 
-    private func inlineNotice(_ text: String) -> some View {
+    private func inlineNotice(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(.system(size: 13))
             .foregroundStyle(SomaTokens.ink2)
@@ -545,7 +545,7 @@ struct GoalHubView: View {
             } else if retestExpanded {
                 retestEntryCard(event)
             } else {
-                SomaButton(title: retestButtonTitle(event), size: .md, variant: .primary) {
+                SomaButton(title: LocalizedStringKey(retestButtonTitle(event)), size: .md, variant: .primary) {
                     retestValue = officialBaseline ?? presetGoal?.entryRange.lowerBound ?? 0
                     retestStage = currentStageIndex.flatMap { ladder.indices.contains($0) ? ladder[$0] : nil }
                     attempts = []
@@ -573,8 +573,18 @@ struct GoalHubView: View {
     }
 
     private func lockedRowText(daysLeft: Int) -> String {
-        if daysLeft >= 14 { return "Re-test opens in \(Int((Double(daysLeft) / 7).rounded())) weeks" }
-        return daysLeft == 1 ? "Re-test opens in 1 day" : "Re-test opens in \(daysLeft) days"
+        if daysLeft >= 14 {
+            return String(
+                localized: "goalHub.retest.opensInWeeks",
+                defaultValue: "Re-test opens in \(Int((Double(daysLeft) / 7).rounded())) weeks",
+                comment: "Locked re-test row, pluralized by week count"
+            )
+        }
+        return String(
+            localized: "goalHub.retest.opensInDays",
+            defaultValue: "Re-test opens in \(daysLeft) days",
+            comment: "Locked re-test row, pluralized by day count"
+        )
     }
 
     private func lockedRow(daysLeft: Int) -> some View {
@@ -617,7 +627,7 @@ struct GoalHubView: View {
             if isMilestone, !ladder.isEmpty {
                 FlowLayout {
                     ForEach(ladder, id: \.self) { key in
-                        SomaChip(title: SportGoal.stageDisplayName(key), isSelected: retestStage == key) {
+                        SomaChip(title: LocalizedStringKey(SportGoal.stageDisplayName(key)), isSelected: retestStage == key) {
                             retestStage = key
                         }
                     }
@@ -717,7 +727,7 @@ struct GoalHubView: View {
 
     private func targetPositionSuffix(_ delta: Double) -> String {
         guard let target = goal.targetRangeText(unit: unit) else { return "" }
-        return " — target \(target)"
+        return String(localized: "goalHub.retest.targetSuffix", defaultValue: " — target \(target)", comment: "Appended to a re-test progress line to show the target range, e.g. ' — target +3–6 cm'; placeholder is the target range text. Leading text includes a leading em dash and space.")
     }
 
     /// The completion moment IS the achievement card, no separate screen.
@@ -786,7 +796,9 @@ struct GoalHubView: View {
                 .foregroundStyle(.secondary)
             AchievementCardShareLink(variant: .coachExport(
                 goalName: goal.displayName(in: catalog),
-                sessionsLine: goal.committedSessions.map { "\(sessionsDone) of \($0) sessions" } ?? "\(sessionsDone) sessions",
+                sessionsLine: goal.committedSessions.map {
+                    String(localized: "goalHub.coachShare.sessionsLine.withTotal", defaultValue: "\(sessionsDone) of \($0) sessions", comment: "Coach export share card: sessions done vs. committed total; placeholders are sessions done and total committed sessions")
+                } ?? String(localized: "goalHub.coachShare.sessionsLine.noTotal", defaultValue: "\(sessionsDone) sessions", comment: "Coach export share card: sessions done with no committed total; placeholder is sessions done count"),
                 coachName: goal.coachName,
                 chartValues: measurements.map { (date: $0.dayString, value: $0.value) },
                 dateRange: blockDateRange
@@ -826,14 +838,14 @@ struct GoalHubView: View {
         let pastBaseline = past.baselineValue
             ?? past.baselineStage.flatMap { pastGoal?.stageIndex(of: $0).map(Double.init) }
         guard let result = past.resultValue, let baseline = pastBaseline else {
-            return .neutral(goalName: name, deltaText: "Block complete", dateRange: range)
+            return .neutral(goalName: name, deltaText: blockCompleteFallback, dateRange: range)
         }
         let delta = result - baseline
         // Past milestone blocks read as their reached stage, not "+1".
         if pastGoal?.kind == .milestone, !(pastGoal?.stageLadder.isEmpty ?? true) {
             let ladder = pastGoal?.stageLadder ?? []
             let index = Int(result.rounded())
-            let stageText = ladder.indices.contains(index) ? SportGoal.stageDisplayName(ladder[index]) : "Block complete"
+            let stageText = ladder.indices.contains(index) ? SportGoal.stageDisplayName(ladder[index]) : blockCompleteFallback
             return delta >= 1
                 ? .celebratory(goalName: name, deltaText: stageText, dateRange: range)
                 : .neutral(goalName: name, deltaText: stageText, dateRange: range)
@@ -844,6 +856,12 @@ struct GoalHubView: View {
             return .celebratory(goalName: name, deltaText: deltaText, dateRange: range)
         }
         return .neutral(goalName: name, deltaText: deltaText, dateRange: range)
+    }
+
+    /// Fallback delta label for a completed block with no numeric result or
+    /// reached stage to show.
+    private var blockCompleteFallback: String {
+        String(localized: "goalHub.history.blockComplete", defaultValue: "Block complete", comment: "Fallback label for a completed goal block with no numeric result or reached stage to show")
     }
 
     // MARK: - Footer
@@ -908,7 +926,7 @@ struct GoalHubView: View {
                 retestResult = .finalResult(achieved: achieved, value: value, delta: delta)
             }
         } catch {
-            errorMessage = "Couldn't save the measurement. Try again."
+            errorMessage = String(localized: "goalHub.error.saveMeasurement", defaultValue: "Couldn't save the measurement. Try again.", comment: "Error shown when saving a re-test/baseline measurement fails")
         }
     }
 
@@ -919,7 +937,7 @@ struct GoalHubView: View {
             try await SupabaseClient.shared.updateGoalStatus(id: goal.id, status: .paused, pauseReason: .user)
             onChanged()
         } catch {
-            errorMessage = "Couldn't pause the goal. Try again."
+            errorMessage = String(localized: "goalHub.error.pause", defaultValue: "Couldn't pause the goal. Try again.", comment: "Error shown when pausing a goal fails")
         }
     }
 
@@ -931,7 +949,7 @@ struct GoalHubView: View {
             resumeNeedsRebaseline = baselineIsStale
             onChanged()
         } catch {
-            errorMessage = "Couldn't resume the goal. Try again."
+            errorMessage = String(localized: "goalHub.error.resume", defaultValue: "Couldn't resume the goal. Try again.", comment: "Error shown when resuming a paused goal fails")
         }
     }
 
@@ -942,7 +960,7 @@ struct GoalHubView: View {
             try await SupabaseClient.shared.updateGoalStatus(id: goal.id, status: .abandoned)
             onChanged()
         } catch {
-            errorMessage = "Couldn't end the goal. Try again."
+            errorMessage = String(localized: "goalHub.error.end", defaultValue: "Couldn't end the goal. Try again.", comment: "Error shown when ending/abandoning a goal fails")
         }
     }
 }

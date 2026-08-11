@@ -11,7 +11,7 @@ enum PillButtonStyle {
 /// both the flow buttons ("Get Started", "Continue", "Finish Setup") and
 /// the provider "Connect" -> "Connected" transition in one component.
 struct PillButton: View {
-    let title: String
+    let title: LocalizedStringKey
     var style: PillButtonStyle = .primary
     var isEnabled: Bool = true
     var action: () -> Void = {}

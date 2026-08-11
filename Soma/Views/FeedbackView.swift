@@ -19,9 +19,9 @@ struct FeedbackView: View {
 
         var label: String {
             switch self {
-            case .bug: "Bug"
-            case .idea: "Idea"
-            case .other: "Other"
+            case .bug: String(localized: "feedback.type.bug", defaultValue: "Bug", comment: "Feedback type: bug report")
+            case .idea: String(localized: "feedback.type.idea", defaultValue: "Idea", comment: "Feedback type: idea or suggestion")
+            case .other: String(localized: "feedback.type.other", defaultValue: "Other", comment: "Feedback type: anything else")
             }
         }
     }
@@ -75,8 +75,8 @@ struct FeedbackView: View {
 
             TextField(
                 type == .bug
-                    ? "What happened, and what did you expect instead?"
-                    : "What's on your mind?",
+                    ? String(localized: "feedback.placeholder.bug", defaultValue: "What happened, and what did you expect instead?", comment: "Text field placeholder when reporting a bug")
+                    : String(localized: "feedback.placeholder.other", defaultValue: "What's on your mind?", comment: "Text field placeholder for general feedback"),
                 text: $message,
                 axis: .vertical
             )
@@ -124,7 +124,10 @@ struct FeedbackView: View {
                 .foregroundStyle(Theme.pillFill)
             Text("Thank you!")
                 .font(.title3.bold())
-            Text("Your \(type == .bug ? "report" : "feedback") is in. It helps more than you'd think.")
+            let noun = type == .bug
+                ? String(localized: "feedback.noun.report", defaultValue: "report", comment: "Noun substituted into 'Your ___ is in.' for a bug report")
+                : String(localized: "feedback.noun.feedback", defaultValue: "feedback", comment: "Noun substituted into 'Your ___ is in.' for general feedback")
+            Text("Your \(noun) is in. It helps more than you'd think.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -150,7 +153,7 @@ struct FeedbackView: View {
             )
             sent = true
         } catch {
-            errorMessage = "Couldn't send right now. Check your connection and try again."
+            errorMessage = String(localized: "feedback.send.error", defaultValue: "Couldn't send right now. Check your connection and try again.", comment: "Error shown when submitting feedback fails")
         }
     }
 
@@ -203,10 +206,13 @@ enum FeedbackPresenter {
         while let presented = top.presentedViewController { top = presented }
         guard !(top is HostingController) else { return }
 
-        // The root's .preferredColorScheme(.light) doesn't reach a
-        // UIKit-presented controller, so the fixed light aesthetic is
-        // re-applied here.
-        let host = HostingController(rootView: AnyView(FeedbackView().preferredColorScheme(.light)))
+        // Neither .preferredColorScheme(.light) nor .environment(\.locale, ...)
+        // reaches a UIKit-presented controller from the root, so both are re-applied here.
+        let host = HostingController(rootView: AnyView(
+            FeedbackView()
+                .environment(\.locale, LanguageManager.shared.effectiveLocale)
+                .preferredColorScheme(.light)
+        ))
         top.present(host, animated: true)
     }
 }

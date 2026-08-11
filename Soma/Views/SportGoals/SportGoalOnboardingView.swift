@@ -100,7 +100,7 @@ struct SportGoalOnboardingView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func slideView(vignette: some View, title: String, sub: String, subIsBold: Bool = false) -> some View {
+    private func slideView(vignette: some View, title: LocalizedStringKey, sub: LocalizedStringKey, subIsBold: Bool = false) -> some View {
         VStack(spacing: 14) {
             vignette
             VStack(spacing: 4) {
@@ -150,7 +150,7 @@ struct SportGoalOnboardingView: View {
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SomaTokens.surface3))
     }
 
-    private func pathRow(icon: String, accent: Bool, text: String, trailingToggle: Bool = false) -> some View {
+    private func pathRow(icon: String, accent: Bool, text: LocalizedStringKey, trailingToggle: Bool = false) -> some View {
         HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(accent ? SomaTokens.accentSoft : SomaTokens.surface4)
@@ -197,15 +197,15 @@ struct SportGoalOnboardingView: View {
             miniRow(icon: "figure.volleyball", plate: SomaTokens.accentSoft, iconColor: SomaTokens.accent,
                     text: "Volleyball", badge: nil, indented: false)
             miniRow(icon: "arrow.up", plate: SomaTokens.accentSoft, iconColor: SomaTokens.accent,
-                    text: "Jump higher", badge: ("METRIC", true), indented: true)
+                    text: "Jump higher", badge: ("sportGoal.kindBadge.metric", true), indented: true)
             miniRow(icon: "list.clipboard", plate: SomaTokens.heartSoft, iconColor: SomaTokens.heart,
-                    text: "Coach's task", badge: ("CUSTOM", false), indented: true)
+                    text: "Coach's task", badge: ("sportGoal.kindBadge.custom", false), indented: true)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SomaTokens.surface3))
     }
 
-    private func miniRow(icon: String, plate: Color, iconColor: Color, text: String, badge: (String, Bool)?, indented: Bool) -> some View {
+    private func miniRow(icon: String, plate: Color, iconColor: Color, text: LocalizedStringKey, badge: (LocalizedStringKey, Bool)?, indented: Bool) -> some View {
         HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(plate)

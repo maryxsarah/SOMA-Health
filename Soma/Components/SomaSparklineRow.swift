@@ -4,7 +4,7 @@ import SwiftUI
 /// column, a flexible 30pt sparkline in accent-deep, and a right-aligned
 /// delta -- colored only when the direction is good, grey otherwise.
 struct SomaSparklineRow: View {
-    let label: String
+    let label: LocalizedStringKey
     let valueText: String
     /// Chronological series; fewer than 2 points renders no line (honest
     /// blank, not a fabricated flat line).

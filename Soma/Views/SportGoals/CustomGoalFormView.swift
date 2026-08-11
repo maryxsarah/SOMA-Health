@@ -163,7 +163,7 @@ struct CustomGoalFormView: View {
         }
     }
 
-    private func assistButton(title: String, action: @escaping () -> Void) -> some View {
+    private func assistButton(title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: "sparkles")
                 .font(.system(size: 13, weight: .semibold))
@@ -221,13 +221,23 @@ struct CustomGoalFormView: View {
     private var commitmentLine: String {
         var freq: String
         switch scheduleRule {
-        case .weekdays where !scheduleDays.isEmpty: freq = "\(scheduleDays.count)× a week"
-        case .everyOtherDay: freq = "Every other day"
-        case .beforeCourtDays where !courtDays.isEmpty: freq = "Before your \(courtDays.count) court days"
-        case .readiness: freq = "When readiness allows"
-        default: freq = "\(frequencyPerWeek)× a week"
+        case .weekdays where !scheduleDays.isEmpty:
+            freq = String(localized: "customGoalForm.commitmentLine.freqWeekdaysCount", defaultValue: "\(scheduleDays.count)× a week", comment: "Frequency phrase: N times per week, count of selected weekdays")
+        case .everyOtherDay:
+            freq = String(localized: "customGoalForm.commitmentLine.freqEveryOtherDay", defaultValue: "Every other day", comment: "Frequency phrase: training every other day")
+        case .beforeCourtDays where !courtDays.isEmpty:
+            freq = String(localized: "customGoalForm.commitmentLine.freqBeforeCourtDays", defaultValue: "Before your \(courtDays.count) court days", comment: "Frequency phrase: training before each of N court days, pluralized by count")
+        case .readiness:
+            freq = String(localized: "customGoalForm.commitmentLine.freqReadiness", defaultValue: "When readiness allows", comment: "Frequency phrase: schedule driven by readiness rather than fixed days")
+        default:
+            freq = String(localized: "customGoalForm.commitmentLine.freqPerWeekCount", defaultValue: "\(frequencyPerWeek)× a week", comment: "Frequency phrase: fixed N times per week")
         }
-        return "\(freq) for \(durationWeeks) weeks — re-check with your coach around \(SportGoalFormat.shortDate(recheckDate))."
+        let weeksText = String(
+            localized: "customGoalForm.weeksStandalone",
+            defaultValue: "\(durationWeeks) weeks",
+            comment: "Bare week count, pluralized by count"
+        )
+        return String(localized: "customGoalForm.commitmentLine.template", defaultValue: "\(freq) for \(weeksText) — re-check with your coach around \(SportGoalFormat.shortDate(recheckDate)).", comment: "Commitment summary line: frequency phrase, duration in weeks (already pluralized), and the re-check date")
     }
 
     private var effectiveFrequency: Int {
@@ -263,7 +273,7 @@ struct CustomGoalFormView: View {
                 assistLowConfidence = true
             }
         } catch {
-            errorMessage = "Couldn't read that — try again, or fill in the fields yourself."
+            errorMessage = String(localized: "customGoalForm.error.parseFailed", defaultValue: "Couldn't read that — try again, or fill in the fields yourself.", comment: "Error shown when AI parsing of a photographed or typed coach assignment fails")
         }
     }
 
@@ -322,10 +332,10 @@ struct CustomGoalFormView: View {
             case .baselineFailed(let created):
                 conflicts = []
                 pendingBaselineGoal = created
-                errorMessage = "Your goal started, but the baseline couldn't be saved — tap the button again to retry."
+                errorMessage = String(localized: "goalCreation.error.baselineFailed", defaultValue: "Your goal started, but the baseline couldn't be saved — tap the button again to retry.", comment: "Error shown when goal creation succeeded but saving the baseline measurement failed")
             }
         } catch {
-            errorMessage = "Couldn't start the goal. Try again."
+            errorMessage = String(localized: "goalCreation.error.startFailed", defaultValue: "Couldn't start the goal. Try again.", comment: "Generic error shown when starting a goal fails")
         }
     }
 }

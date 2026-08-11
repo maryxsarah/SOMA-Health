@@ -91,7 +91,11 @@ struct EmailAuthView: View {
             case true:
                 appState.markSignedIn()
             case false:
-                checkYourEmailMessage = "Check your email to confirm your account, then log in."
+                checkYourEmailMessage = String(
+                    localized: "email_auth.check_your_email",
+                    defaultValue: "Check your email to confirm your account, then log in.",
+                    comment: "Message shown after sign-up prompting the user to check their email inbox and then log in"
+                )
                 mode = .logIn
             case nil:
                 break // errorMessage already set by signUpWithEmail

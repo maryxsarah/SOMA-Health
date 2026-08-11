@@ -692,7 +692,7 @@ final class SupabaseClient {
     /// fields for review before saving via logMeal(...).
     func parseMealText(_ text: String) async throws -> MealEstimate {
         var request = try await authorizedRequest(path: "functions/v1/parse-meal-text", method: "POST")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "language": await currentAILanguageCode()])
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -706,7 +706,7 @@ final class SupabaseClient {
     /// value to update its own local copy of the entry.
     func rateMeal(id: String) async throws -> (score: Int, rationale: String) {
         var request = try await authorizedRequest(path: "functions/v1/rate-meal", method: "POST")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["mealLogId": id])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["mealLogId": id, "language": await currentAILanguageCode()])
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -879,6 +879,7 @@ final class SupabaseClient {
             "feedback": feedback,
             "workoutTitle": workoutTitle,
             "bodyPart": bodyPart,
+            "language": await currentAILanguageCode(),
         ])
 
         let (data, response) = try await urlSession.data(for: request)
@@ -1152,6 +1153,7 @@ final class SupabaseClient {
         var body: [String: Any] = [
             "date": date,
             "selection": ["title": selectedTitle, "bodyPart": selectedBodyPart],
+            "language": await currentAILanguageCode(),
         ]
         if let notes { body["notes"] = notes }
         if let targetDurationMinutes {
@@ -1169,16 +1171,16 @@ final class SupabaseClient {
         struct SafetyResponse: Decodable { let safety_flag: Bool; let message: String? }
         if let safety = try? JSONDecoder().decode(SafetyResponse.self, from: data), safety.safety_flag {
             throw SupabaseError.safetyBlocked(
-                message: safety.message ?? "Please check with a healthcare professional before starting a new workout."
+                message: safety.message ?? String(localized: "supabase.workout.safetyBlockedFallback", defaultValue: "Please check with a healthcare professional before starting a new workout.", comment: "Fallback message shown when the server's safety guardrail withholds workout generation and sends no message of its own")
             )
         }
         struct LockedResponse: Decodable { let locked: Bool; let message: String? }
         if let locked = try? JSONDecoder().decode(LockedResponse.self, from: data), locked.locked {
-            throw SupabaseError.workoutLocked(message: locked.message ?? "Today's workout is already logged.")
+            throw SupabaseError.workoutLocked(message: locked.message ?? String(localized: "supabase.workout.alreadyLoggedFallback", defaultValue: "Today's workout is already logged.", comment: "Fallback message shown when the server refuses to regenerate an already-completed day's workout and sends no message of its own"))
         }
         struct LimitResponse: Decodable { let generation_limit_reached: Bool; let message: String? }
         if let limit = try? JSONDecoder().decode(LimitResponse.self, from: data), limit.generation_limit_reached {
-            throw SupabaseError.generationLimitReached(message: limit.message ?? "You've used today's AI workout generations.")
+            throw SupabaseError.generationLimitReached(message: limit.message ?? String(localized: "supabase.workout.generationLimitFallback", defaultValue: "You've used today's AI workout generations.", comment: "Fallback message shown when the user's daily AI workout generation quota is used up and the server sends no message of its own"))
         }
         return try JSONDecoder().decode(AIWorkoutPlan.self, from: data)
     }
@@ -1229,6 +1231,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "date": date,
             "confirmedEquipment": confirmedEquipment,
+            "language": await currentAILanguageCode(),
         ])
 
         let (data, response) = try await urlSession.data(for: request)
@@ -1236,15 +1239,15 @@ final class SupabaseClient {
 
         struct SafetyResponse: Decodable { let safety_flag: Bool; let message: String? }
         if let safety = try? JSONDecoder().decode(SafetyResponse.self, from: data), safety.safety_flag {
-            return .safetyBlocked(message: safety.message ?? "Please check with a healthcare professional before starting a new workout.")
+            return .safetyBlocked(message: safety.message ?? String(localized: "supabase.workout.safetyBlockedFallback", defaultValue: "Please check with a healthcare professional before starting a new workout.", comment: "Fallback message shown when the server's safety guardrail withholds workout generation and sends no message of its own"))
         }
         struct LockedResponse: Decodable { let locked: Bool; let message: String? }
         if let locked = try? JSONDecoder().decode(LockedResponse.self, from: data), locked.locked {
-            throw SupabaseError.workoutLocked(message: locked.message ?? "Today's workout is already logged.")
+            throw SupabaseError.workoutLocked(message: locked.message ?? String(localized: "supabase.workout.alreadyLoggedFallback", defaultValue: "Today's workout is already logged.", comment: "Fallback message shown when the server refuses to regenerate an already-completed day's workout and sends no message of its own"))
         }
         struct LimitResponse: Decodable { let generation_limit_reached: Bool; let message: String? }
         if let limit = try? JSONDecoder().decode(LimitResponse.self, from: data), limit.generation_limit_reached {
-            return .generationLimitReached(message: limit.message ?? "You've used today's AI workout generations.")
+            return .generationLimitReached(message: limit.message ?? String(localized: "supabase.workout.generationLimitFallback", defaultValue: "You've used today's AI workout generations.", comment: "Fallback message shown when the user's daily AI workout generation quota is used up and the server sends no message of its own"))
         }
         struct TitleDTO: Decodable { let title: String; let bodyPart: String }
         let titleInfo = try JSONDecoder().decode(TitleDTO.self, from: data)
@@ -1288,7 +1291,7 @@ final class SupabaseClient {
     }
 
     func invokeGenerateRecommendation(date: String, healthkit: HealthKitSnapshot?) async throws -> DailyRecommendation {
-        var body: [String: Any] = ["date": date]
+        var body: [String: Any] = ["date": date, "language": await currentAILanguageCode()]
         if let healthkit {
             var hk: [String: Any] = [:]
             if let v = healthkit.sleepHours { hk["sleepHours"] = v }
@@ -1611,6 +1614,13 @@ final class SupabaseClient {
         return request
     }
 
+    /// `LanguageManager` is `@MainActor`-isolated; this is the one hop
+    /// point every AI-generation call below uses to read the user's
+    /// selected language without making the whole client `@MainActor`.
+    private func currentAILanguageCode() async -> String {
+        await MainActor.run { LanguageManager.shared.selected.aiRequestCode }
+    }
+
     private static func assertSuccess(_ response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
@@ -1670,7 +1680,7 @@ enum SupabaseError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            return "Not signed in."
+            return String(localized: "supabase.error.notSignedIn", defaultValue: "Not signed in.", comment: "Error shown when an API call is made without a valid session")
         case .safetyBlocked(let message):
             return message
         case .workoutLocked(let message):
@@ -1678,7 +1688,7 @@ enum SupabaseError: LocalizedError {
         case .generationLimitReached(let message):
             return message
         case .serviceUnavailable:
-            return "Soma's AI service is temporarily unavailable. We've been notified -- please try again later."
+            return String(localized: "supabase.error.serviceUnavailable", defaultValue: "Soma's AI service is temporarily unavailable. We've been notified -- please try again later.", comment: "Error shown when the server's AI generation backend itself is down or rate-limited")
         case .requestFailed(let status, let message):
             return "Request failed (\(status)): \(message)"
         }

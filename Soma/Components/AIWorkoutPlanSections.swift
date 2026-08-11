@@ -68,7 +68,7 @@ struct AIWorkoutPlanView: View {
         plan.warmUp + plan.blocks.flatMap(\.exercises) + plan.coolDown
     }
 
-    private func aiPhaseSection(title: String, exercises: [AIExercise]) -> some View {
+    private func aiPhaseSection(title: LocalizedStringKey, exercises: [AIExercise]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
                 .font(.caption.bold())

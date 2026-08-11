@@ -3,8 +3,8 @@ import SwiftUI
 /// Reused for both "What's your weight?" and "What's your desired
 /// weight?" -- only the headline/subtext and starting value differ.
 struct WeightQuestionView: View {
-    let headline: String
-    var subtext: String? = nil
+    let headline: LocalizedStringKey
+    var subtext: LocalizedStringKey? = nil
     let progress: Double
     @Binding var weightKg: Double
     let onBack: () -> Void

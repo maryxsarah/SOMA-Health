@@ -3,8 +3,8 @@ import SwiftUI
 /// Generic multi-select survey screen (checkboxes instead of radios) --
 /// used for "what's blocking you" where more than one can apply.
 struct MultiSelectQuestionView<Option: SurveyOption>: View {
-    let headline: String
-    var subtext: String? = nil
+    let headline: LocalizedStringKey
+    var subtext: LocalizedStringKey? = nil
     let progress: Double
     var options: [Option] = Array(Option.allCases)
     @Binding var selection: Set<Option>

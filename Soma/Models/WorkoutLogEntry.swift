@@ -51,9 +51,9 @@ enum WorkoutFeelRating: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .easy: "Easy"
-        case .hardButGood: "Hard but good"
-        case .tooMuch: "Too much"
+        case .easy: String(localized: "workoutFeelRating.easy", defaultValue: "Easy", comment: "Short chip label for a workout that felt easy")
+        case .hardButGood: String(localized: "workoutFeelRating.hardButGood", defaultValue: "Hard but good", comment: "Short chip label for a workout that was hard but felt good")
+        case .tooMuch: String(localized: "workoutFeelRating.tooMuch", defaultValue: "Too much", comment: "Short chip label for a workout that was too much")
         }
     }
 
@@ -64,11 +64,11 @@ enum WorkoutFeelRating: String, Codable, CaseIterable, Identifiable {
     var consequence: String {
         switch self {
         case .easy:
-            "Soma will nudge tomorrow's intensity up a notch if your recovery data supports it."
+            String(localized: "workoutFeelRating.easyConsequence", defaultValue: "Soma will nudge tomorrow's intensity up a notch if your recovery data supports it.", comment: "Longer sentence explaining how rating a workout 'Easy' affects tomorrow's plan")
         case .hardButGood:
-            "Soma will keep the next few days as planned -- this looked like the right effort for today."
+            String(localized: "workoutFeelRating.hardButGoodConsequence", defaultValue: "Soma will keep the next few days as planned -- this looked like the right effort for today.", comment: "Longer sentence explaining how rating a workout 'Hard but good' affects upcoming days' plan")
         case .tooMuch:
-            "Soma will ease tomorrow toward Moderate or Light, even if recovery data alone would suggest more."
+            String(localized: "workoutFeelRating.tooMuchConsequence", defaultValue: "Soma will ease tomorrow toward Moderate or Light, even if recovery data alone would suggest more.", comment: "Longer sentence explaining how rating a workout 'Too much' affects tomorrow's plan")
         }
     }
 }

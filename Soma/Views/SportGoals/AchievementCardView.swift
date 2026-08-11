@@ -82,11 +82,13 @@ struct AchievementCardView: View {
 
     private var headline: String {
         switch variant {
-        case .celebratory: return "Goal achieved"
-        case .neutral: return "Block complete"
+        case .celebratory: return String(localized: "achievementCard.headline.celebratory", defaultValue: "Goal achieved", comment: "Achievement card: headline when the goal target was hit")
+        case .neutral: return String(localized: "achievementCard.headline.neutral", defaultValue: "Block complete", comment: "Achievement card: headline for a completed, non-celebratory block")
         case .coachExport(_, _, let coachName, _, _):
-            if let coachName, !coachName.isEmpty { return "Built with Coach \(coachName)" }
-            return "Coach's task"
+            if let coachName, !coachName.isEmpty {
+                return String(localized: "achievementCard.headline.coachNamed", defaultValue: "Built with Coach \(coachName)", comment: "Achievement card: headline crediting the coach by name")
+            }
+            return String(localized: "achievementCard.headline.coachGeneric", defaultValue: "Coach's task", comment: "Achievement card: headline for a coach-assigned task with no coach name set")
         }
     }
 
@@ -111,8 +113,8 @@ struct AchievementCardView: View {
 
     private var footerRight: String? {
         switch variant {
-        case .celebratory: "Goal achieved"
-        case .neutral: "Block complete"
+        case .celebratory: String(localized: "achievementCard.footer.celebratory", defaultValue: "Goal achieved", comment: "Achievement card: footer label confirming the goal was achieved")
+        case .neutral: String(localized: "achievementCard.footer.neutral", defaultValue: "Block complete", comment: "Achievement card: footer label confirming the block was completed")
         case .coachExport: nil
         }
     }

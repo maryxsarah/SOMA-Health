@@ -113,8 +113,8 @@ struct SportGoalFlowView: View {
                 Text("Goals aren't available right now")
                     .font(.body.bold())
                 Text(loadFailed
-                    ? "Couldn't load the goal catalog. Pull down to try again."
-                    : "Sport goal programs will appear here when they open up.")
+                    ? String(localized: "sportGoalFlow.unavailable.loadFailed", defaultValue: "Couldn't load the goal catalog. Pull down to try again.", comment: "Sport goal flow: shown when the catalog fails to load; pull-to-refresh retries")
+                    : String(localized: "sportGoalFlow.unavailable.notOpen", defaultValue: "Sport goal programs will appear here when they open up.", comment: "Sport goal flow: shown when no goal programs are available yet"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

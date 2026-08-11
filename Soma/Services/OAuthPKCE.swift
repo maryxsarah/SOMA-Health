@@ -42,8 +42,10 @@ enum OAuthError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingCode: "No authorization code was returned."
-        case .stateMismatch: "OAuth state mismatch -- possible interception, aborting."
+        case .missingCode:
+            String(localized: "oauth.error.missingCode", defaultValue: "No authorization code was returned.", comment: "Error shown when an OAuth connect flow (Whoop/Oura) doesn't return an authorization code")
+        case .stateMismatch:
+            String(localized: "oauth.error.stateMismatch", defaultValue: "OAuth state mismatch -- possible interception, aborting.", comment: "Error shown when an OAuth connect flow (Whoop/Oura) returns a state parameter that doesn't match what was sent")
         case .providerError(let message): message
         }
     }

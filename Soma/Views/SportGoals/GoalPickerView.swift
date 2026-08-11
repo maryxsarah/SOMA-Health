@@ -92,8 +92,23 @@ struct SportListView: View {
         let goals = catalog.goals(for: sport)
         let count = goals.count
         let names = goals.map { $0.name.lowercased() }.joined(separator: ", ")
-        guard count > 0 else { return "Your own coach's task" }
-        return "\(count) \(count == 1 ? "goal" : "goals") · \(names)"
+        guard count > 0 else {
+            return String(
+                localized: "goalPicker.sportNote.coachTaskOnly",
+                defaultValue: "Your own coach's task",
+                comment: "Sport picker note shown for a sport with zero catalog goals -- only a custom coach-assigned goal is available"
+            )
+        }
+        let goalsText = String(
+            localized: "goalPicker.goalsStandalone",
+            defaultValue: "\(count) goals",
+            comment: "Bare goal count, pluralized by count"
+        )
+        return String(
+            localized: "goalPicker.sportNote.count",
+            defaultValue: "\(goalsText) · \(names)",
+            comment: "Sport picker note: already-pluralized goal count phrase, followed by a comma-separated list of goal names"
+        )
     }
 }
 
@@ -151,9 +166,9 @@ struct GoalPickerView: View {
                     icon: "list.clipboard",
                     plateColor: SomaTokens.heartSoft,
                     iconColor: SomaTokens.heart,
-                    title: "Your own — coach's task",
+                    title: String(localized: "goalPicker.customTask.title", defaultValue: "Your own — coach's task", comment: "Goal picker: title of the block for attaching a custom coach-assigned task"),
                     badge: .custom,
-                    note: "Attach your coach's assignment — Soma schedules and tracks it"
+                    note: String(localized: "goalPicker.customTask.note", defaultValue: "Attach your coach's assignment — Soma schedules and tracks it", comment: "Goal picker: note under the custom coach's-task block")
                 ) {
                     onSelectCustom()
                 }

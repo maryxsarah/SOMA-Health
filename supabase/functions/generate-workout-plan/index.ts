@@ -45,6 +45,7 @@ import { buildLoadGuidance } from "./loadGuidance.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
 import { resolveFreeTextEquipment } from "../_shared/equipment.ts";
 import { computeEtaShift, conceptFromRow, decideGoalWork, decideSafetyPause, deriveEtaInputs, derivePhase, type GoalBlockHistoryEntry, type GoalWorkBlock, type GoalWorkConcept } from "./goalWork.ts";
+import { languageName, normalizeLanguageCode } from "../_shared/language.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -224,6 +225,8 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const date: string | undefined = body.date;
     const selection: Selection | undefined = body.selection;
+    const languageCode = normalizeLanguageCode(body.language);
+    const language = languageName(body.language);
     const notes: string | undefined = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : undefined;
     const targetDurationRange: DurationRange | undefined =
       body.targetDurationRange && typeof body.targetDurationRange.min === "number" && typeof body.targetDurationRange.max === "number"
@@ -299,10 +302,14 @@ Deno.serve(async (req: Request) => {
     // goal-state change that arrived after the fact.
     const cachedGoalSignature =
       ((cached?.plan as { goal_signature?: string | null } | undefined)?.goal_signature) ?? null;
+    // Absent (pre-existing cached plans) is treated as compatible, same
+    // "don't know, allow it" rule as a null goal signature above.
+    const cachedLanguage = ((cached?.plan as { language?: string | null } | undefined)?.language) ?? null;
     const cachedSelectionLogged = (existingLogs ?? []).some((log) => log.title === selection.title);
     if (
       cached && cached.selected_title === selection.title &&
-      (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged)
+      (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged) &&
+      (cachedLanguage === null || cachedLanguage === languageCode || cachedSelectionLogged)
     ) {
       return jsonResponse({ date, category: cached.category, source: cached.source, ...cached.plan });
     }
@@ -467,6 +474,7 @@ Deno.serve(async (req: Request) => {
       (snapshots ?? []) as SnapshotRow[],
       (recentLogs ?? []) as WorkoutLogRow[],
       notes,
+      language,
     );
 
     // Goal-mapped exercise ids join the closed vocabulary inside, under
@@ -570,6 +578,7 @@ Deno.serve(async (req: Request) => {
       // Cache identity (see the cache read above) + tomorrow's goal-block
       // history (hangs-never-consecutive-days rule in goalWork.ts).
       goal_signature: goalSignature,
+      language: languageCode,
       goal_block: goalBlockMeta(goalDecision),
       // Drives the "Optional finisher -- you're well recovered today"
       // badge client-side (AIWorkoutPlanSections.swift) -- only ever true
@@ -689,6 +698,7 @@ function buildPrompt(
   snapshots: SnapshotRow[],
   recentLogs: WorkoutLogRow[],
   notes: string | undefined,
+  language: string,
 ): string {
   const goals = userRow?.goals?.length ? userRow.goals.join(", ") : "general fitness";
   // A secondary, lower-confidence signal from comparing the user's stored
@@ -835,7 +845,9 @@ Return the full session as:
 - blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). VARIETY IS REQUIRED: use each specific named exercise AT MOST ONCE across the ENTIRE session (warm_up + every block + cool_down combined) -- never repeat the same exercise in multiple blocks or rounds of a superset. Like a real strength coach programming a session, deliberately spread the work across different specific muscles within the target body part (e.g. a lower-body day should mix quad-, hamstring-, glute-, and calf-dominant movements, not four variations of the same squat pattern) and different movement patterns (push/pull/hinge/squat/carry/isolation as relevant), not near-duplicates of one exercise. ${finisherInstruction}${goalInstruction}
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
-For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, and instructions (2-3 sentences, plain and easy to follow, describing exact form/technique). Also give a one-line "focus" summarizing today's session.`;
+For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, and instructions (2-3 sentences, plain and easy to follow, describing exact form/technique). Also give a one-line "focus" summarizing today's session.
+
+Write every piece of narrative text in ${language} -- reps, weight_guidance, intensity, instructions, block names, rest_between_rounds, and the closing "focus" line. Never translate an exercise's "name" -- copy it exactly as given.`;
 }
 
 /// Turns whichever provider(s) reported today into a plain-language health

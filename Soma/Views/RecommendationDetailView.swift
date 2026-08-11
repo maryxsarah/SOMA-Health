@@ -234,53 +234,63 @@ struct RecommendationDetailView: View {
 
     // MARK: - Why this? disclosure (was the "Why today" card)
 
+    private var stepTargetText: String {
+        let target = recommendation.category.stepTarget
+        if let averageSteps {
+            return String(localized: "recommendationDetail.stepTarget.withAverage", defaultValue: "Today's step target: \(target) — you've averaged ~\(Int(averageSteps.rounded()))/day over the last week.", comment: "Step-target sentence in the Why-this disclosure, shown when a recent average step count is available. First placeholder is the target range (e.g. '7,000–9,000 steps'), second is the rounded daily average.")
+        }
+        return String(localized: "recommendationDetail.stepTarget.noAverage", defaultValue: "Today's step target: \(target).", comment: "Step-target sentence in the Why-this disclosure, shown when no recent average step count is available. Placeholder is the target range (e.g. '7,000–9,000 steps').")
+    }
+
     private var whyDisclosureBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(explanationText)
-            Text("Today's step target: \(recommendation.category.stepTarget)\(averageSteps.map { String(format: " — you've averaged ~%.0f/day over the last week.", $0) } ?? ".")")
+            Text(stepTargetText)
                 .font(.system(size: 12.5))
             if let requested = recommendation.userRequestedCategory {
                         // Not styled as a warning (unlike the caps below) --
                         // this wasn't a safety downgrade, it's what the user
                         // themselves asked for.
-                        Text("You asked for a \(requested == .rest ? "rest" : "active recovery") day today.")
+                        Text(requested == .rest
+                            ? String(localized: "recommendationDetail.requestedRest", defaultValue: "You asked for a rest day today.", comment: "Shown when the user explicitly requested a rest day")
+                            : String(localized: "recommendationDetail.requestedActiveRecovery", defaultValue: "You asked for an active recovery day today.", comment: "Shown when the user explicitly requested an active recovery day"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     if recommendation.sleepCapApplied {
-                        Text("Note: today's intensity was capped because of short sleep, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.sleep", defaultValue: "Note: today's intensity was capped because of short sleep, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to short sleep"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.hrvCapApplied {
-                        Text("Note: today's intensity was capped because your HRV is noticeably below your usual baseline, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.hrv", defaultValue: "Note: today's intensity was capped because your HRV is noticeably below your usual baseline, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to low HRV"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.stressCapApplied {
-                        Text("Note: today's intensity was capped because of a high-stress day, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.stress", defaultValue: "Note: today's intensity was capped because of a high-stress day, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to high stress"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.injuryCapApplied {
-                        Text("Note: today's intensity was capped because of a noted injury, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.injury", defaultValue: "Note: today's intensity was capped because of a noted injury, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to a noted injury"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.loadCapApplied {
-                        Text("Note: today's intensity was capped because of a strenuous session very recently, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.load", defaultValue: "Note: today's intensity was capped because of a strenuous session very recently, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to a recent strenuous session"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.volumeCapApplied {
-                        Text("Note: today's intensity was capped because of a high training volume over the last week, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.volume", defaultValue: "Note: today's intensity was capped because of a high training volume over the last week, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to high recent training volume"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.consecutiveDaysCapApplied, overrideCategory == nil {
                         Text(recommendation.category == .rest
-                            ? "Note: you've trained several days in a row without a break, so today is a full rest day, even though recovery looked strong."
-                            : "Note: you've trained 5+ days in a row, so today is active recovery -- light movement only, even though recovery looked strong.")
+                            ? String(localized: "recommendationDetail.cap.consecutiveDaysRest", defaultValue: "Note: you've trained several days in a row without a break, so today is a full rest day, even though recovery looked strong.", comment: "Cap explanation shown when several consecutive training days forced a full rest day")
+                            : String(localized: "recommendationDetail.cap.consecutiveDaysActiveRecovery", defaultValue: "Note: you've trained 5+ days in a row, so today is active recovery -- light movement only, even though recovery looked strong.", comment: "Cap explanation shown when 5+ consecutive training days forced an active-recovery day"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                         if let preCapCategory = recommendation.preCapCategory, preCapCategory != recommendation.category {
@@ -333,14 +343,19 @@ struct RecommendationDetailView: View {
             if let steps = todaySteps.map({ Int($0.rounded()) }) {
                 let reached = steps >= target
                 let overshoot = target > 0 ? Int((Double(steps - target) / Double(target) * 100).rounded()) : 0
+                let progressText: String = {
+                    if reached && overshoot >= 5 {
+                        return String(localized: "recommendationDetail.steps.ahead", defaultValue: "\(steps.formatted()) / \(target.formatted()) · +\(overshoot)%", comment: "Step count vs today's target, shown once the user has exceeded the target by 5% or more. First two placeholders are the done/target step counts, third is the overshoot percentage.")
+                    } else if reached {
+                        return String(localized: "recommendationDetail.steps.goalHit", defaultValue: "\(steps.formatted()) / \(target.formatted()) · Goal hit", comment: "Step count vs today's target, shown once the target is reached. Placeholders are the done/target step counts.")
+                    } else {
+                        return String(localized: "recommendationDetail.steps.inProgress", defaultValue: "\(steps.formatted()) / \(target.formatted())", comment: "Step count vs today's target, still in progress. Placeholders are the done/target step counts.")
+                    }
+                }()
                 HStack(spacing: 6) {
                     Image(systemName: reached ? "checkmark" : "figure.walk")
                         .font(.system(size: 11, weight: .bold))
-                    Text(reached && overshoot >= 5
-                        ? "\(steps.formatted()) / \(target.formatted()) · +\(overshoot)%"
-                        : reached
-                            ? "\(steps.formatted()) / \(target.formatted()) · Goal hit"
-                            : "\(steps.formatted()) / \(target.formatted())")
+                    Text(progressText)
                         .font(.system(size: 12, weight: .semibold))
                     Capsule()
                         .fill(reached ? SomaTokens.success.opacity(0.25) : SomaTokens.surface4)
@@ -431,7 +446,7 @@ struct RecommendationDetailView: View {
                 }
             }
 
-            Text(selectedTitle ?? "Loading today's pick…")
+            Text(selectedTitle ?? String(localized: "recommendationDetail.loadingPick", defaultValue: "Loading today's pick…", comment: "Placeholder shown on the pick card while today's suggested workout is still loading"))
                 .font(.system(size: 20, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -446,10 +461,10 @@ struct RecommendationDetailView: View {
             }
 
             Text(isCompletedToday
-                ? "Today's pick, completed."
+                ? String(localized: "recommendationDetail.pickStatus.completed", defaultValue: "Today's pick, completed.", comment: "Pick-card status line once today's workout has been logged as complete")
                 : aiPlan != nil
-                    ? "Exact sets, weights and how to do each one — ready below."
-                    : "Exact sets, weights and how to do each one — built when you start.")
+                    ? String(localized: "recommendationDetail.pickStatus.planReady", defaultValue: "Exact sets, weights and how to do each one — ready below.", comment: "Pick-card status line once an AI plan has been generated")
+                    : String(localized: "recommendationDetail.pickStatus.planPending", defaultValue: "Exact sets, weights and how to do each one — built when you start.", comment: "Pick-card status line before an AI plan has been generated"))
                 .font(.caption)
                 .foregroundStyle(SomaTokens.ink3)
         }
@@ -459,23 +474,32 @@ struct RecommendationDetailView: View {
         if let suggestion = currentPickSuggestion {
             return suggestion.equipment.displayName
         }
-        if aiPlan?.source == "gym_photo" { return "From your gym scan" }
-        return "Matched to your equipment"
+        if aiPlan?.source == "gym_photo" {
+            return String(localized: "recommendationDetail.gearLine.gymScan", defaultValue: "From your gym scan", comment: "Equipment/source line on the pick card, shown when the workout came from a scanned gym photo")
+        }
+        return String(localized: "recommendationDetail.gearLine.matched", defaultValue: "Matched to your equipment", comment: "Equipment/source line on the pick card, default case")
     }
 
     private var pickDurationText: String {
-        if let actual = aiPlan?.actualDurationMinutes { return "\(actual) min" }
+        if let actual = aiPlan?.actualDurationMinutes {
+            return String(localized: "recommendationDetail.duration.minutes", defaultValue: "\(actual) min", comment: "Workout duration tile value, e.g. '45 min'")
+        }
         guard let range = currentPickSuggestion?.targetDurationMinutes ?? selectedDurationRange else { return "—" }
-        return range.lowerBound == range.upperBound ? "\(range.lowerBound) min" : "\(range.lowerBound)–\(range.upperBound) min"
+        if range.lowerBound == range.upperBound {
+            return String(localized: "recommendationDetail.duration.minutes", defaultValue: "\(range.lowerBound) min", comment: "Workout duration tile value, e.g. '45 min'")
+        }
+        return String(localized: "recommendationDetail.duration.range", defaultValue: "\(range.lowerBound)–\(range.upperBound) min", comment: "Workout duration range tile value, e.g. '30–40 min'")
     }
 
     private var pickExerciseCountText: String {
-        guard let aiPlan else { return "AI-built" }
+        guard let aiPlan else {
+            return String(localized: "recommendationDetail.exercises.aiBuilt", defaultValue: "AI-built", comment: "Exercise-count tile value shown before a plan has been generated")
+        }
         let count = aiPlan.warmUp.count + aiPlan.blocks.reduce(0) { $0 + $1.exercises.count } + aiPlan.coolDown.count
         return "\(count)"
     }
 
-    private func pickTile(label: String, value: String) -> some View {
+    private func pickTile(label: LocalizedStringKey, value: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.system(size: 14, weight: .semibold))
@@ -595,28 +619,29 @@ struct RecommendationDetailView: View {
     /// original per-reason tip only when none of the richer signals apply.
     private var personalizedTomorrowTip: String {
         if recommendation.volumeCapApplied {
-            return "Today was capped for high training volume over the last week. Tomorrow, favor a lighter session or full rest -- accumulated fatigue, not just last night's sleep, is driving this one."
+            return String(localized: "recommendationDetail.tomorrowTip.volumeCap", defaultValue: "Today was capped for high training volume over the last week. Tomorrow, favor a lighter session or full rest -- accumulated fatigue, not just last night's sleep, is driving this one.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for high training volume")
         }
         if recommendation.consecutiveDaysCapApplied {
-            return "You've trained several days in a row. A genuine rest or active-recovery day tomorrow (short walk, light mobility) will do more for your next hard session than pushing through again."
+            return String(localized: "recommendationDetail.tomorrowTip.consecutiveDays", defaultValue: "You've trained several days in a row. A genuine rest or active-recovery day tomorrow (short walk, light mobility) will do more for your next hard session than pushing through again.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for consecutive training days")
         }
         if recommendation.injuryProtocolCapApplied || recommendation.injuryProtocolModerateCapApplied {
-            return "You're in an active injury-recovery window. Keep tomorrow's intensity conservative even if recovery data looks good -- the check-ins are what actually clear you to progress, not a single good reading."
+            return String(localized: "recommendationDetail.tomorrowTip.injuryProtocol", defaultValue: "You're in an active injury-recovery window. Keep tomorrow's intensity conservative even if recovery data looks good -- the check-ins are what actually clear you to progress, not a single good reading.", comment: "Tomorrow's-tip card, shown during an active injury-recovery protocol")
         }
         if recommendation.pregnancyCapApplied {
-            return "General guidance for tomorrow: favor controlled, moderate sessions and listen to how your body responds -- your care provider's advice takes priority over this app's recommendation."
+            return String(localized: "recommendationDetail.tomorrowTip.pregnancy", defaultValue: "General guidance for tomorrow: favor controlled, moderate sessions and listen to how your body responds -- your care provider's advice takes priority over this app's recommendation.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for pregnancy")
         }
         // Body-part imbalance: the same focus trained on most of the last
         // 4 logged days -- a real, evidence-based nudge toward variety
         // (recovery and balanced development both benefit from it),
         // not a fabricated observation.
         if let (dominant, count) = recentBodyPartCounts.max(by: { $0.value < $1.value }), count >= 3 {
-            return "You've focused on \(dominant.displayName.lowercased()) \(count) of your last 4 logged sessions. Consider shifting focus tomorrow -- both recovery and balanced progress benefit from rotating which areas you load."
+            let bodyPart = dominant.displayName.lowercased()
+            return String(localized: "recommendationDetail.tomorrowTip.bodyPartImbalance", defaultValue: "You've focused on \(bodyPart) \(count) of your last 4 logged sessions. Consider shifting focus tomorrow -- both recovery and balanced progress benefit from rotating which areas you load.", comment: "Tomorrow's-tip card, shown when one body part dominated recent sessions. First placeholder is the lowercased body-part name (from Models, not translated here), second is a session count.")
         }
         // Goal-aware: cardio-focused goal but no cardio-tagged session in
         // recent history (recentBodyPartCounts has no .cardio entry at all).
         if profile.goals.contains(.cardioEndurance), recentBodyPartCounts[.cardio] == nil {
-            return "Your goals include cardio endurance, but recent sessions haven't included one. If tomorrow's intensity allows, a cardio-focused session would round things out."
+            return String(localized: "recommendationDetail.tomorrowTip.cardioGoalGap", defaultValue: "Your goals include cardio endurance, but recent sessions haven't included one. If tomorrow's intensity allows, a cardio-focused session would round things out.", comment: "Tomorrow's-tip card, shown when the user has a cardio-endurance goal but no recent cardio sessions")
         }
         return recommendation.reason.tomorrowTip
     }
@@ -737,7 +762,7 @@ struct RecommendationDetailView: View {
             // something a retry can fix. See classifyGenerationError.
             aiPlanError = SupabaseError.serviceUnavailable.errorDescription
         } catch {
-            aiPlanError = "Couldn't generate a plan right now. Try again in a moment."
+            aiPlanError = String(localized: "recommendationDetail.aiPlanError.generic", defaultValue: "Couldn't generate a plan right now. Try again in a moment.", comment: "Fallback error shown when AI workout plan generation fails for an unclassified reason")
         }
     }
 
@@ -749,7 +774,7 @@ struct RecommendationDetailView: View {
             try await SupabaseClient.shared.confirmAIPlan(date: recommendation.date)
             addedToPlan = true
         } catch {
-            addToPlanError = "Couldn't add to today's plan. Try again."
+            addToPlanError = String(localized: "recommendationDetail.addToPlanError", defaultValue: "Couldn't add to today's plan. Try again.", comment: "Error shown when confirming/adding the AI plan to today's plan fails")
         }
     }
 
@@ -786,7 +811,7 @@ struct RecommendationDetailView: View {
                 await fetchAddonSuggestions(feedback: trimmedFeedback, title: selectedTitle, bodyPart: selectedBodyPart)
             }
         } catch {
-            aiPlanError = "Couldn't log this workout. Try again."
+            aiPlanError = String(localized: "recommendationDetail.markCompleteError", defaultValue: "Couldn't log this workout. Try again.", comment: "Error shown when logging a completed workout fails")
         }
     }
 
@@ -808,7 +833,8 @@ struct RecommendationDetailView: View {
     private var goalBlockEyebrow: String? {
         guard Config.enableSportGoals, aiPlan?.goalBlock != nil,
               let activeSportGoal, activeSportGoal.status == .active else { return nil }
-        return "\(activeSportGoal.displayName(in: sportGoalCatalog).uppercased()) · GOAL BLOCK"
+        let goalName = activeSportGoal.displayName(in: sportGoalCatalog).uppercased()
+        return String(localized: "recommendationDetail.goalBlockEyebrow", defaultValue: "\(goalName) · GOAL BLOCK", comment: "Eyebrow label over the AI plan's first block when it's built around an active sport goal, e.g. 'VERTICAL JUMP · GOAL BLOCK'. Placeholder is the goal name, already uppercased.")
     }
 
     private func loadContext() async {
@@ -913,14 +939,14 @@ struct RecommendationDetailView: View {
             checkedInTagsToday.insert(tag)
             injuryCheckinMessage = result.escalate ? result.escalationMessage : nil
         } catch {
-            injuryCheckinMessage = "Couldn't record that check-in. Try again."
+            injuryCheckinMessage = String(localized: "recommendationDetail.checkinError", defaultValue: "Couldn't record that check-in. Try again.", comment: "Error shown when submitting an injury check-in response fails")
         }
     }
 
     /// Mirrors pregnancyGuidance.ts's PREGNANCY_DISCLAIMER verbatim -- fixed
     /// UI copy, not sourced from the LLM response, so it always renders
     /// regardless of what the model actually returned.
-    static let pregnancyDisclaimer = "This is general guidance only, not medical advice -- please follow your doctor's or midwife's recommendations, especially if you have any pregnancy complications."
+    static let pregnancyDisclaimer = String(localized: "recommendationDetail.pregnancyDisclaimer", defaultValue: "This is general guidance only, not medical advice -- please follow your doctor's or midwife's recommendations, especially if you have any pregnancy complications.", comment: "Fixed safety disclaimer shown when the user's profile indicates pregnancy; mirrors pregnancyGuidance.ts's PREGNANCY_DISCLAIMER verbatim")
 
     private func fetchProfileSafely() async -> UserProfile {
         guard let userId = SupabaseClient.shared.currentUserID else { return .empty }

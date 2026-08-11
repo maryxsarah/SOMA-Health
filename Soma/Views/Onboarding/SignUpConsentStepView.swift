@@ -80,7 +80,7 @@ struct SignUpConsentStepView: View {
         }
     }
 
-    private func consentRow(isOn: Binding<Bool>, text: String) -> some View {
+    private func consentRow(isOn: Binding<Bool>, text: LocalizedStringKey) -> some View {
         Button {
             isOn.wrappedValue.toggle()
         } label: {

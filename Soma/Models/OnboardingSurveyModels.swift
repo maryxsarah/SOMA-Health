@@ -9,9 +9,9 @@ enum Sex: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .male: "Male"
-        case .female: "Female"
-        case .other: "Other"
+        case .male: String(localized: "sex.male", defaultValue: "Male", comment: "Onboarding sex selection option")
+        case .female: String(localized: "sex.female", defaultValue: "Female", comment: "Onboarding sex selection option")
+        case .other: String(localized: "sex.other", defaultValue: "Other", comment: "Onboarding sex selection option")
         }
     }
     var systemImageName: String {
@@ -30,16 +30,16 @@ enum WorkoutFrequency: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .zeroToTwo: "0-2"
-        case .threeToFive: "3-5"
-        case .sixPlus: "6+"
+        case .zeroToTwo: String(localized: "workoutFrequency.zeroToTwo", defaultValue: "0-2", comment: "Onboarding workout frequency option, workouts per week range")
+        case .threeToFive: String(localized: "workoutFrequency.threeToFive", defaultValue: "3-5", comment: "Onboarding workout frequency option, workouts per week range")
+        case .sixPlus: String(localized: "workoutFrequency.sixPlus", defaultValue: "6+", comment: "Onboarding workout frequency option, workouts per week range")
         }
     }
     var subtitle: String {
         switch self {
-        case .zeroToTwo: "Workouts now and then"
-        case .threeToFive: "A few workouts per week"
-        case .sixPlus: "Dedicated athlete"
+        case .zeroToTwo: String(localized: "workoutFrequency.zeroToTwoSubtitle", defaultValue: "Workouts now and then", comment: "Onboarding workout frequency option subtitle")
+        case .threeToFive: String(localized: "workoutFrequency.threeToFiveSubtitle", defaultValue: "A few workouts per week", comment: "Onboarding workout frequency option subtitle")
+        case .sixPlus: String(localized: "workoutFrequency.sixPlusSubtitle", defaultValue: "Dedicated athlete", comment: "Onboarding workout frequency option subtitle")
         }
     }
     var systemImageName: String {
@@ -58,16 +58,16 @@ enum ReferralSource: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .youtube: "YouTube"
-        case .tiktok: "TikTok"
-        case .appStore: "App Store"
-        case .google: "Google"
-        case .friendsFamily: "Friends & Family"
-        case .x: "X"
-        case .tv: "TV"
-        case .facebook: "Facebook"
-        case .instagram: "Instagram"
-        case .other: "Other"
+        case .youtube: String(localized: "referralSource.youtube", defaultValue: "YouTube", comment: "Onboarding referral source option")
+        case .tiktok: String(localized: "referralSource.tiktok", defaultValue: "TikTok", comment: "Onboarding referral source option")
+        case .appStore: String(localized: "referralSource.appStore", defaultValue: "App Store", comment: "Onboarding referral source option")
+        case .google: String(localized: "referralSource.google", defaultValue: "Google", comment: "Onboarding referral source option")
+        case .friendsFamily: String(localized: "referralSource.friendsFamily", defaultValue: "Friends & Family", comment: "Onboarding referral source option")
+        case .x: String(localized: "referralSource.x", defaultValue: "X", comment: "Onboarding referral source option")
+        case .tv: String(localized: "referralSource.tv", defaultValue: "TV", comment: "Onboarding referral source option")
+        case .facebook: String(localized: "referralSource.facebook", defaultValue: "Facebook", comment: "Onboarding referral source option")
+        case .instagram: String(localized: "referralSource.instagram", defaultValue: "Instagram", comment: "Onboarding referral source option")
+        case .other: String(localized: "referralSource.other", defaultValue: "Other", comment: "Onboarding referral source option")
         }
     }
     var systemImageName: String {
@@ -91,9 +91,9 @@ enum GoalPace: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .slow: "Slow"
-        case .recommended: "Recommended"
-        case .fast: "Fast"
+        case .slow: String(localized: "goalPace.slow", defaultValue: "Slow", comment: "Onboarding goal pace option")
+        case .recommended: String(localized: "goalPace.recommended", defaultValue: "Recommended", comment: "Onboarding goal pace option")
+        case .fast: String(localized: "goalPace.fast", defaultValue: "Fast", comment: "Onboarding goal pace option")
         }
     }
     var systemImageName: String {
@@ -138,13 +138,13 @@ enum BlockerTag: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .lackOfConsistency: "Lack of consistency"
-        case .unhealthyHabits: "Unhealthy habits"
-        case .lackOfSupport: "Lack of support and plan"
-        case .busySchedule: "Busy schedule"
-        case .noIdeaWhereToStart: "No idea where to start"
-        case .overwhelmed: "Overwhelmed with exercises"
-        case .fatigue: "Constant fatigue and exhaustion"
+        case .lackOfConsistency: String(localized: "blockerTag.lackOfConsistency", defaultValue: "Lack of consistency", comment: "Onboarding blocker tag option")
+        case .unhealthyHabits: String(localized: "blockerTag.unhealthyHabits", defaultValue: "Unhealthy habits", comment: "Onboarding blocker tag option")
+        case .lackOfSupport: String(localized: "blockerTag.lackOfSupport", defaultValue: "Lack of support and plan", comment: "Onboarding blocker tag option")
+        case .busySchedule: String(localized: "blockerTag.busySchedule", defaultValue: "Busy schedule", comment: "Onboarding blocker tag option")
+        case .noIdeaWhereToStart: String(localized: "blockerTag.noIdeaWhereToStart", defaultValue: "No idea where to start", comment: "Onboarding blocker tag option")
+        case .overwhelmed: String(localized: "blockerTag.overwhelmed", defaultValue: "Overwhelmed with exercises", comment: "Onboarding blocker tag option")
+        case .fatigue: String(localized: "blockerTag.fatigue", defaultValue: "Constant fatigue and exhaustion", comment: "Onboarding blocker tag option")
         }
     }
     var systemImageName: String {
@@ -175,10 +175,10 @@ enum JourneyStage: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .justStarting: "Just starting out"
-        case .returningAfterBreak: "Returning after a break"
-        case .consistentButPlateaued: "Consistent, but plateaued"
-        case .experienced: "Experienced and progressing"
+        case .justStarting: String(localized: "journeyStage.justStarting", defaultValue: "Just starting out", comment: "Onboarding journey stage option")
+        case .returningAfterBreak: String(localized: "journeyStage.returningAfterBreak", defaultValue: "Returning after a break", comment: "Onboarding journey stage option")
+        case .consistentButPlateaued: String(localized: "journeyStage.consistentButPlateaued", defaultValue: "Consistent, but plateaued", comment: "Onboarding journey stage option")
+        case .experienced: String(localized: "journeyStage.experienced", defaultValue: "Experienced and progressing", comment: "Onboarding journey stage option")
         }
     }
     var systemImageName: String {
@@ -203,17 +203,17 @@ enum DietType: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .balanced: "Balanced"
-        case .wholeFood: "Whole-food focus"
-        case .mediterranean: "Mediterranean"
-        case .pescatarian: "Pescatarian"
-        case .flexitarian: "Flexitarian"
-        case .vegetarian: "Vegetarian"
-        case .vegan: "Vegan"
-        case .lowCarb: "Low-carb"
-        case .keto: "Keto"
-        case .paleo: "Paleo"
-        case .noDiet: "I don't follow any diet"
+        case .balanced: String(localized: "dietType.balanced", defaultValue: "Balanced", comment: "Onboarding diet type option")
+        case .wholeFood: String(localized: "dietType.wholeFood", defaultValue: "Whole-food focus", comment: "Onboarding diet type option")
+        case .mediterranean: String(localized: "dietType.mediterranean", defaultValue: "Mediterranean", comment: "Onboarding diet type option")
+        case .pescatarian: String(localized: "dietType.pescatarian", defaultValue: "Pescatarian", comment: "Onboarding diet type option")
+        case .flexitarian: String(localized: "dietType.flexitarian", defaultValue: "Flexitarian", comment: "Onboarding diet type option")
+        case .vegetarian: String(localized: "dietType.vegetarian", defaultValue: "Vegetarian", comment: "Onboarding diet type option")
+        case .vegan: String(localized: "dietType.vegan", defaultValue: "Vegan", comment: "Onboarding diet type option")
+        case .lowCarb: String(localized: "dietType.lowCarb", defaultValue: "Low-carb", comment: "Onboarding diet type option")
+        case .keto: String(localized: "dietType.keto", defaultValue: "Keto", comment: "Onboarding diet type option")
+        case .paleo: String(localized: "dietType.paleo", defaultValue: "Paleo", comment: "Onboarding diet type option")
+        case .noDiet: String(localized: "dietType.noDiet", defaultValue: "I don't follow any diet", comment: "Onboarding diet type option")
         }
     }
 }
@@ -233,12 +233,12 @@ enum AccomplishmentGoal: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .boostEnergy: "Boost my energy and mood"
-        case .stayMotivated: "Stay motivated and consistent"
-        case .feelBetterBody: "Feel better about my body"
-        case .knowWorkout: "Know exactly what workout to do every day"
-        case .understandBody: "Understand my body better"
-        case .buildStrength: "Build strength and muscle"
+        case .boostEnergy: String(localized: "accomplishmentGoal.boostEnergy", defaultValue: "Boost my energy and mood", comment: "Onboarding accomplishment goal option")
+        case .stayMotivated: String(localized: "accomplishmentGoal.stayMotivated", defaultValue: "Stay motivated and consistent", comment: "Onboarding accomplishment goal option")
+        case .feelBetterBody: String(localized: "accomplishmentGoal.feelBetterBody", defaultValue: "Feel better about my body", comment: "Onboarding accomplishment goal option")
+        case .knowWorkout: String(localized: "accomplishmentGoal.knowWorkout", defaultValue: "Know exactly what workout to do every day", comment: "Onboarding accomplishment goal option")
+        case .understandBody: String(localized: "accomplishmentGoal.understandBody", defaultValue: "Understand my body better", comment: "Onboarding accomplishment goal option")
+        case .buildStrength: String(localized: "accomplishmentGoal.buildStrength", defaultValue: "Build strength and muscle", comment: "Onboarding accomplishment goal option")
         }
     }
     var systemImageName: String {

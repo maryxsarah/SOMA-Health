@@ -75,11 +75,19 @@ struct ReferralCodeSheet: View {
                 AnalyticsManager.shared.referralCodeRedeemed(surface: "profile")
                 appState.referralBonusUntil = bonusUntil
                 await NotificationManager.shared.scheduleUpgradeReminder(bonusUntil: bonusUntil)
-                redeemSuccessMessage = "Applied! Free access extended."
+                redeemSuccessMessage = String(
+                    localized: "referral_code.success",
+                    defaultValue: "Applied! Free access extended.",
+                    comment: "Shown briefly after a referral code is redeemed successfully, before the sheet auto-dismisses"
+                )
                 try? await Task.sleep(for: .seconds(1))
                 dismiss()
             } catch {
-                redeemError = "That code didn't work. Check it and try again."
+                redeemError = String(
+                    localized: "referral_code.invalid",
+                    defaultValue: "That code didn't work. Check it and try again.",
+                    comment: "Error shown when a referral code fails to redeem"
+                )
             }
         }
     }

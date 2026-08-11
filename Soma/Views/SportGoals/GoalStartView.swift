@@ -154,7 +154,7 @@ struct GoalStartView: View {
                 if !goal.stageLadder.isEmpty {
                     FlowLayout {
                         ForEach(goal.stageLadder, id: \.self) { key in
-                            SomaChip(title: SportGoal.stageDisplayName(key), isSelected: selectedStage == key) {
+                            SomaChip(title: LocalizedStringKey(SportGoal.stageDisplayName(key)), isSelected: selectedStage == key) {
                                 selectedStage = key
                             }
                         }
@@ -164,7 +164,7 @@ struct GoalStartView: View {
                 } else {
                     FlowLayout {
                         ForEach(goal.stageLabels, id: \.self) { stage in
-                            SomaChip(title: stage, isSelected: selectedStage == stage) {
+                            SomaChip(title: LocalizedStringKey(stage), isSelected: selectedStage == stage) {
                                 selectedStage = stage
                             }
                         }
@@ -180,7 +180,7 @@ struct GoalStartView: View {
         }
     }
 
-    private var entryTitle: String {
+    private var entryTitle: LocalizedStringKey {
         switch goal.kind {
         case .milestone: "Where are you today?"
         case .qualitative: "What does done look like?"
@@ -347,10 +347,10 @@ struct GoalStartView: View {
             case .baselineFailed(let created):
                 conflicts = []
                 pendingBaselineGoal = created
-                errorMessage = "Your goal started, but the baseline couldn't be saved — tap the button again to retry."
+                errorMessage = String(localized: "goalCreation.error.baselineFailed", defaultValue: "Your goal started, but the baseline couldn't be saved — tap the button again to retry.", comment: "Error shown when goal creation succeeded but saving the baseline measurement failed")
             }
         } catch {
-            errorMessage = "Couldn't start the goal. Try again."
+            errorMessage = String(localized: "goalCreation.error.startFailed", defaultValue: "Couldn't start the goal. Try again.", comment: "Generic error shown when starting a goal fails")
         }
     }
 

@@ -80,14 +80,21 @@ struct GoalPaceQuestionView: View {
     }
 
     private var estimateHeadline: String {
-        "You should reach your goal in \(estimatedMonths) month\(estimatedMonths == 1 ? "" : "s")"
+        String(
+            localized: "onboarding.estimatedMonths",
+            defaultValue: "You should reach your goal in \(estimatedMonths) months",
+            comment: "Estimated time to reach the user's goal, pluralized by month count"
+        )
     }
 
     private var estimateDescription: String {
         switch pace {
-        case .slow: "Going slow means a gentler, more sustainable daily plan."
-        case .recommended: "A balanced pace that fits steady, lasting progress."
-        case .fast: "A faster pace means a more demanding daily plan."
+        case .slow:
+            String(localized: "goalPace.slow.description", defaultValue: "Going slow means a gentler, more sustainable daily plan.")
+        case .recommended:
+            String(localized: "goalPace.recommended.description", defaultValue: "A balanced pace that fits steady, lasting progress.")
+        case .fast:
+            String(localized: "goalPace.fast.description", defaultValue: "A faster pace means a more demanding daily plan.")
         }
     }
 }

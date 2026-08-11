@@ -121,7 +121,7 @@ struct GoalBodyProgressView: View {
         }
     }
 
-    private func emptyPhotoSlot(title: String, isUploading: Bool, selection: Binding<PhotosPickerItem?>) -> some View {
+    private func emptyPhotoSlot(title: LocalizedStringKey, isUploading: Bool, selection: Binding<PhotosPickerItem?>) -> some View {
         VStack(spacing: 8) {
             PhotosPicker(selection: selection, matching: .images) {
                 ZStack {
@@ -164,7 +164,7 @@ struct GoalBodyProgressView: View {
         }
     }
 
-    private func photoSlot(title: String, image: UIImage?, isUploading: Bool, selection: Binding<PhotosPickerItem?>) -> some View {
+    private func photoSlot(title: LocalizedStringKey, image: UIImage?, isUploading: Bool, selection: Binding<PhotosPickerItem?>) -> some View {
         VStack(spacing: 8) {
             PhotosPicker(selection: selection, matching: .images) {
                 ZStack {
@@ -215,13 +215,17 @@ struct GoalBodyProgressView: View {
     /// a timeline for a goal photo showing a much bigger change.
     private func estimateLine(_ progress: GoalJourneyProgress) -> String {
         guard progress.hasReliableEstimate else {
-            return "Your target weight doesn't match your goal photo yet -- update it in Settings for a real estimate."
+            return String(localized: "goal_progress.estimate.no_reliable_estimate", defaultValue: "Your target weight doesn't match your goal photo yet -- update it in Settings for a real estimate.", comment: "Shown when the user's target weight doesn't support a reliable goal timeline estimate")
         }
         let months = progress.estimatedTotalDays / 30
-        let monthsText = months == 1 ? "1 month" : "\(months) months"
+        let monthsText = String(
+            localized: "onboarding.monthsStandalone",
+            defaultValue: "\(months) months",
+            comment: "Bare month count used as a chart axis label and inline in a sentence, pluralized by count"
+        )
         return progress.fraction >= 1.0
-            ? "Past your estimated ~\(monthsText) timeline -- steady progress still counts."
-            : "Roughly \(monthsText) to your goal at your chosen pace."
+            ? String(localized: "goal_progress.estimate.past_timeline", defaultValue: "Past your estimated ~\(monthsText) timeline -- steady progress still counts.", comment: "Shown once the user has passed their estimated goal timeline; the placeholder is a month count like '3 months'")
+            : String(localized: "goal_progress.estimate.remaining_timeline", defaultValue: "Roughly \(monthsText) to your goal at your chosen pace.", comment: "Shown with the estimated remaining time to reach the goal; the placeholder is a month count like '3 months'")
     }
 
     // MARK: - Insights (AI photo comparison, shown directly per product decision)
@@ -271,7 +275,7 @@ struct GoalBodyProgressView: View {
 
     // MARK: - History
 
-    private func historySection(title: String, entries: [BodyPhotoEntry], kind: SupabaseClient.BodyPhotoKind) -> some View {
+    private func historySection(title: LocalizedStringKey, entries: [BodyPhotoEntry], kind: SupabaseClient.BodyPhotoKind) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.subheadline.bold())
@@ -367,7 +371,7 @@ struct GoalBodyProgressView: View {
     private func upload(kind: SupabaseClient.BodyPhotoKind, item: PhotosPickerItem?) async {
         guard let item, let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
         guard let compressed = ImageCompression.jpeg(image) else {
-            errorMessage = "Couldn't process that photo. Try another one."
+            errorMessage = String(localized: "goal_progress.error.process_photo", defaultValue: "Couldn't process that photo. Try another one.", comment: "Error shown when a selected photo fails to compress/process")
             return
         }
 
@@ -414,7 +418,7 @@ struct GoalBodyProgressView: View {
                 }
             }
         } catch {
-            errorMessage = "Couldn't upload that photo. Try again."
+            errorMessage = String(localized: "goal_progress.error.upload_photo", defaultValue: "Couldn't upload that photo. Try again.", comment: "Error shown when uploading a photo to the server fails")
         }
     }
 
@@ -431,7 +435,7 @@ struct GoalBodyProgressView: View {
                 currentImage = image
             }
         } catch {
-            errorMessage = "Couldn't switch to that photo. Try again."
+            errorMessage = String(localized: "goal_progress.error.switch_photo", defaultValue: "Couldn't switch to that photo. Try again.", comment: "Error shown when pinning/switching to a history photo fails")
         }
     }
 }

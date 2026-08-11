@@ -96,7 +96,7 @@ struct BodyPhotosStepView: View {
     private func upload(kind: SupabaseClient.BodyPhotoKind, item: PhotosPickerItem?) async {
         guard let item, let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
         guard let compressed = ImageCompression.jpeg(image) else {
-            errorMessage = "Couldn't process that photo. Try another one."
+            errorMessage = String(localized: "photoUpload.error.processingFailed", defaultValue: "Couldn't process that photo. Try another one.", comment: "Error shown when a selected body photo fails local compression/processing before upload.")
             return
         }
 
@@ -115,7 +115,7 @@ struct BodyPhotosStepView: View {
                 Task { try? await SupabaseClient.shared.analyzeBodyPhotos() }
             }
         } catch {
-            errorMessage = "Couldn't upload that photo. Try again."
+            errorMessage = String(localized: "photoUpload.error.uploadFailed", defaultValue: "Couldn't upload that photo. Try again.", comment: "Error shown when the body photo upload request to the backend fails.")
         }
     }
 }

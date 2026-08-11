@@ -19,6 +19,7 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { assessHealthKit } from "./healthkitBand.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
+import { normalizeLanguageCode } from "../_shared/language.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -43,14 +44,82 @@ import type { Band, DataConfidence, HealthKitPayload } from "./healthkitBand.ts"
 type Category = "rest" | "light" | "moderate" | "push_hard";
 type Source = "whoop" | "oura" | "healthkit";
 
-const MESSAGES: Record<Category, string> = {
-  push_hard:
-    "You're well recovered — today's a good day to push. Go for a hard workout or high-intensity session.",
-  moderate:
-    "You're in decent shape today. A moderate cardio session or a solid strength workout (30-45 min) is a good call.",
-  light:
-    "Take it easier today — a short walk, mobility work, or light yoga (20-30 min) is ideal.",
-  rest: "Today's a recovery day. Keep movement light and let your body rest — a gentle walk is plenty.",
+// This is a fixed, deterministic dict, not an LLM call -- there's no
+// prompt to hand a language instruction to, so every string Soma ships a
+// UI language for needs its own literal translation here too.
+const MESSAGES: Record<string, Record<Category, string>> = {
+  en: {
+    push_hard:
+      "You're well recovered — today's a good day to push. Go for a hard workout or high-intensity session.",
+    moderate:
+      "You're in decent shape today. A moderate cardio session or a solid strength workout (30-45 min) is a good call.",
+    light:
+      "Take it easier today — a short walk, mobility work, or light yoga (20-30 min) is ideal.",
+    rest: "Today's a recovery day. Keep movement light and let your body rest — a gentle walk is plenty.",
+  },
+  es: {
+    push_hard:
+      "Estás bien recuperado — hoy es un buen día para exigirte. Ve a por un entrenamiento intenso o una sesión de alta intensidad.",
+    moderate:
+      "Hoy estás en buena forma. Una sesión de cardio moderada o un buen entrenamiento de fuerza (30-45 min) es una buena opción.",
+    light:
+      "Tómatelo con calma hoy — un paseo corto, trabajo de movilidad o yoga suave (20-30 min) es ideal.",
+    rest: "Hoy es un día de recuperación. Mantén el movimiento ligero y deja que tu cuerpo descanse — un paseo suave es suficiente.",
+  },
+  fr: {
+    push_hard:
+      "Vous êtes bien récupéré — c'est le bon jour pour vous dépasser. Optez pour un entraînement intense ou une séance à haute intensité.",
+    moderate:
+      "Vous êtes en bonne forme aujourd'hui. Une séance de cardio modérée ou un bon entraînement de force (30-45 min) est une bonne option.",
+    light:
+      "Prenez-le plus doucement aujourd'hui — une courte marche, du travail de mobilité ou un yoga léger (20-30 min) est idéal.",
+    rest: "Aujourd'hui est un jour de récupération. Restez léger dans vos mouvements et laissez votre corps se reposer — une marche douce suffit.",
+  },
+  it: {
+    push_hard:
+      "Ti sei ripreso bene — oggi è una buona giornata per spingere. Punta su un allenamento intenso o una sessione ad alta intensità.",
+    moderate:
+      "Oggi sei in buona forma. Una sessione di cardio moderata o un buon allenamento di forza (30-45 min) è una buona scelta.",
+    light:
+      "Oggi vacci piano — una breve camminata, lavoro di mobilità o yoga leggero (20-30 min) è l'ideale.",
+    rest: "Oggi è una giornata di recupero. Mantieni il movimento leggero e lascia riposare il corpo — una camminata leggera è sufficiente.",
+  },
+  de: {
+    push_hard:
+      "Du bist gut erholt — heute ist ein guter Tag, um an deine Grenzen zu gehen. Wähle ein intensives Training oder eine hochintensive Einheit.",
+    moderate:
+      "Du bist heute gut in Form. Eine moderate Cardio-Einheit oder ein solides Krafttraining (30-45 Min) ist eine gute Wahl.",
+    light:
+      "Geh es heute ruhiger an — ein kurzer Spaziergang, Mobility-Übungen oder sanftes Yoga (20-30 Min) sind ideal.",
+    rest: "Heute ist ein Erholungstag. Bleib in Bewegung, aber locker, und lass deinem Körper Ruhe — ein entspannter Spaziergang reicht völlig.",
+  },
+  ru: {
+    push_hard:
+      "Ты хорошо восстановился — сегодня отличный день, чтобы выложиться. Выбери интенсивную тренировку или высокоинтенсивную сессию.",
+    moderate:
+      "Сегодня ты в хорошей форме. Умеренная кардиотренировка или силовая тренировка (30-45 мин) — хороший вариант.",
+    light:
+      "Сегодня стоит сбавить темп — короткая прогулка, упражнения на подвижность или лёгкая йога (20-30 мин) — то, что нужно.",
+    rest: "Сегодня день восстановления. Двигайся по минимуму и дай телу отдохнуть — достаточно спокойной прогулки.",
+  },
+  ka: {
+    push_hard:
+      "კარგად აღდგენილი ხარ — დღეს კარგი დღეა, რომ მეტი მოითხოვო საკუთარი თავისგან. აირჩიე ინტენსიური ვარჯიში ან მაღალი ინტენსივობის სესია.",
+    moderate:
+      "დღეს კარგ ფორმაში ხარ. ზომიერი კარდიო სესია ან სოლიდური საძალო ვარჯიში (30-45 წთ) კარგი არჩევანია.",
+    light:
+      "დღეს უფრო მშვიდად მოეკიდე — მოკლე გასეირნება, მოძრაობის ვარჯიშები ან მსუბუქი იოგა (20-30 წთ) იდეალურია.",
+    rest: "დღეს აღდგენის დღეა. იმოძრავე მსუბუქად და მიეცი სხეულს დასვენება — მშვიდი გასეირნება საკმარისია.",
+  },
+  hy: {
+    push_hard:
+      "Դու լավ վերականգնվել ես — այսօր լավ օր է սահմանները մղելու համար։ Ընտրիր ինտենսիվ մարզում կամ բարձր ինտենսիվության պարապմունք։",
+    moderate:
+      "Այսօր դու լավ ֆորմայում ես։ Չափավոր կարդիո պարապմունքը կամ լավ ուժային մարզումը (30-45 րոպե) լավ ընտրություն է։",
+    light:
+      "Այսօր ավելի հանգիստ վերաբերվիր — կարճ զբոսանք, շարժունակության վարժություններ կամ թեթև յոգա (20-30 րոպե) իդեալական է։",
+    rest: "Այսօր վերականգնման օր է։ Պահպանիր թեթև շարժում և թող մարմինդ հանգստանա — հանգիստ զբոսանքը բավական է։",
+  },
 };
 
 interface WearableTokenRow {
@@ -70,6 +139,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const date: string | undefined = body.date;
     const healthkit: HealthKitPayload | undefined = body.healthkit;
+    const language = normalizeLanguageCode(body.language);
 
     if (!date) {
       return jsonResponse({ error: "missing 'date' (YYYY-MM-DD)" }, 400);
@@ -411,7 +481,7 @@ Deno.serve(async (req: Request) => {
     // computed cap above -- see the comment where userRequestedCategory is
     // read, near the top of this handler.
     const category: Category = userRequestedCategory ?? computedCategory;
-    const message = MESSAGES[category];
+    const message = MESSAGES[language][category];
 
     await supabase
       .from("daily_recommendation")

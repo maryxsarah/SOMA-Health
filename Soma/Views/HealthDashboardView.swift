@@ -22,10 +22,10 @@ struct HealthDashboardView: View {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .overview: "Overview"
-            case .sleep: "Sleep"
-            case .activity: "Activity"
-            case .body: "Body"
+            case .overview: String(localized: "dashboardSection.overview", defaultValue: "Overview", comment: "Dashboard section chip: overview tab")
+            case .sleep: String(localized: "dashboardSection.sleep", defaultValue: "Sleep", comment: "Dashboard section chip: sleep tab")
+            case .activity: String(localized: "dashboardSection.activity", defaultValue: "Activity", comment: "Dashboard section chip: activity tab")
+            case .body: String(localized: "dashboardSection.body", defaultValue: "Body", comment: "Dashboard section chip: body tab")
             }
         }
     }
@@ -125,19 +125,27 @@ struct HealthDashboardView: View {
         trendCard(title: "Recovery", series: series { $0.recoveryScore ?? $0.readinessScore }, format: "%.0f")
 
         accordionCard(items: [
-            ("Recovery / Readiness", todaysValueText(format: "%.0f", unit: "") { $0.recoveryScore ?? $0.readinessScore }, "A single score blending your heart rate variability, resting heart rate, and sleep from last night -- Whoop calls it Recovery, Oura calls it Readiness. Higher generally means your body is better prepared for a harder effort today."),
-            ("HRV", todaysValueText(format: "%.0f", unit: " ms") { $0.hrvMs }, "The variation in time between heartbeats. Generally, a higher HRV relative to your own baseline suggests your nervous system is well-recovered; a lower one can signal fatigue, stress, or incomplete recovery."),
-            ("Resting HR", todaysValueText(format: "%.0f", unit: " bpm") { $0.restingHr }, "Your heart rate at rest, usually measured overnight. A notably higher-than-usual resting heart rate can be an early sign of accumulated fatigue, illness, or poor sleep."),
-            ("Sleep", todaysValueText(format: "%.1f", unit: " h") { $0.sleepHours }, "Total time asleep. Both duration and consistency matter for recovery -- see the Sleep section for how that time was split between light, deep, and REM sleep."),
+            (String(localized: "overviewAccordion.recovery.title", defaultValue: "Recovery / Readiness", comment: "Accordion item title for the combined recovery/readiness score explainer"),
+             todaysValueText(format: "%.0f", unit: "") { $0.recoveryScore ?? $0.readinessScore },
+             String(localized: "overviewAccordion.recovery.text", defaultValue: "A single score blending your heart rate variability, resting heart rate, and sleep from last night -- Whoop calls it Recovery, Oura calls it Readiness. Higher generally means your body is better prepared for a harder effort today.", comment: "Accordion explainer text for the Recovery/Readiness score")),
+            (String(localized: "overviewAccordion.hrv.title", defaultValue: "HRV", comment: "Accordion item title for heart rate variability (kept as the HRV acronym)"),
+             todaysValueText(format: "%.0f", unit: " ms") { $0.hrvMs },
+             String(localized: "overviewAccordion.hrv.text", defaultValue: "The variation in time between heartbeats. Generally, a higher HRV relative to your own baseline suggests your nervous system is well-recovered; a lower one can signal fatigue, stress, or incomplete recovery.", comment: "Accordion explainer text for HRV")),
+            (String(localized: "overviewAccordion.restingHR.title", defaultValue: "Resting HR", comment: "Accordion item title for resting heart rate"),
+             todaysValueText(format: "%.0f", unit: " bpm") { $0.restingHr },
+             String(localized: "overviewAccordion.restingHR.text", defaultValue: "Your heart rate at rest, usually measured overnight. A notably higher-than-usual resting heart rate can be an early sign of accumulated fatigue, illness, or poor sleep.", comment: "Accordion explainer text for resting heart rate")),
+            (String(localized: "overviewAccordion.sleep.title", defaultValue: "Sleep", comment: "Accordion item title for total sleep duration"),
+             todaysValueText(format: "%.1f", unit: " h") { $0.sleepHours },
+             String(localized: "overviewAccordion.sleep.text", defaultValue: "Total time asleep. Both duration and consistency matter for recovery -- see the Sleep section for how that time was split between light, deep, and REM sleep.", comment: "Accordion explainer text for total sleep duration")),
         ])
     }
 
     private func overviewHeadline(score: Double, isWhoop: Bool) -> String {
         switch HealthMetricFamily.qualitativeBand(recoveryOrReadiness: score, isWhoopRecovery: isWhoop) {
-        case .high: return "High — a good day to push"
-        case .mediumHigh: return "Medium-High — quality work fits today"
-        case .medium: return "Medium — moderate effort fits"
-        case .low: return "Low — favor recovery today"
+        case .high: return String(localized: "overviewHero.headline.high", defaultValue: "High — a good day to push", comment: "Overview hero headline when recovery/readiness is in the high band")
+        case .mediumHigh: return String(localized: "overviewHero.headline.mediumHigh", defaultValue: "Medium-High — quality work fits today", comment: "Overview hero headline when recovery/readiness is in the medium-high band")
+        case .medium: return String(localized: "overviewHero.headline.medium", defaultValue: "Medium — moderate effort fits", comment: "Overview hero headline when recovery/readiness is in the medium band")
+        case .low: return String(localized: "overviewHero.headline.low", defaultValue: "Low — favor recovery today", comment: "Overview hero headline when recovery/readiness is in the low band")
         }
     }
 
@@ -151,7 +159,9 @@ struct HealthDashboardView: View {
             heroCard(
                 ringValue: min(hours, 8), ringMax: 8, ringText: String(format: "%.1f", hours), ringUnit: "OF 8 H",
                 eyebrow: "LAST NIGHT",
-                headline: hours >= 7 ? "Solid night's sleep" : "Shorter than ideal",
+                headline: hours >= 7
+                    ? String(localized: "sleepHero.headline.good", defaultValue: "Solid night's sleep", comment: "Sleep hero headline when last night's sleep was 7 hours or more")
+                    : String(localized: "sleepHero.headline.short", defaultValue: "Shorter than ideal", comment: "Sleep hero headline when last night's sleep was under 7 hours"),
                 context: averageDeltaContext(values: seriesValues { $0.sleepHours }, current: hours, unit: " h", format: "%+.1f")
             )
         } else {
@@ -203,7 +213,9 @@ struct HealthDashboardView: View {
         heroCard(
             ringValue: Double(min(done, target)), ringMax: Double(target), ringText: "\(done)", ringUnit: "OF \(target)",
             eyebrow: "SESSIONS THIS WEEK",
-            headline: done >= target ? "Weekly target hit" : "\(target - done) to go this week",
+            headline: done >= target
+                ? String(localized: "activityHero.headline.hit", defaultValue: "Weekly target hit", comment: "Activity hero headline when the weekly session target is met")
+                : String(localized: "activityHero.headline.remaining", defaultValue: "\(target - done) to go this week", comment: "Activity hero headline showing sessions remaining to hit the weekly target; the number is sessions left"),
             context: nil
         )
 
@@ -215,8 +227,12 @@ struct HealthDashboardView: View {
         trendCard(title: "Strain", series: series { $0.strainScore }, format: "%.1f")
 
         accordionCard(items: [
-            ("Strain", todaysValueText(format: "%.1f", unit: "") { $0.strainScore }, "How much cardiovascular and muscular load your body has taken on. Whoop scores this 0-21; other sources report the count of harder sessions. Consistently high strain without matching recovery is what today's training caps are designed to catch."),
-            ("Stress", todaysValueText(format: "%.0f", unit: " min") { $0.stressScore }, "Time spent in a high-stress physiological state today, as reported by Oura. This reflects the body's stress response generally, not necessarily how you feel emotionally."),
+            (String(localized: "activityAccordion.strain.title", defaultValue: "Strain", comment: "Accordion item title for training strain"),
+             todaysValueText(format: "%.1f", unit: "") { $0.strainScore },
+             String(localized: "activityAccordion.strain.text", defaultValue: "How much cardiovascular and muscular load your body has taken on. Whoop scores this 0-21; other sources report the count of harder sessions. Consistently high strain without matching recovery is what today's training caps are designed to catch.", comment: "Accordion explainer text for strain")),
+            (String(localized: "activityAccordion.stress.title", defaultValue: "Stress", comment: "Accordion item title for high-stress minutes"),
+             todaysValueText(format: "%.0f", unit: " min") { $0.stressScore },
+             String(localized: "activityAccordion.stress.text", defaultValue: "Time spent in a high-stress physiological state today, as reported by Oura. This reflects the body's stress response generally, not necessarily how you feel emotionally.", comment: "Accordion explainer text for stress")),
         ])
     }
 
@@ -235,9 +251,7 @@ struct HealthDashboardView: View {
                 }
                 if let goal = profile?.desiredWeightKg {
                     let delta = weight - goal
-                    Text(abs(delta) < 0.05
-                        ? "At your goal weight"
-                        : String(format: "%.1f kg %@ your goal of %.1f kg", abs(delta), delta > 0 ? "above" : "below", goal))
+                    Text(weightGoalComparisonText(delta: delta, goal: goal))
                         .font(.system(size: 13))
                         .foregroundStyle(SomaTokens.ink2)
                 }
@@ -256,9 +270,25 @@ struct HealthDashboardView: View {
         }
     }
 
+    /// Above/below are two full sentences, not a word swapped into a shared
+    /// template -- word order and agreement can differ per language.
+    private func weightGoalComparisonText(delta: Double, goal: Double) -> String {
+        let absDelta = abs(delta)
+        guard absDelta >= 0.05 else {
+            return String(localized: "bodySection.weightGoal.atGoal", defaultValue: "At your goal weight", comment: "Shown in the Body section when current weight matches the goal weight")
+        }
+        let absDeltaText = String(format: "%.1f", absDelta)
+        let goalText = String(format: "%.1f", goal)
+        if delta > 0 {
+            return String(localized: "bodySection.weightGoal.above", defaultValue: "\(absDeltaText) kg above your goal of \(goalText) kg", comment: "Shown in the Body section when current weight is above the goal weight; both values are formatted kg amounts")
+        } else {
+            return String(localized: "bodySection.weightGoal.below", defaultValue: "\(absDeltaText) kg below your goal of \(goalText) kg", comment: "Shown in the Body section when current weight is below the goal weight; both values are formatted kg amounts")
+        }
+    }
+
     // MARK: - Shared cards
 
-    private func heroCard(ringValue: Double, ringMax: Double, ringText: String, ringUnit: String, eyebrow: String, headline: String, context: String?) -> some View {
+    private func heroCard(ringValue: Double, ringMax: Double, ringText: String, ringUnit: LocalizedStringKey, eyebrow: LocalizedStringKey, headline: String, context: String?) -> some View {
         CardView {
             HStack(spacing: 18) {
                 ZStack {
@@ -332,7 +362,7 @@ struct HealthDashboardView: View {
         return MetricRowModel(
             id: label,
             family: family,
-            row: SomaSparklineRow(label: label, valueText: valueText, series: values, deltaText: deltaText, deltaIsGood: deltaIsGood)
+            row: SomaSparklineRow(label: LocalizedStringKey(label), valueText: valueText, series: values, deltaText: deltaText, deltaIsGood: deltaIsGood)
         )
     }
 
@@ -355,7 +385,7 @@ struct HealthDashboardView: View {
     }
 
     @ViewBuilder
-    private func trendCard(title: String, series values: [(date: String, value: Double)], format: String) -> some View {
+    private func trendCard(title: LocalizedStringKey, series values: [(date: String, value: Double)], format: String) -> some View {
         if values.count > 1 {
             let raw = values.map(\.value)
             let avg = raw.reduce(0, +) / Double(raw.count)
@@ -455,7 +485,7 @@ struct HealthDashboardView: View {
 
     private func bestInRangeContext(values: [Double], current: Double) -> String? {
         guard values.count > 2, current >= (values.max() ?? current) else { return nil }
-        return "Best in \(values.count) days"
+        return String(localized: "heroContext.bestInRange", defaultValue: "Best in \(values.count) days", comment: "Hero card badge shown when today's value is the best in the recent range; the number is a count of days")
     }
 
     private func averageDeltaContext(values: [Double], current: Double, unit: String, format: String) -> String? {
@@ -464,7 +494,8 @@ struct HealthDashboardView: View {
         let avg = prior.reduce(0, +) / Double(prior.count)
         let delta = current - avg
         guard delta > 0 else { return nil }
-        return "\(String(format: format, delta))\(unit) vs your average"
+        let deltaText = "\(String(format: format, delta))\(unit)"
+        return String(localized: "heroContext.vsAverage", defaultValue: "\(deltaText) vs your average", comment: "Hero card badge showing today's value relative to the recent average; the value is a formatted number with its unit")
     }
 
     private func load() async {

@@ -51,9 +51,9 @@ enum MealVerdict: Equatable {
 
     var displayTitle: String {
         switch self {
-        case .good: "Great fit"
-        case .ok: "OK fit"
-        case .notGreat: "Not a great fit"
+        case .good: String(localized: "mealVerdict.greatFit", defaultValue: "Great fit", comment: "Meal verdict badge shown when a logged meal fits the user's nutrition targets well")
+        case .ok: String(localized: "mealVerdict.okFit", defaultValue: "OK fit", comment: "Meal verdict badge shown when a logged meal moderately fits the user's nutrition targets")
+        case .notGreat: String(localized: "mealVerdict.notGreatFit", defaultValue: "Not a great fit", comment: "Meal verdict badge shown when a logged meal poorly fits the user's nutrition targets")
         }
     }
 

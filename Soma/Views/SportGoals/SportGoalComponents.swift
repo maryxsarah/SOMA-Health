@@ -5,7 +5,13 @@ import SwiftUI
 enum GoalPhase: String, CaseIterable {
     case foundation, build, peak
 
-    var displayName: String { rawValue.capitalized }
+    var displayName: String {
+        switch self {
+        case .foundation: String(localized: "sportGoal.phase.foundation", defaultValue: "Foundation", comment: "Sport-goal training phase name (periodization: base-building phase)")
+        case .build: String(localized: "sportGoal.phase.build", defaultValue: "Build", comment: "Sport-goal training phase name (periodization: build/development phase), noun")
+        case .peak: String(localized: "sportGoal.phase.peak", defaultValue: "Peak", comment: "Sport-goal training phase name (periodization: peak phase), noun")
+        }
+    }
 }
 
 /// Thin inline phase strip: Foundation → Build → Peak, current one filled.
@@ -55,9 +61,9 @@ struct GoalKindBadge: View {
 
     init(kind: SportGoalKind) {
         switch kind {
-        case .metric: text = "METRIC"; isAccent = true
-        case .milestone: text = "MILESTONE"; isAccent = true
-        case .qualitative: text = "IN WORDS"; isAccent = false
+        case .metric: text = String(localized: "sportGoal.kindBadge.metric", defaultValue: "METRIC", comment: "Uppercase goal-kind badge: goal has a numeric/measurable target"); isAccent = true
+        case .milestone: text = String(localized: "sportGoal.kindBadge.milestone", defaultValue: "MILESTONE", comment: "Uppercase goal-kind badge: goal is a milestone/checkpoint target"); isAccent = true
+        case .qualitative: text = String(localized: "sportGoal.kindBadge.qualitative", defaultValue: "IN WORDS", comment: "Uppercase goal-kind badge: goal is described qualitatively in free text"); isAccent = false
         case .unknown: text = ""; isAccent = false
         }
     }
@@ -67,7 +73,7 @@ struct GoalKindBadge: View {
         self.isAccent = isAccent
     }
 
-    static let custom = GoalKindBadge(text: "CUSTOM", isAccent: false)
+    static let custom = GoalKindBadge(text: String(localized: "sportGoal.kindBadge.custom", defaultValue: "CUSTOM", comment: "Uppercase goal-kind badge: user's own custom/coach-assigned goal, not a preset"), isAccent: false)
 
     var body: some View {
         if !text.isEmpty {
@@ -143,7 +149,7 @@ struct ScheduleFrequencyPicker: View {
                         frequencyPerWeek = count
                     }
                 }
-                SomaChip(title: customChipTitle, isSelected: scheduleRule != nil, isOneOff: scheduleRule == nil) {
+                SomaChip(title: LocalizedStringKey(customChipTitle), isSelected: scheduleRule != nil, isOneOff: scheduleRule == nil) {
                     showFrequencySheet = true
                 }
             }
@@ -180,13 +186,22 @@ struct ScheduleFrequencyPicker: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    ruleRow(.weekdays, title: "Specific weekdays", subtitle: "Train on fixed days", icon: "calendar")
+                    ruleRow(.weekdays,
+                            title: String(localized: "sportGoal.scheduleRule.specificWeekdays.title", defaultValue: "Specific weekdays", comment: "Schedule rule row title: train on fixed weekdays chosen by the user"),
+                            subtitle: String(localized: "sportGoal.scheduleRule.specificWeekdays.subtitle", defaultValue: "Train on fixed days", comment: "Schedule rule row subtitle for 'Specific weekdays'"),
+                            icon: "calendar")
                     if scheduleRule == .weekdays {
                         WeekdayMiniPicker(selected: $scheduleDays)
                             .padding(.leading, 4)
                     }
-                    ruleRow(.everyOtherDay, title: "Every other day", subtitle: "A steady one-on, one-off rhythm", icon: "arrow.left.arrow.right")
-                    ruleRow(.beforeCourtDays, title: "Before court days", subtitle: "Sessions land the day before you play", icon: "figure.tennis")
+                    ruleRow(.everyOtherDay,
+                            title: String(localized: "sportGoal.scheduleRule.everyOtherDay.title", defaultValue: "Every other day", comment: "Schedule rule: alternating training day / rest day pattern"),
+                            subtitle: String(localized: "sportGoal.scheduleRule.everyOtherDay.subtitle", defaultValue: "A steady one-on, one-off rhythm", comment: "Schedule rule row subtitle for 'Every other day'"),
+                            icon: "arrow.left.arrow.right")
+                    ruleRow(.beforeCourtDays,
+                            title: String(localized: "sportGoal.scheduleRule.beforeCourtDays.title", defaultValue: "Before court days", comment: "Schedule rule: sessions are placed the day before the user's court/match days"),
+                            subtitle: String(localized: "sportGoal.scheduleRule.beforeCourtDays.subtitle", defaultValue: "Sessions land the day before you play", comment: "Schedule rule row subtitle for 'Before court days'"),
+                            icon: "figure.tennis")
                     if scheduleRule == .beforeCourtDays {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("My court days")
@@ -196,7 +211,10 @@ struct ScheduleFrequencyPicker: View {
                         }
                         .padding(.leading, 4)
                     }
-                    ruleRow(.readiness, title: "When readiness allows", subtitle: "Soma places sessions on your better days", icon: "waveform.path.ecg")
+                    ruleRow(.readiness,
+                            title: String(localized: "sportGoal.scheduleRule.whenReadinessAllows.title", defaultValue: "When readiness allows", comment: "Schedule rule: app places sessions on the user's better-readiness days rather than fixed days"),
+                            subtitle: String(localized: "sportGoal.scheduleRule.whenReadinessAllows.subtitle", defaultValue: "Soma places sessions on your better days", comment: "Schedule rule row subtitle for 'When readiness allows'"),
+                            icon: "waveform.path.ecg")
                 }
                 .padding(20)
             }

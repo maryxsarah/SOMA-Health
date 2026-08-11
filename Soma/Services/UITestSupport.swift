@@ -40,6 +40,10 @@ enum UITestSupport {
         let scenario = FixtureScenario.current
         defaults.set(scenario.promoDismissedAtLaunch, forKey: "sportGoalPromoDismissed")
         defaults.set(scenario.onboardingSeenAtLaunch, forKey: "sportGoalOnboardingSeen")
+        // A LocalizationUITests run that failed mid-test can leave this
+        // simulator stuck on a non-English language -- reset on every launch.
+        defaults.removeObject(forKey: "com.soma.app.languageOverride")
+        defaults.removeObject(forKey: "AppleLanguages")
     }
     #else
     static let isActive = false

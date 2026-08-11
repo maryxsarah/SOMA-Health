@@ -123,14 +123,14 @@ struct LogMealView: View {
             fatText = String(result.fatG)
             usedAIEstimate = true
         } catch {
-            errorMessage = "Couldn't estimate that -- try describing it differently, or enter the numbers below yourself."
+            errorMessage = String(localized: "logMeal.estimateFailed", defaultValue: "Couldn't estimate that -- try describing it differently, or enter the numbers below yourself.", comment: "Error shown when AI meal estimation fails")
         }
     }
 
     private func save() async {
         guard let calories, let protein else { return }
         guard macrosInRange else {
-            errorMessage = "Calories should be 0-5000 and macros 0-500g -- check your numbers."
+            errorMessage = String(localized: "logMeal.macrosOutOfRange", defaultValue: "Calories should be 0-5000 and macros 0-500g -- check your numbers.", comment: "Validation error shown when entered meal macros are out of allowed range")
             return
         }
         isSaving = true
@@ -148,7 +148,7 @@ struct LogMealView: View {
             )
             dismiss()
         } catch {
-            errorMessage = "Couldn't save that entry. Try again."
+            errorMessage = String(localized: "logMeal.saveFailed", defaultValue: "Couldn't save that entry. Try again.", comment: "Error shown when saving a meal log entry fails")
         }
     }
 }

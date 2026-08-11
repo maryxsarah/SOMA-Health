@@ -143,7 +143,7 @@ struct OnboardingView: View {
         .padding(.horizontal, 12)
     }
 
-    private func stepIcon(_ systemName: String, _ label: String) -> some View {
+    private func stepIcon(_ systemName: String, _ label: LocalizedStringKey) -> some View {
         VStack(spacing: 4) {
             Image(systemName: systemName)
                 .font(.subheadline)

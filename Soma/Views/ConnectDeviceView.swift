@@ -74,7 +74,11 @@ struct ConnectDeviceView: View {
                 appState.markProviderConnected(provider)
                 AnalyticsManager.shared.deviceConnected(provider: provider.rawValue)
             } catch {
-                errorMessage = "Couldn't connect \(provider.displayName): \(error.localizedDescription)"
+                errorMessage = String(
+                    localized: "connectDevice.error",
+                    defaultValue: "Couldn't connect \(provider.displayName): \(error.localizedDescription)",
+                    comment: "Error shown when connecting a health/wearable provider fails; first placeholder is the provider name, second is the underlying error description"
+                )
             }
         }
     }

@@ -29,10 +29,10 @@ struct GenerationProgressView: View {
     /// Default stage list for the AI-generated-workout flow. Other flows
     /// (e.g. gym-photo) pass their own via the `stages:` initializer.
     static let workoutPlanStages = [
-        "Reading your health data…",
-        "Matching exercises…",
-        "Sequencing your workout…",
-        "Finishing touches…",
+        String(localized: "generationProgress.workoutPlanStages.stage1", defaultValue: "Reading your health data…", comment: "Loading stage while Soma reads the user's health data to build an AI workout plan"),
+        String(localized: "generationProgress.workoutPlanStages.stage2", defaultValue: "Matching exercises…", comment: "Loading stage while Soma matches exercises to the user's profile and equipment for an AI workout plan"),
+        String(localized: "generationProgress.workoutPlanStages.stage3", defaultValue: "Sequencing your workout…", comment: "Loading stage while Soma orders/sequences the exercises into the AI workout plan"),
+        String(localized: "generationProgress.workoutPlanStages.stage4", defaultValue: "Finishing touches…", comment: "Final loading stage while Soma finishes building the AI workout plan"),
     ]
 
     init(stages: [String] = GenerationProgressView.workoutPlanStages, estimatedSeconds: Double = 6) {

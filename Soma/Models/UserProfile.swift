@@ -17,13 +17,13 @@ enum InjuryTag: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .knee: "Knee"
-        case .ankle: "Ankle"
-        case .back: "Back"
-        case .shoulder: "Shoulder"
-        case .hip: "Hip"
-        case .wrist: "Wrist"
-        case .other: "Other"
+        case .knee: String(localized: "injuryTag.knee", defaultValue: "Knee", comment: "Injury location tag shown in injury tracking UI")
+        case .ankle: String(localized: "injuryTag.ankle", defaultValue: "Ankle", comment: "Injury location tag shown in injury tracking UI")
+        case .back: String(localized: "injuryTag.back", defaultValue: "Back", comment: "Injury location tag shown in injury tracking UI")
+        case .shoulder: String(localized: "injuryTag.shoulder", defaultValue: "Shoulder", comment: "Injury location tag shown in injury tracking UI")
+        case .hip: String(localized: "injuryTag.hip", defaultValue: "Hip", comment: "Injury location tag shown in injury tracking UI")
+        case .wrist: String(localized: "injuryTag.wrist", defaultValue: "Wrist", comment: "Injury location tag shown in injury tracking UI")
+        case .other: String(localized: "injuryTag.other", defaultValue: "Other", comment: "Injury location tag (catch-all) shown in injury tracking UI")
         }
     }
 }
@@ -43,9 +43,9 @@ enum InjurySeverity: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .mild: "Mild"
-        case .moderate: "Moderate"
-        case .severe: "Severe"
+        case .mild: String(localized: "injurySeverity.mild", defaultValue: "Mild", comment: "Injury severity level shown in injury tracking UI")
+        case .moderate: String(localized: "injurySeverity.moderate", defaultValue: "Moderate", comment: "Injury severity level shown in injury tracking UI")
+        case .severe: String(localized: "injurySeverity.severe", defaultValue: "Severe", comment: "Injury severity level shown in injury tracking UI")
         }
     }
 }
@@ -66,11 +66,11 @@ enum InjuryType: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .strain: "Strain"
-        case .sprain: "Sprain"
-        case .tendinitis: "Tendinitis"
-        case .postSurgical: "Post-surgical"
-        case .other: "Other"
+        case .strain: String(localized: "injuryType.strain", defaultValue: "Strain", comment: "Injury type shown in injury tracking UI (muscle strain)")
+        case .sprain: String(localized: "injuryType.sprain", defaultValue: "Sprain", comment: "Injury type shown in injury tracking UI (ligament sprain)")
+        case .tendinitis: String(localized: "injuryType.tendinitis", defaultValue: "Tendinitis", comment: "Injury type shown in injury tracking UI")
+        case .postSurgical: String(localized: "injuryType.postSurgical", defaultValue: "Post-surgical", comment: "Injury type shown in injury tracking UI (recovering from surgery)")
+        case .other: String(localized: "injuryType.other", defaultValue: "Other", comment: "Injury type (catch-all) shown in injury tracking UI")
         }
     }
 }
@@ -88,9 +88,9 @@ enum ExperienceLevel: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .newbie: "Newbie"
-        case .moderate: "Moderate"
-        case .advanced: "Advanced"
+        case .newbie: String(localized: "experienceLevel.newbie", defaultValue: "Newbie", comment: "Training experience level shown in profile UI")
+        case .moderate: String(localized: "experienceLevel.moderate", defaultValue: "Moderate", comment: "Training experience level shown in profile UI")
+        case .advanced: String(localized: "experienceLevel.advanced", defaultValue: "Advanced", comment: "Training experience level shown in profile UI")
         }
     }
 }

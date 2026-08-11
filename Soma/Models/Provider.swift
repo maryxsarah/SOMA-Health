@@ -10,9 +10,9 @@ enum Provider: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .appleHealth: "Apple Health"
-        case .whoop: "Whoop"
-        case .oura: "Oura"
+        case .appleHealth: return String(localized: "provider.appleHealth", defaultValue: "Apple Health", comment: "Connected-device provider display name; brand name, not translated")
+        case .whoop: return String(localized: "provider.whoop", defaultValue: "Whoop", comment: "Connected-device provider display name; brand name, not translated")
+        case .oura: return String(localized: "provider.oura", defaultValue: "Oura", comment: "Connected-device provider display name; brand name, not translated")
         }
     }
 

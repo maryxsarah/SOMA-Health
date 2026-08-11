@@ -219,7 +219,7 @@ struct CalendarStripView: View {
         }
     }
 
-    private func legendItem(_ status: DayStatus, label: String) -> some View {
+    private func legendItem(_ status: DayStatus, label: LocalizedStringKey) -> some View {
         HStack(spacing: 4) {
             heartIcon(for: status).font(.system(size: 14))
             Text(label)

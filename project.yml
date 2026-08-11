@@ -4,6 +4,7 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
+  developmentLanguage: en
 
 configs:
   Debug: debug
@@ -87,6 +88,18 @@ targets:
         # entirely, instead of having to answer it by hand each time.
         ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
+        # Explicit language list so the per-app language override in
+        # iOS Settings (Settings -> Soma -> Language) shows all shipped
+        # languages even though only en has UI chrome (LaunchScreen etc).
+        CFBundleLocalizations:
+          - en
+          - es
+          - fr
+          - it
+          - de
+          - ru
+          - ka
+          - hy
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

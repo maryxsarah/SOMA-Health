@@ -141,7 +141,7 @@ struct NutritionView: View {
     private static let carbsColor = Color(red: 0.95, green: 0.65, blue: 0.20)
     private static let fatColor = Color(red: 0.35, green: 0.55, blue: 0.90)
 
-    private func macroBar(label: String, consumed: Int, target: Int, unit: String, fraction: Double, color: Color, isPrimary: Bool = false) -> some View {
+    private func macroBar(label: LocalizedStringKey, consumed: Int, target: Int, unit: String, fraction: Double, color: Color, isPrimary: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(label)
@@ -197,7 +197,7 @@ struct NutritionView: View {
                             scoreBadge(score: score, color: verdict.color)
                         }
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.label?.isEmpty == false ? entry.label! : "Logged food")
+                            Text(entry.label?.isEmpty == false ? entry.label! : String(localized: "nutrition.loggedFoodFallback", defaultValue: "Logged food", comment: "Fallback title shown for a meal log entry that has no name"))
                                 .font(.system(size: 14.5, weight: .semibold))
                                 .foregroundStyle(SomaTokens.ink)
                             Text(macroSummary(entry))
@@ -282,7 +282,7 @@ struct NutritionView: View {
             try await SupabaseClient.shared.deleteMealLog(id: entry.id)
             entries.removeAll { $0.id == entry.id }
         } catch {
-            errorMessage = "Couldn't remove that entry. Try again."
+            errorMessage = String(localized: "nutrition.deleteError", defaultValue: "Couldn't remove that entry. Try again.", comment: "Error message shown when deleting a logged meal entry fails")
         }
     }
 

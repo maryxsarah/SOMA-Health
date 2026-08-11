@@ -60,17 +60,17 @@ struct GymPhotoWorkoutView: View {
                                 cameraBlockedContent
                             case .analyzing:
                                 loadingContent(stages: [
-                                    "Looking at your photo…",
-                                    "Identifying equipment…",
-                                    "Checking what's usable…",
+                                    String(localized: "gymPhoto.analyzing.stage1", defaultValue: "Looking at your photo…", comment: "Loading stage while Soma examines the gym photo"),
+                                    String(localized: "gymPhoto.analyzing.stage2", defaultValue: "Identifying equipment…", comment: "Loading stage while Soma identifies equipment in the photo"),
+                                    String(localized: "gymPhoto.analyzing.stage3", defaultValue: "Checking what's usable…", comment: "Loading stage while Soma checks which equipment is usable"),
                                 ])
                             case .confirmingEquipment:
                                 confirmingEquipmentContent
                             case .generating:
                                 loadingContent(stages: [
-                                    "Matching a workout to your setup…",
-                                    "Selecting exercises…",
-                                    "Writing your instructions…",
+                                    String(localized: "gymPhoto.generating.stage1", defaultValue: "Matching a workout to your setup…", comment: "Loading stage while Soma builds a workout from the confirmed equipment"),
+                                    String(localized: "gymPhoto.generating.stage2", defaultValue: "Selecting exercises…", comment: "Loading stage while Soma selects exercises"),
+                                    String(localized: "gymPhoto.generating.stage3", defaultValue: "Writing your instructions…", comment: "Loading stage while Soma writes the workout instructions"),
                                 ])
                             case .result:
                                 EmptyView()
@@ -217,8 +217,16 @@ struct GymPhotoWorkoutView: View {
 
     private var cameraInstructionSteps: [String] {
         cameraRestricted
-            ? ["Open the Settings app", "Go to Screen Time → Content & Privacy Restrictions", "Under Allowed Apps (or App Privacy), allow the Camera"]
-            : ["Open the Settings app", "Scroll down and tap Soma", "Turn on Camera"]
+            ? [
+                String(localized: "gymPhoto.cameraSteps.openSettings", defaultValue: "Open the Settings app", comment: "Step 1 of camera access instructions: open the Settings app"),
+                String(localized: "gymPhoto.cameraSteps.restrictedScreenTime", defaultValue: "Go to Screen Time → Content & Privacy Restrictions", comment: "Step 2 of instructions for a restricted device: navigate to Screen Time restrictions"),
+                String(localized: "gymPhoto.cameraSteps.restrictedAllowCamera", defaultValue: "Under Allowed Apps (or App Privacy), allow the Camera", comment: "Step 3 of instructions for a restricted device: allow Camera under Allowed Apps"),
+            ]
+            : [
+                String(localized: "gymPhoto.cameraSteps.openSettings", defaultValue: "Open the Settings app", comment: "Step 1 of camera access instructions: open the Settings app"),
+                String(localized: "gymPhoto.cameraSteps.scrollToSoma", defaultValue: "Scroll down and tap Soma", comment: "Step 2 of camera access instructions: find Soma in the Settings list"),
+                String(localized: "gymPhoto.cameraSteps.turnOnCamera", defaultValue: "Turn on Camera", comment: "Step 3 of camera access instructions: enable the Camera toggle"),
+            ]
     }
 
     private func loadingContent(stages: [String]) -> some View {
@@ -447,7 +455,7 @@ struct GymPhotoWorkoutView: View {
         step = .analyzing
         errorMessage = nil
         guard let imageData = ImageCompression.jpeg(image) else {
-            errorMessage = "Couldn't process that photo. Try another one."
+            errorMessage = String(localized: "gymPhoto.error.photoProcessFailed", defaultValue: "Couldn't process that photo. Try another one.", comment: "Error shown when the selected/captured photo can't be compressed for upload")
             step = .pickPhoto
             return
         }
@@ -457,7 +465,7 @@ struct GymPhotoWorkoutView: View {
             lowConfidenceNotice = result.lowConfidence
             step = .confirmingEquipment
         } catch {
-            errorMessage = "Couldn't analyze that photo. Try again."
+            errorMessage = String(localized: "gymPhoto.error.analyzeFailed", defaultValue: "Couldn't analyze that photo. Try again.", comment: "Error shown when the gym-photo equipment analysis request fails")
             step = .pickPhoto
         }
     }
@@ -488,7 +496,7 @@ struct GymPhotoWorkoutView: View {
             errorMessage = SupabaseError.serviceUnavailable.errorDescription
             step = .confirmingEquipment
         } catch {
-            errorMessage = "Couldn't build a workout right now. Try again."
+            errorMessage = String(localized: "gymPhoto.error.generateFailed", defaultValue: "Couldn't build a workout right now. Try again.", comment: "Error shown when generating a workout from confirmed equipment fails")
             step = .confirmingEquipment
         }
     }
@@ -501,7 +509,7 @@ struct GymPhotoWorkoutView: View {
             try await SupabaseClient.shared.confirmAIPlan(date: date)
             addedToPlan = true
         } catch {
-            addToPlanError = "Couldn't add to today's plan. Try again."
+            addToPlanError = String(localized: "gymPhoto.error.addToPlanFailed", defaultValue: "Couldn't add to today's plan. Try again.", comment: "Error shown when confirming the AI-generated workout into today's plan fails")
         }
     }
 

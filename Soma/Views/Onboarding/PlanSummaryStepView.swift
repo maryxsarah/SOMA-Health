@@ -17,7 +17,12 @@ struct PlanSummaryStepView: View {
 
     private var chartLabels: [String] {
         guard let estimatedMonths else { return ["Now", "Ahead"] }
-        return ["Now", "Halfway", "\(estimatedMonths) month\(estimatedMonths == 1 ? "" : "s")"]
+        let monthLabel = String(
+            localized: "onboarding.monthsStandalone",
+            defaultValue: "\(estimatedMonths) months",
+            comment: "Bare month count used as a chart axis label and inline in a sentence, pluralized by count"
+        )
+        return ["Now", "Halfway", monthLabel]
     }
 
     var body: some View {

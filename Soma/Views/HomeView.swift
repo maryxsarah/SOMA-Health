@@ -492,7 +492,13 @@ struct HomeView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")
-                        Text("You requested a \(requested == .rest ? "rest" : "active recovery") day today — Undo")
+                        // Two full sentences rather than an interpolated
+                        // "rest"/"active recovery" fragment -- that word sat
+                        // inside an otherwise-localized string and would have
+                        // shipped in English inside every translation.
+                        Text(requested == .rest
+                            ? String(localized: "home.restDay.requestedRest", defaultValue: "You requested a rest day today — Undo", comment: "Home: shown after the user asks for a rest day instead of today's plan; tapping undoes the request")
+                            : String(localized: "home.restDay.requestedActiveRecovery", defaultValue: "You requested an active recovery day today — Undo", comment: "Home: shown after the user asks for an active recovery day instead of today's plan; tapping undoes the request"))
                     }
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(SomaTokens.ink3)
@@ -630,10 +636,10 @@ struct HomeView: View {
     private func goalRowText(_ goal: UserGoal) -> String {
         let name = goal.displayName(in: sportGoalCatalog)
         if goal.kind == .custom, let weeks = goal.durationWeeks, let week = goal.currentWeek {
-            return "\(name) · week \(min(week, weeks)) of \(weeks)"
+            return String(localized: "home.goalRow.customWeek", defaultValue: "\(name) · week \(min(week, weeks)) of \(weeks)", comment: "Home: goal row summary for a custom-length goal -- goal name, then current week of total weeks")
         }
         if let weekLine = goal.weekLine {
-            return "\(name) · \(weekLine)"
+            return String(localized: "home.goalRow.weekLine", defaultValue: "\(name) · \(weekLine)", comment: "Home: goal row summary -- goal name, then a status/week line supplied by the goal")
         }
         return name
     }
@@ -643,13 +649,14 @@ struct HomeView: View {
     private var readinessInputs: [String] {
         var parts: [String] = []
         if let sleep = todaysSnapshots.compactMap(\.sleepHours).first {
-            parts.append("Sleep \(String(format: "%.1f", sleep)) h")
+            let hours = String(format: "%.1f", sleep)
+            parts.append(String(localized: "home.readiness.sleep", defaultValue: "Sleep \(hours) h", comment: "Home: readiness disclosure input chip -- hours of sleep"))
         }
         if let hrv = todaysSnapshots.compactMap(\.hrvMs).first {
-            parts.append("HRV \(Int(hrv.rounded())) ms")
+            parts.append(String(localized: "home.readiness.hrv", defaultValue: "HRV \(Int(hrv.rounded())) ms", comment: "Home: readiness disclosure input chip -- heart rate variability in milliseconds"))
         }
         if let rhr = todaysSnapshots.compactMap(\.restingHr).first {
-            parts.append("Resting HR \(Int(rhr.rounded())) bpm")
+            parts.append(String(localized: "home.readiness.restingHR", defaultValue: "Resting HR \(Int(rhr.rounded())) bpm", comment: "Home: readiness disclosure input chip -- resting heart rate in beats per minute"))
         }
         return parts
     }
@@ -808,7 +815,7 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
-    private func scanRowBody(plate: Color, icon: String, iconColor: Color, title: String, subtitle: String, @ViewBuilder trailing: () -> some View) -> some View {
+    private func scanRowBody(plate: Color, icon: String, iconColor: Color, title: LocalizedStringKey, subtitle: LocalizedStringKey, @ViewBuilder trailing: () -> some View) -> some View {
         CardView {
             HStack(spacing: 12) {
                 Image(systemName: icon)
@@ -897,7 +904,14 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entry.title)
                             .font(.subheadline.bold())
-                        Text("\(entry.sourceDisplayName) — \(Self.timeString(entry.startTime)) — \(entry.durationMinutes) min\(entry.calories.map { " — \($0) kcal" } ?? "")")
+                        // Two full sentences (with/without calories) rather
+                        // than fragment-translating a trailing optional
+                        // clause -- word order around the number varies by
+                        // language, so a bolted-on " — X kcal" suffix can't
+                        // be translated correctly on its own.
+                        Text(entry.calories.map { calories in
+                            String(localized: "home.timeline.entry.withCalories", defaultValue: "\(entry.sourceDisplayName) — \(Self.timeString(entry.startTime)) — \(entry.durationMinutes) min — \(calories) kcal", comment: "Home: today's timeline entry -- source name, start time, duration, and calories burned")
+                        } ?? String(localized: "home.timeline.entry.noCalories", defaultValue: "\(entry.sourceDisplayName) — \(Self.timeString(entry.startTime)) — \(entry.durationMinutes) min", comment: "Home: today's timeline entry -- source name, start time, and duration, no calories reported"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1055,9 +1069,9 @@ struct HomeView: View {
 
     private static func timeOfDayGreeting() -> String {
         switch Calendar.current.component(.hour, from: Date()) {
-        case 5..<12: "Good morning"
-        case 12..<18: "Good afternoon"
-        default: "Good evening"
+        case 5..<12: String(localized: "home.greeting.morning", defaultValue: "Good morning", comment: "Home: greeting shown in the morning")
+        case 12..<18: String(localized: "home.greeting.afternoon", defaultValue: "Good afternoon", comment: "Home: greeting shown in the afternoon")
+        default: String(localized: "home.greeting.evening", defaultValue: "Good evening", comment: "Home: greeting shown in the evening")
         }
     }
 
@@ -1131,7 +1145,7 @@ struct HomeView: View {
         } catch {
             // Covers "expired wearable token" / "zero connected devices" --
             // show a clear message instead of crashing.
-            errorMessage = "Couldn't fetch today's data. Reconnect a device or try again."
+            errorMessage = String(localized: "home.error.couldNotFetch", defaultValue: "Couldn't fetch today's data. Reconnect a device or try again.", comment: "Home: shown when the check-now/refresh fetch fails")
             AnalyticsManager.shared.recommendationFailed()
         }
     }

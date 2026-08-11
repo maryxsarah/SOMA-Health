@@ -162,19 +162,32 @@ final class HealthKitManager {
 
     private static func displayName(for type: HKWorkoutActivityType) -> String {
         switch type {
-        case .running: "Running"
-        case .walking: "Walking"
-        case .cycling: "Cycling"
-        case .swimming: "Swimming"
-        case .traditionalStrengthTraining, .functionalStrengthTraining: "Strength Training"
-        case .yoga: "Yoga"
-        case .highIntensityIntervalTraining: "HIIT"
-        case .coreTraining: "Core Training"
-        case .flexibility: "Flexibility"
-        case .hiking: "Hiking"
-        case .rowing: "Rowing"
-        case .elliptical: "Elliptical"
-        default: "Workout"
+        case .running:
+            String(localized: "healthKit.workoutType.running", defaultValue: "Running", comment: "Workout type label shown in the home workout timeline")
+        case .walking:
+            String(localized: "healthKit.workoutType.walking", defaultValue: "Walking", comment: "Workout type label shown in the home workout timeline")
+        case .cycling:
+            String(localized: "healthKit.workoutType.cycling", defaultValue: "Cycling", comment: "Workout type label shown in the home workout timeline")
+        case .swimming:
+            String(localized: "healthKit.workoutType.swimming", defaultValue: "Swimming", comment: "Workout type label shown in the home workout timeline")
+        case .traditionalStrengthTraining, .functionalStrengthTraining:
+            String(localized: "healthKit.workoutType.strengthTraining", defaultValue: "Strength Training", comment: "Workout type label shown in the home workout timeline")
+        case .yoga:
+            String(localized: "healthKit.workoutType.yoga", defaultValue: "Yoga", comment: "Workout type label shown in the home workout timeline")
+        case .highIntensityIntervalTraining:
+            String(localized: "healthKit.workoutType.hiit", defaultValue: "HIIT", comment: "Workout type label shown in the home workout timeline (High Intensity Interval Training)")
+        case .coreTraining:
+            String(localized: "healthKit.workoutType.coreTraining", defaultValue: "Core Training", comment: "Workout type label shown in the home workout timeline")
+        case .flexibility:
+            String(localized: "healthKit.workoutType.flexibility", defaultValue: "Flexibility", comment: "Workout type label shown in the home workout timeline")
+        case .hiking:
+            String(localized: "healthKit.workoutType.hiking", defaultValue: "Hiking", comment: "Workout type label shown in the home workout timeline")
+        case .rowing:
+            String(localized: "healthKit.workoutType.rowing", defaultValue: "Rowing", comment: "Workout type label shown in the home workout timeline")
+        case .elliptical:
+            String(localized: "healthKit.workoutType.elliptical", defaultValue: "Elliptical", comment: "Workout type label shown in the home workout timeline")
+        default:
+            String(localized: "healthKit.workoutType.fallback", defaultValue: "Workout", comment: "Generic fallback workout type label shown in the home workout timeline")
         }
     }
 
@@ -381,5 +394,7 @@ final class HealthKitManager {
 
 enum HealthKitError: LocalizedError {
     case notAvailable
-    var errorDescription: String? { "HealthKit is not available on this device." }
+    var errorDescription: String? {
+        String(localized: "healthKit.error.notAvailable", defaultValue: "HealthKit is not available on this device.", comment: "Error shown when the device doesn't support HealthKit")
+    }
 }

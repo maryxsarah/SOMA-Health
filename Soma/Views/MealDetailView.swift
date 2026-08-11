@@ -34,7 +34,7 @@ struct MealDetailView: View {
                 .padding(20)
             }
             .somaBackground()
-            .navigationTitle(entry.label?.isEmpty == false ? entry.label! : "Logged food")
+            .navigationTitle(entry.label?.isEmpty == false ? entry.label! : String(localized: "meal.loggedFoodTitle", defaultValue: "Logged food", comment: "Fallback navigation title for a meal log entry with no label"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -54,13 +54,13 @@ struct MealDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Details")
                     .font(.subheadline.bold())
-                detailRow("Calories", "\(entry.calories) kcal")
-                detailRow("Protein", "\(entry.proteinG) g")
+                detailRow("Calories", String(localized: "meal.detail.caloriesValue", defaultValue: "\(entry.calories) kcal", comment: "Calorie amount with unit, e.g. 520 kcal"))
+                detailRow("Protein", String(localized: "meal.detail.gramsValue", defaultValue: "\(entry.proteinG) g", comment: "Gram amount with unit, e.g. 42 g"))
                 if let carbsG = entry.carbsG {
-                    detailRow("Carbs", "\(carbsG) g")
+                    detailRow("Carbs", String(localized: "meal.detail.gramsValue", defaultValue: "\(carbsG) g", comment: "Gram amount with unit, e.g. 42 g"))
                 }
                 if let fatG = entry.fatG {
-                    detailRow("Fat", "\(fatG) g")
+                    detailRow("Fat", String(localized: "meal.detail.gramsValue", defaultValue: "\(fatG) g", comment: "Gram amount with unit, e.g. 42 g"))
                 }
                 detailRow("Logged", Self.timeString(entry.loggedAt))
                 detailRow("Source", Self.sourceLabel(entry.source))
@@ -68,7 +68,7 @@ struct MealDetailView: View {
         }
     }
 
-    private func detailRow(_ label: String, _ value: String) -> some View {
+    private func detailRow(_ label: LocalizedStringKey, _ value: String) -> some View {
         HStack {
             Text(label)
                 .font(.caption)
@@ -81,9 +81,9 @@ struct MealDetailView: View {
 
     private static func sourceLabel(_ source: String) -> String {
         switch source {
-        case "text_ai": "AI-estimated from your description"
-        case "photo": "Photo scan"
-        default: "Manual entry"
+        case "text_ai": String(localized: "meal.source.textAI", defaultValue: "AI-estimated from your description", comment: "Meal log source: estimated from the user's text description")
+        case "photo": String(localized: "meal.source.photo", defaultValue: "Photo scan", comment: "Meal log source: estimated from a photo")
+        default: String(localized: "meal.source.manual", defaultValue: "Manual entry", comment: "Meal log source: manually entered by the user")
         }
     }
 
@@ -145,7 +145,7 @@ struct MealDetailView: View {
             score = result.score
             rationale = result.rationale
         } catch {
-            ratingError = "Couldn't rate this meal right now. Try again later."
+            ratingError = String(localized: "meal.rating.error", defaultValue: "Couldn't rate this meal right now. Try again later.", comment: "Error shown when rating a meal fails")
         }
     }
 

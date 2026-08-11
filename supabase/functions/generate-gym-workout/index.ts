@@ -26,6 +26,7 @@ import { extractOutputText } from "../_shared/openai.ts";
 import { GymWorkoutTemplate, selectTemplate } from "./templates.ts";
 import { normalizeEquipment } from "../_shared/equipment.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
+import { languageName, normalizeLanguageCode } from "../_shared/language.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MODEL = "gpt-5.6-luna";
@@ -66,6 +67,8 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const date: string | undefined = body.date;
     const confirmedEquipment: string[] | undefined = body.confirmedEquipment;
+    const languageCode = normalizeLanguageCode(body.language);
+    const language = languageName(body.language);
     if (!date) return jsonResponse({ error: "missing 'date' (YYYY-MM-DD)" }, 400);
     if (!Array.isArray(confirmedEquipment)) {
       return jsonResponse({ error: "missing 'confirmedEquipment' (string array)" }, 400);
@@ -119,11 +122,14 @@ Deno.serve(async (req: Request) => {
     // is selectable, so a severity edit (mild -> severe knee) must miss
     // the cache and re-select -- otherwise the cache replays the morning's
     // squat/lunge session that the new severity exists to withhold.
+    // The requested language belongs here too, same reasoning as the
+    // injury state above -- otherwise a language switch mid-day replays the morning's wording verbatim.
     const equipmentSignature = Array.from(equipmentSet).sort().join("|") +
       (safety.excludeHighImpact ? "|no-impact" : "") +
       (safety.excludedKeywords.length > 0
         ? "|kw:" + [...safety.excludedKeywords].sort().join(",")
-        : "");
+        : "") +
+      "|lang:" + languageCode;
 
     // Same setup, same day -> same answer, so serve it rather than paying
     // for the wording pass again. A different setup is a different
@@ -200,6 +206,7 @@ Deno.serve(async (req: Request) => {
       goals,
       (snapshots ?? []) as SnapshotRow[],
       equipmentSet,
+      language,
     );
     // title/bodyPart travel inside the cached object so a cache hit can
     // return them without re-running selection. actual_duration_minutes is
@@ -260,6 +267,7 @@ async function callLunaForWording(
   goals: string[],
   snapshots: SnapshotRow[],
   equipment: Set<string>,
+  language: string,
 ): Promise<{ focus: string; exercises: { name: string; instructions: string }[] }> {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
@@ -283,7 +291,7 @@ async function callLunaForWording(
     ? Array.from(equipment).sort().join(", ")
     : "no equipment -- bodyweight only";
   const prompt =
-    `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, structure, and target muscle areas are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise, and do not change which muscles it targets. Write "instructions" text (2-3 sentences) for each of these exercises, in this exact order: ${exerciseList}. Open each one by briefly naming what it targets and why that supports the user's goal (${goalsText}), then give plain-language form cues. The user confirmed they have this equipment available right now: ${equipmentSummary} -- make the cues concrete about that setup where it helps, but never substitute a different exercise or suggest equipment not in that list. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
+    `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, structure, and target muscle areas are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise, and do not change which muscles it targets. Write "instructions" text (2-3 sentences) for each of these exercises, in this exact order: ${exerciseList}. Open each one by briefly naming what it targets and why that supports the user's goal (${goalsText}), then give plain-language form cues. The user confirmed they have this equipment available right now: ${equipmentSummary} -- make the cues concrete about that setup where it helps, but never substitute a different exercise or suggest equipment not in that list. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session. Write "instructions" and "focus" in ${language}; echo each exercise's "name" back exactly as given above, untranslated.`;
 
   const res = await fetch(OPENAI_URL, {
     method: "POST",

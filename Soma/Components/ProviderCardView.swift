@@ -27,7 +27,7 @@ struct ProviderCardView: View {
                 Spacer()
 
                 if !provider.isAvailable {
-                    Text("Coming Soon")
+                    Text("provider.status.comingSoon")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 14)
@@ -50,7 +50,12 @@ struct ProviderCardView: View {
     }
 
     private var statusText: String {
-        if !provider.isAvailable { return "Coming soon" }
-        return isConnected ? "Connected" : "Not connected"
+        if !provider.isAvailable {
+            return String(localized: "provider.status.comingSoon", defaultValue: "Coming Soon", comment: "Status text under a provider name for an integration not yet available")
+        }
+        // "Connected" stays un-namespaced -- PillButton.swift/ProfileView.swift share this exact entry.
+        return isConnected
+            ? String(localized: "Connected", comment: "Provider connection status: successfully connected")
+            : String(localized: "provider.status.notConnected", defaultValue: "Not connected", comment: "Provider connection status: not yet connected")
     }
 }

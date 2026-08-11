@@ -54,7 +54,7 @@ struct UpwardTrendChartView: View {
 
             HStack {
                 ForEach(xAxisLabels, id: \.self) { label in
-                    Text(label).font(.caption2).foregroundStyle(.secondary)
+                    Text(LocalizedStringKey(label)).font(.caption2).foregroundStyle(.secondary)
                     if label != xAxisLabels.last { Spacer() }
                 }
             }
@@ -88,7 +88,7 @@ struct ComparisonBarView: View {
         }
     }
 
-    private func column(label: String, height: CGFloat, color: Color, icon: String, iconIsLight: Bool) -> some View {
+    private func column(label: LocalizedStringKey, height: CGFloat, color: Color, icon: String, iconIsLight: Bool) -> some View {
         VStack(spacing: 8) {
             Image(systemName: icon)
                 .foregroundStyle(iconIsLight ? Color.secondary : Color.white)

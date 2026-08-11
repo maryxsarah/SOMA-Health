@@ -15,12 +15,17 @@ struct GeneratingPlanStepView: View {
     @State private var didStartWork = false
 
     private let statusMessages = [
-        "Customizing your health plan...",
-        "Analyzing your recovery data...",
-        "Tailoring today's workout...",
-        "Finalizing your results...",
+        String(localized: "Customizing your health plan..."),
+        String(localized: "Analyzing your recovery data..."),
+        String(localized: "Tailoring today's workout..."),
+        String(localized: "Finalizing your results..."),
     ]
-    private let checklist = ["Movement", "Health Score", "Workout", "Active Recovery"]
+    private let checklist = [
+        String(localized: "onboarding.generatingPlan.checklist.movement", defaultValue: "Movement", comment: "Checklist item label in the plan-generation loading card."),
+        String(localized: "onboarding.generatingPlan.checklist.healthScore", defaultValue: "Health Score", comment: "Checklist item label in the plan-generation loading card."),
+        String(localized: "onboarding.generatingPlan.checklist.workout", defaultValue: "Workout", comment: "Checklist item label in the plan-generation loading card."),
+        String(localized: "onboarding.generatingPlan.checklist.activeRecovery", defaultValue: "Active Recovery", comment: "Checklist item label in the plan-generation loading card."),
+    ]
 
     var body: some View {
         VStack(spacing: 28) {

@@ -17,6 +17,7 @@
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkFlatDailyLimit, logGeneration } from "../_shared/generationLimits.ts";
+import { languageName } from "../_shared/language.ts";
 
 // Realistically bounded by how many meals a person logs in a day anyway
 // (each rated at most once, ever) -- this is defense-in-depth against a
@@ -50,6 +51,7 @@ Deno.serve(async (req: Request) => {
     const userId = await requireUser(req);
     const body = await req.json().catch(() => ({}));
     const mealLogId: string | undefined = body.mealLogId;
+    const language = languageName(body.language);
     if (!mealLogId) return jsonResponse({ error: "missing 'mealLogId'" }, 400);
 
     const supabase = serviceRoleClient();
@@ -91,6 +93,7 @@ Deno.serve(async (req: Request) => {
       fatG: meal.fat_g,
       targets: targetsRow ?? null,
       trainingEmphasis: userRow?.training_emphasis ?? null,
+      language,
     });
 
     const { error: updateError } = await supabase
@@ -116,6 +119,7 @@ interface RateInput {
   fatG: number | null;
   targets: { daily_calories: number; daily_protein_g: number; daily_carbs_g: number; daily_fat_g: number } | null;
   trainingEmphasis: string | null;
+  language: string;
 }
 
 async function callClaude(input: RateInput): Promise<MealRating> {
@@ -146,7 +150,7 @@ Rate how well this single meal supports their goal today, on a scale of 1 (not a
 
 Return:
 - score: integer 1-10
-- rationale: one short sentence (under 30 words) explaining the score`;
+- rationale: one short sentence (under 30 words) explaining the score, written in ${input.language}`;
 
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",

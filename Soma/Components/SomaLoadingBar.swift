@@ -75,12 +75,12 @@ extension SomaLoadingBar {
     /// looking, matching that screen's "SOMA is how you get there" framing
     /// rather than generic "please wait" copy.
     static let goalProgressMessages = [
-        "You're on track to reach your goal.",
-        "Every day you commit is a day you win.",
-        "Consistency beats perfection.",
-        "Small steps, real progress.",
-        "Showing up today is what changes tomorrow.",
-        "Your future self is already proud of you.",
+        String(localized: "loadingBar.goalProgress.0", defaultValue: "You're on track to reach your goal.", comment: "Rotating motivational message shown while a goal-progress estimate loads"),
+        String(localized: "loadingBar.goalProgress.1", defaultValue: "Every day you commit is a day you win.", comment: "Rotating motivational message shown while a goal-progress estimate loads"),
+        String(localized: "loadingBar.goalProgress.2", defaultValue: "Consistency beats perfection.", comment: "Rotating motivational message shown while a goal-progress estimate loads"),
+        String(localized: "loadingBar.goalProgress.3", defaultValue: "Small steps, real progress.", comment: "Rotating motivational message shown while a goal-progress estimate loads"),
+        String(localized: "loadingBar.goalProgress.4", defaultValue: "Showing up today is what changes tomorrow.", comment: "Rotating motivational message shown while a goal-progress estimate loads"),
+        String(localized: "loadingBar.goalProgress.5", defaultValue: "Your future self is already proud of you.", comment: "Rotating motivational message shown while a goal-progress estimate loads"),
     ]
 
     /// Rotates while parse-meal-text estimates a logged meal -- lighthearted
@@ -89,16 +89,16 @@ extension SomaLoadingBar {
     /// `.shuffled()` so repeated estimates in one sitting don't always open
     /// on the same line.
     static let mealFunFacts = [
-        "Honey never spoils -- archaeologists have found 3,000-year-old honey that's still edible.",
-        "Bananas are berries. Strawberries, botanically, are not.",
-        "Carrots were originally purple before the Dutch bred the orange ones.",
-        "Peanuts aren't nuts -- they're legumes.",
-        "Avocados are technically a single-seeded berry.",
-        "Apples float because they're about 25% air.",
-        "Chocolate was once used as currency by the Aztecs.",
-        "An egg's shell color depends on the hen's breed, not its nutrition.",
-        "Chewing celery burns about as many calories as it contains -- close to a wash.",
-        "Crunching your food louder can genuinely make it taste better, per actual studies.",
+        String(localized: "loadingBar.mealFact.0", defaultValue: "Honey never spoils -- archaeologists have found 3,000-year-old honey that's still edible.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
+        String(localized: "loadingBar.mealFact.1", defaultValue: "Bananas are berries. Strawberries, botanically, are not.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
+        String(localized: "loadingBar.mealFact.2", defaultValue: "Carrots were originally purple before the Dutch bred the orange ones.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
+        String(localized: "loadingBar.mealFact.3", defaultValue: "Peanuts aren't nuts -- they're legumes.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
+        String(localized: "loadingBar.mealFact.4", defaultValue: "Avocados are technically a single-seeded berry.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
+        String(localized: "loadingBar.mealFact.5", defaultValue: "Apples float because they're about 25% air.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
+        String(localized: "loadingBar.mealFact.6", defaultValue: "Chocolate was once used as currency by the Aztecs.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
+        String(localized: "loadingBar.mealFact.7", defaultValue: "An egg's shell color depends on the hen's breed, not its nutrition.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
+        String(localized: "loadingBar.mealFact.8", defaultValue: "Chewing celery burns about as many calories as it contains -- close to a wash.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
+        String(localized: "loadingBar.mealFact.9", defaultValue: "Crunching your food louder can genuinely make it taste better, per actual studies.", comment: "Rotating food-trivia fact shown while a logged meal is estimated"),
     ]
 }
 

@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Generic Yes/No survey screen (personal trainer question, etc.).
 struct BinaryYesNoQuestionView: View {
-    let headline: String
-    var subtext: String? = nil
+    let headline: LocalizedStringKey
+    var subtext: LocalizedStringKey? = nil
     let progress: Double
     let onBack: () -> Void
     let onAnswer: (Bool) -> Void

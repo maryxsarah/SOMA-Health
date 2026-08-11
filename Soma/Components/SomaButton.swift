@@ -71,7 +71,7 @@ struct SomaNavPillButtonStyle: ButtonStyle {
 }
 
 struct SomaButton: View {
-    let title: String
+    let title: LocalizedStringKey
     var size: SomaButtonSize = .lg
     var variant: SomaButtonVariant = .primary
     var isEnabled: Bool = true
@@ -152,7 +152,7 @@ struct SomaIconButton: View {
 /// alone (guide 00, step 5); padding drops 1pt when selected so the box
 /// size doesn't jump.
 struct SomaChip: View {
-    let title: String
+    let title: LocalizedStringKey
     var isSelected: Bool = false
     /// Dashed border for a one-off (unsaved) thing -- `.chip--oneoff`.
     var isOneOff: Bool = false

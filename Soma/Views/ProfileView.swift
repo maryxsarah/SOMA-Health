@@ -16,6 +16,7 @@ import SwiftUI
 /// container changed.
 struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var languageManager: LanguageManager
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
     @State private var section: ProfileSection = .training
@@ -259,15 +260,16 @@ struct ProfileView: View {
         var parts: [String] = []
         let connected = Provider.allCases.filter { appState.connectedProviders.contains($0) }
         if !connected.isEmpty {
-            parts.append(connected.map(\.displayName).joined(separator: " & ") + " connected")
+            let connectedNames = connected.map(\.displayName).joined(separator: " & ")
+            parts.append(String(localized: "profile.header.connectedDevices", defaultValue: "\(connectedNames) connected", comment: "Profile header status line naming the connected device providers, e.g. 'Whoop & Oura connected'"))
         }
         if completedWorkoutStreak > 0 {
-            parts.append("\(completedWorkoutStreak)-day streak")
+            parts.append(String(localized: "profile.header.streakDays", defaultValue: "\(completedWorkoutStreak)-day streak", comment: "Profile header status line: current workout streak length in days"))
         }
         if let category = appState.currentRecommendation?.category.displayTitle {
             parts.append(category)
         }
-        return parts.isEmpty ? "Soma uses this to tailor which workouts it suggests." : parts.joined(separator: " · ")
+        return parts.isEmpty ? String(localized: "profile.header.defaultTagline", defaultValue: "Soma uses this to tailor which workouts it suggests.", comment: "Default profile header subtitle shown before any status fragments are available") : parts.joined(separator: " · ")
     }
 
     // MARK: - Streak
@@ -399,7 +401,9 @@ struct ProfileView: View {
                                 .font(.system(size: 76, weight: .black, design: .rounded))
                                 .foregroundStyle(.white)
                                 .padding(.top, 12)
-                            Text(streakDays == 1 ? "DAY STREAK" : "DAY STREAK")
+                            Text(streakDays == 1
+                                ? String(localized: "profile.dayStreakLabel", defaultValue: "DAY STREAK", comment: "Label under the big streak count number (singular)")
+                                : String(localized: "profile.dayStreakLabelPlural", defaultValue: "DAY STREAKS", comment: "Label under the big streak count number (plural)"))
                                 .font(.system(size: 16, weight: .bold))
                                 .tracking(4)
                                 .foregroundStyle(.white.opacity(0.92))
@@ -410,7 +414,7 @@ struct ProfileView: View {
                                         chip(icon: categoryIcon(category), text: category.displayTitle)
                                     }
                                     if let steps {
-                                        chip(icon: "figure.walk", text: "\(steps.formatted()) steps")
+                                        chip(icon: "figure.walk", text: String(localized: "profile.streakShare.stepsChip", defaultValue: "\(steps.formatted()) steps", comment: "Step count chip shown on the shareable streak card image"))
                                     }
                                 }
                                 .padding(.top, 16)
@@ -629,25 +633,27 @@ struct ProfileView: View {
             summaryRow(
                 title: "Experience",
                 consequence: "Sets block count, supersets and rest",
-                value: experienceLevel?.displayName ?? "Not set"
+                value: experienceLevel?.displayName ?? notSetLabel
             ) { activeSheet = .experience }
 
             summaryRow(
                 title: "Goals",
                 consequence: "Prioritizes which workouts are suggested first",
-                value: goals.isEmpty ? "Not set" : "\(goals.count) selected"
+                value: goals.isEmpty ? notSetLabel : String(localized: "profile.goals.selectedCount", defaultValue: "\(goals.count) selected", comment: "Training goals row value: number of goals selected")
             ) { activeSheet = .goals }
 
             summaryRow(
                 title: "Equipment & access",
                 consequence: "Only suggests workouts you can actually do",
-                value: equipment.isEmpty ? "Not set" : equipment.map(\.displayName).joined(separator: ", ")
+                value: equipment.isEmpty ? notSetLabel : equipment.map(\.displayName).joined(separator: ", ")
             ) { activeSheet = .equipment }
 
             summaryRow(
                 title: "Weekly target",
                 consequence: "Personal tracking goal only -- doesn't change suggestions",
-                value: weeklySessionTarget.map { "\($0)/wk · \(sessionsDoneThisWeek) done" } ?? "Not set"
+                value: weeklySessionTarget.map {
+                    String(localized: "profile.weeklyTarget.progress", defaultValue: "\($0)/wk · \(sessionsDoneThisWeek) done", comment: "Weekly target row value: target sessions per week and sessions done so far, e.g. '4/wk · 2 done'")
+                } ?? notSetLabel
             ) { activeSheet = .weeklyTarget }
 
             if showSportGoalRow {
@@ -672,15 +678,20 @@ struct ProfileView: View {
     /// Must mirror what the goal screen actually opens to -- a paused goal
     /// still names the row ("Not set" while the hub shows a goal is a lie).
     private var sportGoalRowValue: String {
-        let doneSuffix = completedSportGoals > 0 ? " · \(completedSportGoals) done" : ""
+        let doneSuffix = completedSportGoals > 0
+            ? String(localized: "profile.sportGoal.doneSuffix", defaultValue: " · \(completedSportGoals) done", comment: "Suffix on an active sport goal's name showing completed-goal count")
+            : ""
         if let activeSportGoal {
             return activeSportGoal.displayName(in: sportGoalCatalog) + doneSuffix
         }
         if let pausedSportGoal {
-            return pausedSportGoal.displayName(in: sportGoalCatalog) + " · paused"
+            let goalName = pausedSportGoal.displayName(in: sportGoalCatalog)
+            return String(localized: "profile.sportGoal.paused", defaultValue: "\(goalName) · paused", comment: "Sport goal row value showing a paused goal's name")
         }
-        if completedSportGoals > 0 { return "\(completedSportGoals) done" }
-        return "Not set"
+        if completedSportGoals > 0 {
+            return String(localized: "profile.sportGoal.doneCount", defaultValue: "\(completedSportGoals) done", comment: "Sport goal row value: count of completed goals with no active/paused goal")
+        }
+        return notSetLabel
     }
 
     // MARK: - Health & Safety tab
@@ -692,14 +703,16 @@ struct ProfileView: View {
             summaryRow(
                 title: "Injuries",
                 consequence: injuryTags.isEmpty ? "None noted" : "Caps today's intensity at Moderate, hides high impact",
-                value: injuryTags.isEmpty ? "None noted" : injuryTags.map(\.displayName).joined(separator: ", "),
+                value: injuryTags.isEmpty ? String(localized: "profile.injuries.noneNoted", defaultValue: "None noted", comment: "Injuries row value when no injuries are recorded") : injuryTags.map(\.displayName).joined(separator: ", "),
                 valueColor: injuryTags.isEmpty ? nil : SomaTokens.danger
             ) { activeSheet = .injuries }
 
             summaryRow(
                 title: "Pregnancy",
                 consequence: "Withholds generated workouts until confirmed",
-                value: pregnancy == true ? (pregnancyWeek.map { "Week \($0)" } ?? "Yes") : "Not set"
+                value: pregnancy == true
+                    ? (pregnancyWeek.map { String(localized: "profile.pregnancy.week", defaultValue: "Week \($0)", comment: "Pregnancy row value showing the current week number, e.g. 'Week 12'") } ?? String(localized: "profile.pregnancy.yes", defaultValue: "Yes", comment: "Pregnancy row value when pregnant but no week number is set"))
+                    : notSetLabel
             ) { activeSheet = .pregnancy }
 
             if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
@@ -730,14 +743,22 @@ struct ProfileView: View {
             summaryRow(
                 title: "Contact email",
                 consequence: "Never used to sign in -- display only",
-                value: contactEmailText.isEmpty ? "Not set" : contactEmailText
+                value: contactEmailText.isEmpty ? notSetLabel : contactEmailText
             ) { activeSheet = .contactEmail }
 
             summaryRow(
                 title: "Region",
                 consequence: "Powers nearby gym & coach suggestions",
-                value: UserProfile.regionDisplay(country: countryCode, city: cityText) ?? "Not set"
+                value: UserProfile.regionDisplay(country: countryCode, city: cityText) ?? notSetLabel
             ) { activeSheet = .region }
+
+            groupEyebrow("PREFERENCES")
+            summaryRow(
+                title: "Language",
+                consequence: "Overrides your device's language just for Soma",
+                value: languageManager.selected.displayName(locale: languageManager.effectiveLocale)
+            ) { activeSheet = .language }
+            .accessibilityIdentifier("language-settings-row")
 
             groupEyebrow("EARLY ACCESS")
             betaOptInRow
@@ -753,7 +774,7 @@ struct ProfileView: View {
             }
 
             groupEyebrow("PLAN")
-            summaryRow(title: "Subscription", consequence: subscriptionStatusText, value: "") {
+            summaryRow(title: "Subscription", consequence: LocalizedStringKey(subscriptionStatusText), value: "") {
                 if !subscriptionManager.isSubscribed { presentPremiumPaywall() }
             }
             summaryRow(title: "Referral code", consequence: "Redeem a code for free access", value: "") {
@@ -770,7 +791,7 @@ struct ProfileView: View {
                 Text("Saved.").font(.caption).foregroundStyle(SomaTokens.success)
             }
 
-            SomaButton(title: "Sign out", size: .md, variant: .danger, isBlock: true) {
+            SomaButton(title: LocalizedStringKey(signOutLabel), size: .md, variant: .danger, isBlock: true) {
                 showSignOutConfirmation = true
             }
             .padding(.top, 6)
@@ -813,13 +834,28 @@ struct ProfileView: View {
             await loadSportGoalState()
         } catch {
             betaOptIn = !enabled
-            errorMessage = "Couldn't update beta access. Try again."
+            errorMessage = String(localized: "profile.betaOptIn.error", defaultValue: "Couldn't update beta access. Try again.", comment: "Error shown when toggling the sport-goals beta opt-in fails")
         }
     }
 
     // MARK: - Row primitives
 
-    private func groupEyebrow(_ text: String) -> some View {
+    /// Shared fallback text for an unset profile field, reused across
+    /// every summary row so its localization stays consistent.
+    private var notSetLabel: String {
+        String(localized: "profile.notSet", defaultValue: "Not set", comment: "Fallback value shown when a profile field hasn't been set yet")
+    }
+
+    /// Lowercase variant used mid-sentence in Stepper titles.
+    private var notSetLowerLabel: String {
+        String(localized: "profile.notSetLower", defaultValue: "not set", comment: "Lowercase 'not set' fallback used mid-sentence in a Stepper title")
+    }
+
+    private var signOutLabel: String {
+        String(localized: "profile.signOut", defaultValue: "Sign out", comment: "Button to sign out of the account")
+    }
+
+    private func groupEyebrow(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .bold))
             .tracking(0.5)
@@ -831,7 +867,7 @@ struct ProfileView: View {
     /// `label / one-line consequence / current value / ›` -- guide 05's
     /// row shape. Tapping presents whatever detail the caller wired up
     /// (usually `activeSheet = .someCase`).
-    private func summaryRow(title: String, consequence: String, value: String, valueColor: Color? = nil, action: @escaping () -> Void) -> some View {
+    private func summaryRow(title: LocalizedStringKey, consequence: LocalizedStringKey, value: String, valueColor: Color? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -917,6 +953,7 @@ struct ProfileView: View {
                     case .pregnancy: pregnancyEditor
                     case .contactEmail: contactEmailEditor
                     case .region: regionEditor
+                    case .language: languageEditor
                     }
                 }
                 .padding(20)
@@ -924,12 +961,15 @@ struct ProfileView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .somaBackground()
-            .navigationTitle(sheet.title)
+            .navigationTitle(sheet.title(locale: languageManager.effectiveLocale))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
-                        save()
+                        // Language is a local display preference (applied
+                        // immediately by languageEditor's picker), not a
+                        // profile field -- skip the network save() for it.
+                        if sheet != .language { save() }
                         activeSheet = nil
                     }
                     .disabled(isSaving)
@@ -991,7 +1031,7 @@ struct ProfileView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Stepper(
-                "Target: \(weeklySessionTarget.map(String.init) ?? "not set") sessions/week",
+                "Target: \(weeklySessionTarget.map(String.init) ?? notSetLowerLabel) sessions/week",
                 value: Binding(get: { weeklySessionTarget ?? 3 }, set: { weeklySessionTarget = $0 }),
                 in: 1...14
             )
@@ -1046,7 +1086,7 @@ struct ProfileView: View {
                     .font(.caption)
 
                     Stepper(
-                        "Pain level: \(injuryPainLevel[tag].map(String.init) ?? "not set")",
+                        "Pain level: \(injuryPainLevel[tag].map(String.init) ?? notSetLowerLabel)",
                         value: Binding(get: { injuryPainLevel[tag] ?? 1 }, set: { injuryPainLevel[tag] = $0 }),
                         in: 1...10
                     )
@@ -1072,14 +1112,14 @@ struct ProfileView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             FlowLayout {
-                ChipToggle(title: "I'm currently pregnant", isSelected: pregnancy == true) {
+                ChipToggle(title: String(localized: "profile.pregnancy.currentlyPregnant", defaultValue: "I'm currently pregnant", comment: "Pregnancy chip toggle label"), isSelected: pregnancy == true) {
                     pregnancy = (pregnancy == true) ? nil : true
                     if pregnancy != true { pregnancyWeek = nil }
                 }
             }
             if pregnancy == true {
                 Stepper(
-                    "Week: \(pregnancyWeek.map(String.init) ?? "not set")",
+                    "Week: \(pregnancyWeek.map(String.init) ?? notSetLowerLabel)",
                     value: Binding(get: { pregnancyWeek ?? 1 }, set: { pregnancyWeek = $0 }),
                     in: 1...42
                 )
@@ -1121,19 +1161,57 @@ struct ProfileView: View {
         }
     }
 
+    private var languageEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Most of Soma updates immediately; the rest applies next time you open the app.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                ForEach(AppLanguage.allCases) { language in
+                    Button {
+                        languageManager.selected = language
+                    } label: {
+                        HStack {
+                            Text(language.displayName(locale: languageManager.effectiveLocale))
+                                .foregroundStyle(SomaTokens.ink)
+                            Spacer()
+                            if languageManager.selected == language {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(SomaTokens.accent)
+                            }
+                        }
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    // Stable hook for XCUITest -- displayName is untranslated
+                    // (each language shows its own name) and unstable across
+                    // locales isn't the issue, but matching by raw value is
+                    // still more robust than matching translated text.
+                    .accessibilityIdentifier("language-option-\(language.rawValue)")
+                    if language != AppLanguage.allCases.last {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
     /// Three distinct states worth telling apart: paying, on a referral
     /// bonus (free, but ending), or neither.
     private var subscriptionStatusText: String {
         if subscriptionManager.isSubscribed {
-            return "Soma Premium is active."
+            return String(localized: "profile.subscription.active", defaultValue: "Soma Premium is active.", comment: "Subscription row consequence text when Premium is active")
         }
         if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
             let formatter = DateFormatter()
             formatter.dateStyle = .medium
             formatter.timeStyle = .none
-            return "Free until \(formatter.string(from: bonusUntil)) -- tap to subscribe now instead."
+            formatter.locale = languageManager.effectiveLocale
+            let dateText = formatter.string(from: bonusUntil)
+            return String(localized: "profile.subscription.freeBonus", defaultValue: "Free until \(dateText) -- tap to subscribe now instead.", comment: "Subscription row consequence text during a temporary referral-bonus free period")
         }
-        return "Free plan -- today's category and message only."
+        return String(localized: "profile.subscription.freePlan", defaultValue: "Free plan -- today's category and message only.", comment: "Subscription row consequence text on the default free plan")
     }
 
     private func connectDevice(_ provider: Provider) {
@@ -1154,7 +1232,9 @@ struct ProfileView: View {
                 }
                 appState.markProviderConnected(provider)
             } catch {
-                deviceErrorMessage = "Couldn't connect \(provider.displayName): \(error.localizedDescription)"
+                let providerName = provider.displayName
+                let reason = error.localizedDescription
+                deviceErrorMessage = String(localized: "profile.device.connectError", defaultValue: "Couldn't connect \(providerName): \(reason)", comment: "Error shown when connecting a wearable device provider fails; includes the provider name and system error text")
             }
         }
     }
@@ -1220,7 +1300,7 @@ struct ProfileView: View {
     private func uploadAvatar(item: PhotosPickerItem?) async {
         guard let item, let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
         guard let compressed = ImageCompression.jpeg(image) else {
-            avatarErrorMessage = "Couldn't process that photo. Try another one."
+            avatarErrorMessage = String(localized: "photoUpload.error.processingFailed", defaultValue: "Couldn't process that photo. Try another one.", comment: "Error shown when a selected body photo fails local compression/processing before upload.")
             return
         }
         isUploadingAvatar = true
@@ -1230,7 +1310,7 @@ struct ProfileView: View {
             try await SupabaseClient.shared.uploadAvatar(imageData: compressed)
             avatarImage = image
         } catch {
-            avatarErrorMessage = "Couldn't upload that photo. Try again."
+            avatarErrorMessage = String(localized: "photoUpload.error.uploadFailed", defaultValue: "Couldn't upload that photo. Try again.", comment: "Error shown when the body photo upload request to the backend fails.")
         }
     }
 
@@ -1242,7 +1322,7 @@ struct ProfileView: View {
             avatarImage = nil
             self.avatarPhotoPath = nil
         } catch {
-            avatarErrorMessage = "Couldn't remove that photo. Try again."
+            avatarErrorMessage = String(localized: "profile.avatar.error.removeFailed", defaultValue: "Couldn't remove that photo. Try again.", comment: "Error shown when removing the profile avatar photo fails")
         }
     }
 
@@ -1377,7 +1457,7 @@ struct ProfileView: View {
                 )
                 savedConfirmation = true
             } catch {
-                errorMessage = "Couldn't save profile. Try again."
+                errorMessage = String(localized: "profile.save.error", defaultValue: "Couldn't save profile. Try again.", comment: "Error shown when saving profile changes to the server fails")
             }
         }
     }
@@ -1386,28 +1466,42 @@ struct ProfileView: View {
 private enum ProfileSection: String, CaseIterable, Identifiable {
     case training, healthSafety, account
     var id: String { rawValue }
+    // Stays String -- SomaSegmentedControl's shared closure param is
+    // String, so each case pre-localizes via String(localized:) instead.
     var title: String {
         switch self {
-        case .training: "Training"
-        case .healthSafety: "Health & Safety"
-        case .account: "Account"
+        case .training: String(localized: "profile.section.training", defaultValue: "Training", comment: "Profile screen segmented tab label")
+        case .healthSafety: String(localized: "profile.section.healthSafety", defaultValue: "Health & Safety", comment: "Profile screen segmented tab label")
+        case .account: String(localized: "profile.section.account", defaultValue: "Account", comment: "Profile screen segmented tab label")
         }
     }
 }
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region
+    case experience, goals, equipment, weeklyTarget, injuries, pregnancy, contactEmail, region, language
     var id: String { rawValue }
-    var title: String {
+
+    /// Resolved explicitly against `locale` rather than a bare
+    /// `LocalizedStringKey` relying on the ambient `.environment(\.locale)`:
+    /// this title lives inside the very sheet whose own Language picker can
+    /// change the active locale while the sheet is still on screen, and
+    /// `.navigationTitle`'s bridge to `UINavigationItem` doesn't reliably
+    /// re-resolve a `LocalizedStringKey` once the view has already
+    /// appeared. Uses `LanguageManager.localizedString(_:locale:)` (loads
+    /// the target `.lproj` bundle directly) rather than
+    /// `String(localized:locale:)`, whose `locale:` parameter did not
+    /// reliably override `Bundle.main`'s resolved language in testing.
+    func title(locale: Locale) -> String {
         switch self {
-        case .experience: "Experience"
-        case .goals: "Goals"
-        case .equipment: "Equipment & access"
-        case .weeklyTarget: "Weekly target"
-        case .injuries: "Injuries"
-        case .pregnancy: "Pregnancy"
-        case .contactEmail: "Contact email"
-        case .region: "Region"
+        case .experience: localizedString("Experience", locale: locale)
+        case .goals: localizedString("Goals", locale: locale)
+        case .equipment: localizedString("Equipment & access", locale: locale)
+        case .weeklyTarget: localizedString("Weekly target", locale: locale)
+        case .injuries: localizedString("Injuries", locale: locale)
+        case .pregnancy: localizedString("Pregnancy", locale: locale)
+        case .contactEmail: localizedString("Contact email", locale: locale)
+        case .region: localizedString("Region", locale: locale)
+        case .language: localizedString("Language", locale: locale)
         }
     }
 }

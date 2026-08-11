@@ -66,7 +66,11 @@ struct ReferralCodeEntryStepView: View {
                 AnalyticsManager.shared.referralCodeRedeemed(surface: "onboarding")
                 onRedeemed()
             } catch {
-                errorMessage = "That code didn't work. Check it and try again."
+                errorMessage = String(
+                    localized: "referral_code.invalid",
+                    defaultValue: "That code didn't work. Check it and try again.",
+                    comment: "Error shown when a referral code fails to redeem"
+                )
             }
         }
     }

@@ -114,10 +114,10 @@ struct DayDetailView: View {
 
     private var statusPill: some View {
         let info: (label: String, fg: Color, bg: Color, systemImage: String) = switch state {
-        case .done: ("Completed", SomaTokens.heart, SomaTokens.heartSoft, "heart.fill")
-        case .todo: ("Planned for today", SomaTokens.accent, SomaTokens.accentSoft, "heart")
-        case .upcoming: ("Planned", SomaTokens.accent, SomaTokens.accentSoft, "heart")
-        case .skipped: ("Missed", SomaTokens.ink3, SomaTokens.surface3, "heart")
+        case .done: (String(localized: "day_detail.status.completed", defaultValue: "Completed", comment: "Status pill label for a completed workout day"), SomaTokens.heart, SomaTokens.heartSoft, "heart.fill")
+        case .todo: (String(localized: "day_detail.status.planned_today", defaultValue: "Planned for today", comment: "Status pill label for today's planned workout"), SomaTokens.accent, SomaTokens.accentSoft, "heart")
+        case .upcoming: (String(localized: "day_detail.status.planned", defaultValue: "Planned", comment: "Status pill label for a future planned workout day"), SomaTokens.accent, SomaTokens.accentSoft, "heart")
+        case .skipped: (String(localized: "day_detail.status.missed", defaultValue: "Missed", comment: "Status pill label for a missed workout day"), SomaTokens.ink3, SomaTokens.surface3, "heart")
         }
         return HStack(spacing: 4) {
             Image(systemName: info.systemImage).font(.system(size: 10))
@@ -257,12 +257,12 @@ struct DayDetailView: View {
         switch state {
         case .done:
             if let feelRating = log?.feelRating {
-                SomaChip(title: feelRating.displayName, isSelected: true) {}
+                SomaChip(title: LocalizedStringKey(feelRating.displayName), isSelected: true) {}
                     .allowsHitTesting(false)
             }
         case .todo, .upcoming:
             if let gear = requiredGear {
-                SomaChip(title: gear, isSelected: false) {}
+                SomaChip(title: LocalizedStringKey(gear), isSelected: false) {}
                     .allowsHitTesting(false)
             }
         case .skipped:
@@ -285,7 +285,7 @@ struct DayDetailView: View {
     private var plannedTitleForSkippedDay: String {
         if let plannedPlan { return plannedPlan.selectedTitle }
         if let title = topSuggestion?.title { return title }
-        return "No plan was recorded for this day"
+        return String(localized: "day_detail.no_plan_recorded", defaultValue: "No plan was recorded for this day", comment: "Fallback workout title shown for a skipped day with no recorded plan")
     }
 
     // MARK: - Bottom bar
@@ -367,7 +367,7 @@ struct DayDetailView: View {
             )
             await load()
         } catch {
-            completeError = "Couldn't log this workout. Try again."
+            completeError = String(localized: "day_detail.complete_error", defaultValue: "Couldn't log this workout. Try again.", comment: "Error shown when logging a completed workout fails")
         }
     }
 

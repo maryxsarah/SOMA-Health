@@ -33,10 +33,10 @@ struct WorkoutTimelineEntry: Identifiable {
 
     var sourceDisplayName: String {
         switch source {
-        case "whoop": "Whoop"
-        case "oura": "Oura"
-        case "apple_health": "Apple Health"
-        default: source.capitalized
+        case "whoop": return String(localized: "provider.whoop", defaultValue: "Whoop", comment: "Connected-device provider display name; brand name, not translated")
+        case "oura": return String(localized: "provider.oura", defaultValue: "Oura", comment: "Connected-device provider display name; brand name, not translated")
+        case "apple_health": return String(localized: "provider.appleHealth", defaultValue: "Apple Health", comment: "Connected-device provider display name; brand name, not translated")
+        default: return source.capitalized
         }
     }
 }
