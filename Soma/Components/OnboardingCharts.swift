@@ -70,38 +70,179 @@ struct UpwardTrendChartView: View {
     }
 }
 
-/// "A simpler way to workout and improve health" -- side-by-side growing
-/// bars, without vs. with Soma.
-struct ComparisonBarView: View {
-    @State private var grown = false
+/// The user's own real weight trajectory -- start/today and goal, plotted
+/// on a real calendar timeline (today -> today + estimatedMonths) -- in
+/// place of a decorative always-upward curve. Direction is honest: the
+/// line slopes down for a weight-loss goal, up for a gain goal, flat for
+/// maintain, because it plots the real kg values rather than an abstract
+/// "progress" curve that looked identical for every user regardless of
+/// what they'd actually answered. Two labeled anchor points only --
+/// "Today" and "Goal" -- never a fabricated third waypoint in between;
+/// see each call site for why start and today are the same point during
+/// onboarding (no weigh-in history exists yet).
+struct GoalTrajectoryChartView: View {
+    let startWeightKg: Double?
+    let goalWeightKg: Double?
+    let estimatedMonths: Int
+    var chartHeight: CGFloat = 150
+
+    @State private var drawProgress: CGFloat = 0
+    @State private var markersVisible = false
+
+    private var points: [CGPoint] {
+        guard let start = startWeightKg, let goal = goalWeightKg else { return [] }
+        // Padding keeps the line off the top/bottom edges even when the
+        // goal delta is tiny; a flat (maintain) line still reads as a
+        // real, centered line rather than one glued to an edge.
+        let range = max(abs(goal - start), 0.6)
+        let pad = range * 0.4
+        let valMin = min(start, goal) - pad
+        let span = max((max(start, goal) + pad) - valMin, 0.01)
+        func normalize(_ value: Double) -> Double { (value - valMin) / span }
+        return [CGPoint(x: 0, y: normalize(start)), CGPoint(x: 1, y: normalize(goal))]
+    }
+
+    private var goalDate: Date {
+        Calendar.current.date(byAdding: .month, value: max(estimatedMonths, 1), to: Date()) ?? Date()
+    }
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM yyyy"
+        return formatter
+    }()
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 28) {
-            column(label: "Without Soma", height: 70, color: Color(.systemGray4), icon: "person.fill", iconIsLight: true)
-            column(label: "With Soma", height: grown ? 170 : 70, color: Theme.pillFill, icon: "checkmark.circle.fill", iconIsLight: false)
-        }
-        .frame(height: 210, alignment: .bottom)
-        .onAppear {
-            withAnimation(.spring(response: 0.8, dampingFraction: 0.75).delay(0.2)) {
-                grown = true
+        Group {
+            if let start = startWeightKg, let goal = goalWeightKg {
+                let linePoints = points
+                ZStack {
+                    TrendAreaShape(points: linePoints)
+                        .fill(
+                            LinearGradient(
+                                colors: [SomaTokens.accentSoft, SomaTokens.accentSoft.opacity(0)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .opacity(drawProgress)
+
+                    TrendLineShape(points: linePoints)
+                        .trim(from: 0, to: drawProgress)
+                        .stroke(Theme.pillFill, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+
+                    GeometryReader { geometry in
+                        marker(tag: "TODAY", weightKg: start, date: Date(), point: linePoints[0], geometry: geometry)
+                        marker(tag: "GOAL", weightKg: goal, date: goalDate, point: linePoints[1], geometry: geometry)
+                    }
+                    .opacity(markersVisible ? 1 : 0)
+                }
+                .frame(height: chartHeight)
+                .onAppear {
+                    withAnimation(.spring(response: 0.75, dampingFraction: 0.75)) { drawProgress = 1 }
+                    withAnimation(.easeOut(duration: 0.3).delay(0.5)) { markersVisible = true }
+                }
+            } else if let start = startWeightKg {
+                // Partial data (no goal weight set yet) -- an honest
+                // single reading rather than fabricating a goal line.
+                VStack(spacing: 6) {
+                    Text("\(Self.formattedWeight(start)) kg today")
+                        .font(.system(.title3, design: .serif).italic())
+                    Text("Set a goal weight to see your projected timeline.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: chartHeight)
+            } else {
+                Text("Add your weight to see your projected timeline.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: chartHeight)
             }
         }
     }
 
-    private func column(label: LocalizedStringKey, height: CGFloat, color: Color, icon: String, iconIsLight: Bool) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundStyle(iconIsLight ? Color.secondary : Color.white)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(iconIsLight ? Color.white : color))
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(color)
-                .frame(width: 72, height: height)
-            Text(label)
-                .font(.caption.bold())
+    private func marker(tag: String, weightKg: Double, date: Date, point: CGPoint, geometry: GeometryProxy) -> some View {
+        VStack(spacing: 1) {
+            Text(tag)
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(Theme.pillFill)
+            Text("\(Self.formattedWeight(weightKg)) kg")
+                .font(.system(.subheadline, design: .serif).italic().bold())
+            Text(Self.monthFormatter.string(from: date))
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(width: 90)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white)
+                .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+        )
+        .position(
+            x: min(max(geometry.size.width * point.x, 40), geometry.size.width - 40),
+            y: max(24, geometry.size.height * (1 - point.y) - 32)
+        )
+    }
+
+    private static func formattedWeight(_ value: Double) -> String {
+        value.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+    }
+}
+
+/// "Highlights of your plan" -- 3-4 lines built only from answers actually
+/// collected this onboarding session. Renders nothing at all (not a
+/// generic fallback line) when nothing real has been collected yet, so a
+/// screen shown before those questions are asked never presents a claim
+/// unearned by an unset field.
+struct PlanHighlightsListView: View {
+    let items: [String]
+
+    var body: some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Highlights of your plan")
+                    .font(.body.bold())
+                ForEach(Array(items.enumerated()), id: \.offset) { _, text in
+                    HStack(alignment: .top, spacing: 8) {
+                        Circle()
+                            .fill(Theme.pillFill)
+                            .frame(width: 5, height: 5)
+                            .padding(.top, 6)
+                        Text(text)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Priority order: the goal itself first, then journey/blockers/diet
+    /// context -- each line skipped outright when its field is nil/empty,
+    /// never backfilled with a generic claim. `maxItems` lets a tighter
+    /// mid-survey screen (no ScrollView) cap to 3 while the final summary
+    /// screen (which scrolls) can show all 4.
+    static func build(
+        goalTags: Set<GoalTag>, journeyStage: JourneyStage?,
+        blockers: Set<BlockerTag>, dietType: DietType?, maxItems: Int = 4
+    ) -> [String] {
+        var lines: [String] = []
+        if !goalTags.isEmpty {
+            let names = goalTags.map(\.displayName).sorted().prefix(3).joined(separator: ", ")
+            lines.append("Built around your goal: \(names)")
+        }
+        if let journeyStage {
+            lines.append("Paced for where you are: \(journeyStage.displayName.lowercased())")
+        }
+        if !blockers.isEmpty {
+            let names = blockers.map(\.displayName).sorted().prefix(2).joined(separator: ", ")
+            lines.append("Designed around what's gotten in the way: \(names)")
+        }
+        if let dietType {
+            lines.append("Nutrition guidance tuned to: \(dietType.displayName)")
+        }
+        return Array(lines.prefix(maxItems))
     }
 }

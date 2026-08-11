@@ -57,8 +57,16 @@ final class SupabaseClient {
 
         // Apple only shares the real email on the user's very first
         // authorization for this app -- capture it here since it's never
-        // offered again on subsequent sign-ins.
-        try await upsertUser(id: auth.user.id, contactEmail: email)
+        // offered again on subsequent sign-ins. Real feedback: "Contact
+        // E-Mail should be auto-filled ... these mails are used for the
+        // setup." `?? auth.user.email` is a harmless-if-unavailable
+        // fallback: AuthResponse.AuthUser's own doc comment notes
+        // Supabase's Apple id_token exchange has not been observed to
+        // populate `email` (unlike Google/email sign-in), so this adds no
+        // coverage today if that holds -- but costs nothing to keep in
+        // case that ever changes, and does help if it turns out not to be
+        // universally true.
+        try await upsertUser(id: auth.user.id, contactEmail: email ?? auth.user.email)
         return auth.user.id
     }
 
@@ -104,7 +112,14 @@ final class SupabaseClient {
     /// "check your email to confirm" message instead.
     @discardableResult
     func signUpWithEmail(email: String, password: String) async throws -> Bool {
-        var request = URLRequest(url: URL(string: "\(Config.supabaseURL.absoluteString)/auth/v1/signup")!)
+        // redirect_to controls where {{ .ConfirmationURL }} in the signup
+        // email lands once Supabase verifies the token -- our universal
+        // link, not Supabase's own bare default page. Must also be on the
+        // Dashboard's Redirect URLs allow-list (see
+        // Config.emailConfirmationRedirectURL's own doc comment).
+        var components = URLComponents(url: Config.supabaseURL.appendingPathComponent("auth/v1/signup"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "redirect_to", value: Config.emailConfirmationRedirectURL)]
+        var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -148,6 +163,74 @@ final class SupabaseClient {
         ))
         try await upsertUser(id: auth.user.id, contactEmail: auth.user.email ?? email)
         return auth.user.id
+    }
+
+    /// Establishes a session from the confirmation email's universal-link
+    /// redirect -- Supabase's hosted /auth/v1/verify checks the token,
+    /// then 302s the browser to Config.emailConfirmationRedirectURL with
+    /// `#access_token=...&refresh_token=...&expires_in=...` in the URL
+    /// FRAGMENT (implicit-grant shape, same as its magic-link/OAuth
+    /// redirects), which is what SomaApp's onOpenURL hands this
+    /// `fragment` param -- there is no JSON response to decode here, this
+    /// is a redirect landing, not an API call.
+    ///
+    /// The fragment carries no user id, only the access token itself, so
+    /// it's decoded locally (no signature verification -- this token just
+    /// arrived from Supabase's own first-party HTTPS redirect, the same
+    /// trust level as any other sign-in response body here) to read the
+    /// `sub`/`email` claims, rather than spending an extra round trip on
+    /// GET /auth/v1/user for the same information.
+    @discardableResult
+    func completeEmailConfirmation(fragment: String) async throws -> String {
+        let params = Self.parseFragmentParams(fragment)
+        guard let accessToken = params["access_token"], let refreshToken = params["refresh_token"] else {
+            throw SupabaseError.requestFailed(status: 0, message: "Confirmation link is missing its tokens")
+        }
+        guard let claims = Self.decodeJWTClaims(accessToken), let userID = claims["sub"] as? String else {
+            throw SupabaseError.requestFailed(status: 0, message: "Couldn't read the confirmation token")
+        }
+        let email = claims["email"] as? String
+        let expiresIn = params["expires_in"].flatMap(Double.init) ?? 3600
+
+        keychain.save(StoredSession(
+            userID: userID,
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: Date().addingTimeInterval(expiresIn)
+        ))
+        // Same "ensure a users row exists" step every other sign-in path
+        // takes (see signInWithApple's own doc comment) -- this is a
+        // brand-new session this app has never upserted for.
+        try await upsertUser(id: userID, contactEmail: email)
+        return userID
+    }
+
+    /// `key1=value1&key2=value2`, percent-decoded -- the shape of a URL
+    /// fragment/query string. `URLComponents.fragment` gives the raw
+    /// string; Foundation has no built-in parser for query-string-shaped
+    /// fragments (only for `.query`), so this is hand-rolled.
+    static func parseFragmentParams(_ fragment: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for pair in fragment.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            result[String(parts[0])] = String(parts[1]).removingPercentEncoding ?? String(parts[1])
+        }
+        return result
+    }
+
+    /// Decodes a JWT's middle (payload) segment only -- no signature
+    /// verification, see completeEmailConfirmation's own doc comment for
+    /// why that's an acceptable trust level here.
+    static func decodeJWTClaims(_ token: String) -> [String: Any]? {
+        let segments = token.split(separator: ".")
+        guard segments.count == 3 else { return nil }
+        var base64 = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64 += "=" }
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
     private func refreshSession() async throws {
@@ -249,6 +332,25 @@ final class SupabaseClient {
         }
         if let diet = answers.dietType { body["diet_type"] = diet.rawValue }
         if !answers.accomplishmentGoals.isEmpty { body["accomplishment_goals"] = answers.accomplishmentGoals.map(\.rawValue) }
+        // Always skippable (KitchenEquipmentQuestionView's Continue is
+        // never gated on a selection) -- an empty selection here just
+        // means the household_equipment column keeps its '{}' default,
+        // the same "not set yet" state "What can I make?"'s first-use
+        // prompt checks for.
+        if !answers.householdEquipment.isEmpty { body["household_equipment"] = answers.householdEquipment.map(\.rawValue) }
+        if let otherHouseholdEquipmentNotes = answers.otherHouseholdEquipmentNotes,
+           !otherHouseholdEquipmentNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["other_household_equipment_notes"] = otherHouseholdEquipmentNotes
+        }
+        // Name is the primary signal -- a day picked with no name isn't
+        // saved (there's nothing to name the day against); a name with no
+        // day is still saved as context even though it can't drive
+        // scheduling yet, same "save what we have" rule as blockersNotes.
+        let trimmedAnchorName = answers.anchorSessionName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedAnchorName.isEmpty {
+            body["anchor_session_name"] = trimmedAnchorName
+            if !answers.anchorSessionDays.isEmpty { body["anchor_session_days"] = Array(answers.anchorSessionDays).sorted() }
+        }
         body["marketing_opt_in"] = answers.marketingOptIn
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
@@ -266,7 +368,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,household_equipment,other_household_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_session_name,anchor_session_days,last_period_start_date,typical_cycle_length_days&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -285,22 +387,41 @@ final class SupabaseClient {
             "id": id,
             "goals": profile.goals.map(\.rawValue),
             "equipment": profile.equipment.map(\.rawValue),
+            "household_equipment": profile.householdEquipment.map(\.rawValue),
         ]
         // JSONSerialization can't encode `nil` -- use NSNull so Postgres
         // actually clears these columns rather than leaving them untouched.
         body["contact_email"] = profile.contactEmail ?? NSNull()
         body["other_goal_notes"] = profile.otherGoalNotes ?? NSNull()
         body["other_equipment_notes"] = profile.otherEquipmentNotes ?? NSNull()
+        body["other_household_equipment_notes"] = profile.otherHouseholdEquipmentNotes ?? NSNull()
         body["injury_notes"] = profile.injuryNotes ?? NSNull()
         body["experience_level"] = profile.experienceLevel?.rawValue ?? NSNull()
         body["pregnancy"] = profile.pregnancy ?? NSNull()
         body["pregnancy_week"] = profile.pregnancy == true ? (profile.pregnancyWeek ?? NSNull()) : NSNull()
+        // Same "clearing the primary field also clears its dependent
+        // detail" rule as pregnancy/pregnancy_week just above -- a cleared
+        // start date leaves no length to anchor to either.
+        body["last_period_start_date"] = profile.lastPeriodStartDate ?? NSNull()
+        body["typical_cycle_length_days"] = profile.lastPeriodStartDate != nil ? (profile.typicalCycleLengthDays ?? NSNull()) : NSNull()
         body["weekly_session_target"] = profile.weeklySessionTarget ?? NSNull()
         body["country"] = profile.country ?? NSNull()
         body["city"] = profile.city ?? NSNull()
         body["height_cm"] = profile.heightCm ?? NSNull()
         body["journey_stage"] = profile.journeyStage?.rawValue ?? NSNull()
         body["blockers_notes"] = profile.blockersNotes ?? NSNull()
+        body["known_lifts"] = (profile.knownLifts?.isEmpty ?? true) ? NSNull() : profile.knownLifts!
+        // Now editable from ProfileView's Account section -- see
+        // UserProfile.dateOfBirth's doc comment for why this needed to
+        // stop being read-only.
+        body["date_of_birth"] = profile.dateOfBirth ?? NSNull()
+        // Name is the primary signal here too, same "save what we have"
+        // rule as saveOnboardingSurvey -- clearing the name also clears
+        // the days, rather than leaving orphaned days with no name to
+        // anchor them to.
+        let trimmedAnchorName = profile.anchorSessionName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        body["anchor_session_name"] = trimmedAnchorName.isEmpty ? NSNull() : trimmedAnchorName
+        body["anchor_session_days"] = trimmedAnchorName.isEmpty ? [] : profile.anchorSessionDays
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
@@ -653,6 +774,42 @@ final class SupabaseClient {
         return try JSONDecoder().decode([MealLogEntry].self, from: data)
     }
 
+    /// Cheap existence check (limit=1, no row body needed) for the daily
+    /// checklist's "log breakfast" item -- distinct from fetchMealLogs,
+    /// which the Nutrition screen uses and actually needs the full rows.
+    func hasMealLoggedToday(date: String) async throws -> Bool {
+        let path = "rest/v1/meal_log?date=eq.\(date)&select=id&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Row: Decodable { let id: String }
+        return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
+    }
+
+    /// Same shape as hasMealLoggedToday, no date filter -- the onboarding
+    /// checklist's "log your first meal" item.
+    func hasEverLoggedMeal() async throws -> Bool {
+        let path = "rest/v1/meal_log?select=id&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Row: Decodable { let id: String }
+        return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
+    }
+
+    /// Onboarding checklist's "log your first workout" item -- same
+    /// limit=1 existence-check shape, distinct from
+    /// fetchRecentWorkoutLogDates (which is genuinely day-windowed for the
+    /// calendar strip).
+    func hasEverLoggedWorkout() async throws -> Bool {
+        let path = "rest/v1/workout_log?select=id&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        struct Row: Decodable { let id: String }
+        return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
+    }
+
     /// `source` defaults to "manual" (typed numbers directly); pass
     /// "text_ai" when the numbers came from a parseMealText(_:) estimate
     /// the user reviewed/saved as-is or after editing -- both land in the
@@ -699,6 +856,22 @@ final class SupabaseClient {
         return try JSONDecoder().decode(MealEstimate.self, from: data)
     }
 
+    /// "What can I make?" -- a freeform description of what's in the
+    /// fridge/pantry -> one complete AI-suggested recipe (generate-meal-
+    /// recommendation), scoped to the user's real kitchen equipment,
+    /// remaining daily macros, and goal direction. Never writes anything
+    /// itself -- MealRecommendationView shows the result back and only
+    /// calls logMeal(...) (source "recipe_ai") if the user taps "Log this
+    /// meal", same estimate-then-review shape as parseMealText.
+    func generateMealRecommendation(ingredients: String) async throws -> MealRecommendation {
+        var request = try await authorizedRequest(path: "functions/v1/generate-meal-recommendation", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["ingredients": ingredients])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode(MealRecommendation.self, from: data)
+    }
+
     /// Scores an already-logged meal (rate-meal, Claude Haiku) against
     /// the user's real nutrition targets/goal direction and writes the
     /// result back onto the row server-side -- this call both rates AND
@@ -715,12 +888,63 @@ final class SupabaseClient {
         return (decoded.score, decoded.rationale)
     }
 
+    // MARK: - daily_mood
+
+    /// Plain read via RLS -- nil when the user hasn't checked in yet today.
+    func fetchTodaysMood(date: String) async throws -> DailyMoodEntry? {
+        let path = "rest/v1/daily_mood?date=eq.\(date)&select=date,rating,logged_at&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([DailyMoodEntry].self, from: data)
+        return rows.first
+    }
+
+    /// Feeds the Health Dashboard's mood trend -- ascending by date so
+    /// the chart draws left-to-right chronologically.
+    func fetchRecentMoods(days: Int = 30) async throws -> [DailyMoodEntry] {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        let end = Date()
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
+        let path = "rest/v1/daily_mood?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&select=date,rating,logged_at&order=date.asc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([DailyMoodEntry].self, from: data)
+    }
+
+    /// Upsert -- same "one row per day, re-tap to correct yourself"
+    /// posture as logging a workout is NOT (multiple workout_log rows
+    /// per day are fine), but a mood check-in is inherently a single
+    /// daily answer, so this replaces rather than adds.
+    func logMood(date: String, rating: Int) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/daily_mood", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId, "date": date, "rating": rating,
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
     // MARK: - daily_recommendation
 
     /// Plain read via RLS -- used by HomeView on appear so opening the app
     /// doesn't invoke the mutating generate-recommendation function every time.
     func fetchTodaysRecommendation(date: String) async throws -> DailyRecommendation? {
-        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category&limit=1"
+        // hrv_cap_applied/stress_cap_applied/user_requested_category were
+        // missing from this select= entirely until now -- a plain RLS
+        // re-read (e.g. reopening the app after generation already ran)
+        // silently showed those caps as false/nil even when they were
+        // active, since only the Edge Function's own JSON response ever
+        // carried them. injury_protocol_rest_applied/mood_cap_applied are
+        // new columns added alongside this fix, so they'd have shipped
+        // with the same gap if not caught here.
+        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,injury_protocol_rest_applied,hrv_cap_applied,stress_cap_applied,mood_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category,user_requested_category&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -741,7 +965,8 @@ final class SupabaseClient {
         let startStr = formatter.string(from: start)
         let endStr = formatter.string(from: end)
 
-        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category&order=date.asc"
+        // Same select= gap as fetchTodaysRecommendation above -- see its comment.
+        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,injury_protocol_rest_applied,hrv_cap_applied,stress_cap_applied,mood_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category,user_requested_category&order=date.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -779,6 +1004,10 @@ final class SupabaseClient {
     /// workout done (e.g. "I like a 5-10min incline treadmill warm-up") --
     /// generate-workout-plan folds recent feedback into future plans for a
     /// similar workout.
+    /// `source` defaults to "ai_plan" (every existing call site logs an
+    /// AI-generated suggestion/plan); pass "manual" for
+    /// LogManualWorkoutView's sport/activity entries -- see the
+    /// 20260806040000 migration's own comment for why this exists.
     func logWorkout(
         date: String,
         title: String,
@@ -788,7 +1017,8 @@ final class SupabaseClient {
         feelRating: WorkoutFeelRating? = nil,
         planSnapshot: AIWorkoutPlan? = nil,
         startedAt: Date? = nil,
-        endedAt: Date? = nil
+        endedAt: Date? = nil,
+        source: String = "ai_plan"
     ) async throws {
         guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
         var body: [String: Any] = [
@@ -797,6 +1027,7 @@ final class SupabaseClient {
             "title": title,
             "body_part": bodyPart,
             "category": category,
+            "source": source,
         ]
         if let feedback, !feedback.isEmpty {
             body["feedback"] = feedback
@@ -833,7 +1064,7 @@ final class SupabaseClient {
     /// which of today's/yesterday's suggestions are already logged) and
     /// DayDetailView (calendar day drill-down).
     func fetchWorkoutLogs(date: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating&order=completed_at.asc"
+        let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source,calories_burned,calories_estimated,reason_snapshot&order=completed_at.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -844,7 +1075,7 @@ final class SupabaseClient {
     /// TrainingHistoryView's 30-day list and RecommendationDetailView's
     /// 7-day body-part balancing.
     func fetchWorkoutLogs(fromDate: String, toDate: String) async throws -> [WorkoutLogEntry] {
-        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating&order=date.desc"
+        let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source,calories_burned,calories_estimated,reason_snapshot&order=date.desc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -860,6 +1091,24 @@ final class SupabaseClient {
         if let feedback {
             body["feedback"] = feedback.isEmpty ? NSNull() : feedback
         }
+        var request = try await authorizedRequest(path: "rest/v1/workout_log?id=eq.\(id)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// System-computed backfill, not a user edit -- kept separate from
+    /// updateWorkoutLog above (feel rating/feedback, always user-triggered)
+    /// on purpose. CompletedWorkoutView.load() calls this once per log, the
+    /// first time it resolves a missing calorie/reason value, so every
+    /// later open reads the same frozen result instead of recomputing (and
+    /// potentially re-querying HealthKit) every time.
+    func updateWorkoutLogComputedFields(id: String, caloriesBurned: Int?, caloriesEstimated: Bool, reasonSnapshot: String?) async throws {
+        var body: [String: Any] = ["calories_estimated": caloriesEstimated]
+        body["calories_burned"] = caloriesBurned ?? NSNull()
+        body["reason_snapshot"] = reasonSnapshot ?? NSNull()
         var request = try await authorizedRequest(path: "rest/v1/workout_log?id=eq.\(id)", method: "PATCH")
         request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -908,6 +1157,47 @@ final class SupabaseClient {
         struct Row: Decodable { let date: String }
         let rows = try JSONDecoder().decode([Row].self, from: data)
         return Set(rows.map(\.date))
+    }
+
+    // MARK: - daily_checklist_state
+
+    /// Plain read via RLS. `scope` is "daily" or "onboarding" -- see the
+    /// migration's own comment on the two. `sinceDate` is ignored for
+    /// "onboarding" (that scope is never date-scoped; the table only has
+    /// ~8 such rows per user total, so an unfiltered fetch is cheap).
+    func fetchDailyChecklistState(scope: String, sinceDate: String? = nil) async throws -> [DailyChecklistStateRow] {
+        var path = "rest/v1/daily_checklist_state?scope=eq.\(scope)&select=item_key,date"
+        if scope == "daily", let sinceDate {
+            path += "&date=gte.\(sinceDate)"
+        }
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        return try JSONDecoder().decode([DailyChecklistStateRow].self, from: data)
+    }
+
+    /// Idempotent -- the table's (user_id, item_key, date) unique
+    /// constraint means checking an already-checked item twice is a no-op,
+    /// not a duplicate row or an error.
+    func upsertDailyChecklistState(scope: String, itemKey: String, date: String) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/daily_checklist_state", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId, "scope": scope, "item_key": itemKey, "date": date,
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// Un-checks a manual item -- only ever called for "daily" scope rows
+    /// (onboarding items, once checked, stay checked: there's no UX path
+    /// that un-does "you've connected a health source").
+    func deleteDailyChecklistState(itemKey: String, date: String) async throws {
+        let path = "rest/v1/daily_checklist_state?item_key=eq.\(itemKey)&date=eq.\(date)"
+        let request = try await authorizedRequest(path: path, method: "DELETE")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
     }
 
     /// Which of the last N days had a real sport-goal training session --
@@ -1080,6 +1370,16 @@ final class SupabaseClient {
             // yoga session (has none) therefore synced NOTHING -- and since
             // the call site uses `try?`, silently.
             row["calories"] = entry.calories ?? NSNull()
+            // activity_type (WorkoutTimelineEntry.isWalk) intentionally NOT
+            // synced here yet -- the healthkit_workout_sync table doesn't
+            // have that column live yet (see the still-held migration,
+            // 20260808000000_add_healthkit_activity_type.sql); referencing
+            // an unknown column in this insert would 400 and silently break
+            // ALL HealthKit sync via this function's try?-wrapped caller.
+            // Wire this through once that migration deploys -- until then,
+            // the walk-exclusion fix only covers this device's own local
+            // HealthKit query (HomeView.autoLogDeviceDetectedWorkoutIfNeeded),
+            // which is what the reported bug actually hit.
             return row
         }
 
@@ -1108,6 +1408,12 @@ final class SupabaseClient {
     /// data that nothing consumes is the wrong side of data minimisation as
     /// well as an unmet promise.
     func fetchSyncedHealthKitWorkouts(date: String) async throws -> [WorkoutTimelineEntry] {
+        // activity_type deliberately left out of select= -- see the
+        // matching comment in syncHealthKitWorkouts above; the column
+        // isn't live yet. Entries read back here decode with
+        // activityType == nil, i.e. isWalk == false: an honest "we don't
+        // know" rather than a false positive that would wrongly block a
+        // real workout from being auto-logged for another device's entries.
         let path = "rest/v1/healthkit_workout_sync?select=source,title,start_time,duration_minutes,calories&start_time=gte.\(date)T00:00:00&start_time=lt.\(date)T23:59:59.999&order=start_time.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
@@ -1301,6 +1607,7 @@ final class SupabaseClient {
             if let v = healthkit.sleepDeepHours { hk["sleepDeepHours"] = v }
             if let v = healthkit.sleepRemHours { hk["sleepRemHours"] = v }
             if let v = healthkit.sleepAwakeHours { hk["sleepAwakeHours"] = v }
+            if let v = healthkit.basalEnergyKcal { hk["basalEnergyKcal"] = v }
             body["healthkit"] = hk
         }
 

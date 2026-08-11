@@ -104,4 +104,18 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .badge]
     }
+
+    /// Only the checklist nudges (NotificationManager.scheduleChecklistNudges)
+    /// carry a "checklistDeepLink" key -- every other notification in this
+    /// app (morning recommendation, upgrade reminder, the 3 engagement
+    /// nudges) has no userInfo and this is a no-op for them, same as
+    /// tapping just opens the app to wherever AppState already routes.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        if let rawValue = response.notification.request.content.userInfo["checklistDeepLink"] as? String {
+            ChecklistDeepLinkRouter.shared.route(rawValue: rawValue)
+        }
+    }
 }

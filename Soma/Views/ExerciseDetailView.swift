@@ -35,7 +35,7 @@ struct ExerciseDetailView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(exercise.name)
                             .font(.title3.bold())
-                        Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)")
+                        Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)\(exercise.restLabel.map { " — \($0)" } ?? "")")
                             .font(.subheadline)
                             .foregroundStyle(Theme.pillFill)
                         // Always-visible, no interaction needed -- someone

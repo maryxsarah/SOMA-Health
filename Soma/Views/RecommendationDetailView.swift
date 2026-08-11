@@ -320,6 +320,16 @@ struct RecommendationDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
+                    if recommendation.injuryProtocolRestApplied {
+                        Text("Note: today is a full rest day because of a severe injury you reported recently, or one that's been trending worse -- your safety comes before intensity here.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    if recommendation.moodCapApplied {
+                        Text("Note: today's intensity was eased based on how you said you're feeling, even though recovery looked strong.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                     // Says out loud when the read is thin. Without this a run
                     // of identical days is indistinguishable from the app
                     // being broken -- which is exactly how testers read it.
@@ -618,6 +628,9 @@ struct RecommendationDetailView: View {
     /// user, instead of repeating identical copy. Falls through to the
     /// original per-reason tip only when none of the richer signals apply.
     private var personalizedTomorrowTip: String {
+        if recommendation.injuryProtocolRestApplied {
+            return "Today is a full rest day for your injury's sake. Tomorrow, only resume light activity if a check-in shows things are trending better -- pushing through too soon is what turns a short setback into a long one."
+        }
         if recommendation.volumeCapApplied {
             return String(localized: "recommendationDetail.tomorrowTip.volumeCap", defaultValue: "Today was capped for high training volume over the last week. Tomorrow, favor a lighter session or full rest -- accumulated fatigue, not just last night's sleep, is driving this one.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for high training volume")
         }
@@ -629,6 +642,9 @@ struct RecommendationDetailView: View {
         }
         if recommendation.pregnancyCapApplied {
             return String(localized: "recommendationDetail.tomorrowTip.pregnancy", defaultValue: "General guidance for tomorrow: favor controlled, moderate sessions and listen to how your body responds -- your care provider's advice takes priority over this app's recommendation.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for pregnancy")
+        }
+        if recommendation.moodCapApplied {
+            return "Today's session eased off based on how you said you were feeling. If tomorrow's check-in is better, intensity can pick back up -- this app tracks how you feel, not just how your wearable reads you."
         }
         // Body-part imbalance: the same focus trained on most of the last
         // 4 logged days -- a real, evidence-based nudge toward variety
@@ -995,6 +1011,8 @@ private struct SeededGenerator: RandomNumberGenerator {
             volumeCapApplied: false,
             hrvCapApplied: false,
             stressCapApplied: false,
+            injuryProtocolRestApplied: false,
+            moodCapApplied: false,
             preCapCategory: nil,
             dataConfidence: .low,
             userRequestedCategory: nil

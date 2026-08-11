@@ -15,9 +15,15 @@ struct HealthKitSnapshot: Codable {
     var sleepDeepHours: Double?
     var sleepRemHours: Double?
     var sleepAwakeHours: Double?
+    /// Trailing-24h basalEnergyBurned sum (kcal) -- feeds
+    /// nutritionTargets.ts's measured-BMR override server-side (see
+    /// docs/coaching-personalization-plan.md Phase 1). Not used anywhere
+    /// client-side.
+    var basalEnergyKcal: Double?
 
     enum CodingKeys: String, CodingKey {
         case sleepHours, hrvMs, restingHr
         case sleepLightHours, sleepDeepHours, sleepRemHours, sleepAwakeHours
+        case basalEnergyKcal
     }
 }

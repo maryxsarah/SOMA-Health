@@ -1,7 +1,8 @@
 import HealthKit
 
 /// Wraps the exact read-only HealthKit access the spec calls for: sleep,
-/// HRV, resting/instant heart rate, steps, active energy, exercise time.
+/// HRV, resting/instant heart rate, steps, active energy, basal energy,
+/// exercise time.
 final class HealthKitManager {
     static let shared = HealthKitManager()
 
@@ -17,6 +18,7 @@ final class HealthKitManager {
         HKObjectType.quantityType(forIdentifier: .heartRate)!,
         HKObjectType.quantityType(forIdentifier: .stepCount)!,
         HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
+        HKObjectType.quantityType(forIdentifier: .basalEnergyBurned)!,
         HKObjectType.quantityType(forIdentifier: .appleExerciseTime)!,
         HKObjectType.workoutType(),
     ]
@@ -32,6 +34,27 @@ final class HealthKitManager {
     func requestAuthorization() async throws {
         guard Self.isAvailable else { throw HealthKitError.notAvailable }
         try await store.requestAuthorization(toShare: [], read: readTypes)
+    }
+
+    /// Whether this install has already completed the read-authorization
+    /// sheet for `readTypes` -- the only signal HealthKit exposes for read
+    /// access (see requestAuthorization's own doc comment: it never
+    /// reports per-type grant/denial). `.unnecessary` means "already
+    /// asked," which this app already treats as "Connected" the moment
+    /// requestAuthorization's sheet completes -- same definition, just
+    /// checked without re-prompting.
+    ///
+    /// This is an OS-level, install-scoped grant -- entirely untouched by
+    /// SOMA sign-out/sign-in, unlike Whoop/Oura's server-stored tokens. So
+    /// unlike AppState.refreshConnectedProviders' Whoop/Oura fetch, a
+    /// `false` here after a prior `true` is never treated as "must have
+    /// been revoked, ignore it" -- it just means never authorized yet.
+    func isAuthorized() async -> Bool {
+        guard Self.isAvailable else { return false }
+        guard let status = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes) else {
+            return false
+        }
+        return status == .unnecessary
     }
 
     /// Snapshot of today's metrics for the optional `healthkit` payload sent
@@ -60,6 +83,7 @@ final class HealthKitManager {
             .restingHeartRate,
             unit: HKUnit.count().unitDivided(by: .minute())
         )
+        async let basalEnergy = fetchCumulativeQuantity(.basalEnergyBurned, unit: .kilocalorie())
         async let stages = fetchSleepStageBreakdown()
         let stageBreakdown = await stages
         return await HealthKitSnapshot(
@@ -69,7 +93,8 @@ final class HealthKitManager {
             sleepLightHours: stageBreakdown.light,
             sleepDeepHours: stageBreakdown.deep,
             sleepRemHours: stageBreakdown.rem,
-            sleepAwakeHours: stageBreakdown.awake
+            sleepAwakeHours: stageBreakdown.awake,
+            basalEnergyKcal: basalEnergy
         )
     }
 
@@ -151,12 +176,35 @@ final class HealthKitManager {
                         title: Self.displayName(for: workout.workoutActivityType),
                         startTime: workout.startDate,
                         durationMinutes: Int(workout.duration / 60),
-                        calories: workout.totalEnergyBurned.map { Int($0.doubleValue(for: .kilocalorie())) }
+                        calories: workout.totalEnergyBurned.map { Int($0.doubleValue(for: .kilocalorie())) },
+                        activityType: Self.activityTypeKey(for: workout.workoutActivityType)
                     )
                 } ?? []
                 continuation.resume(returning: entries)
             }
             store.execute(query)
+        }
+    }
+
+    /// Stable machine key for WorkoutTimelineEntry.activityType -- kept
+    /// separate from displayName() below since that one is user-facing
+    /// copy and free to change wording without breaking the "is this a
+    /// walk" check that depends on this key.
+    private static func activityTypeKey(for type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .walking: "walking"
+        case .running: "running"
+        case .cycling: "cycling"
+        case .swimming: "swimming"
+        case .traditionalStrengthTraining, .functionalStrengthTraining: "strength_training"
+        case .yoga: "yoga"
+        case .highIntensityIntervalTraining: "hiit"
+        case .coreTraining: "core_training"
+        case .flexibility: "flexibility"
+        case .hiking: "hiking"
+        case .rowing: "rowing"
+        case .elliptical: "elliptical"
+        default: "other"
         }
     }
 
@@ -325,6 +373,51 @@ final class HealthKitManager {
         }
     }
 
+    /// Trailing-window SUM of a cumulative quantity type (e.g.
+    /// basalEnergyBurned, which HealthKit reports as many small
+    /// per-interval samples throughout the day, not one point reading like
+    /// restingHeartRate/HRV) -- nil if nothing was recorded in the window.
+    /// Same "nil rather than stale" rule as fetchMedianQuantity: this is
+    /// never allowed to fall back to an older window's total.
+    ///
+    /// basalEnergyBurned specifically: summing a full trailing 24h already
+    /// yields kcal/day directly (it's a rate accumulated over the day, not
+    /// a snapshot to average) -- this is what nutritionTargets.ts treats as
+    /// a "measured BMR" override for the day's calorie target. Apple's own
+    /// estimate, itself algorithmic (derived from the user's weight/age/sex
+    /// plus their actual activity), not a lab-measured BMR -- but it is
+    /// this specific user's real recent data rather than a population
+    /// formula, and it's the only device-level resting-energy signal this
+    /// app has access to (see nutritionTargets.ts's own comment on this).
+    private func fetchCumulativeQuantity(
+        _ identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        hours: Double = 24
+    ) async -> Double? {
+        guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { return nil }
+        let now = Date()
+        let predicate = HKQuery.predicateForSamples(
+            withStart: now.addingTimeInterval(-hours * 3600),
+            end: now,
+            options: .strictStartDate
+        )
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, _ in
+                guard let sum = statistics?.sumQuantity() else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: sum.doubleValue(for: unit))
+            }
+            store.execute(query)
+        }
+    }
+
     /// Average and max heart rate over an EXACT window -- e.g. a logged
     /// workout's start/end timestamps, not the whole day. Everything else
     /// in this file only ever computes a day-level median (see
@@ -354,6 +447,34 @@ final class HealthKitManager {
                 }
                 let average = values.reduce(0, +) / Double(values.count)
                 continuation.resume(returning: (average: average, max: values.max() ?? average))
+            }
+            store.execute(query)
+        }
+    }
+
+    /// Active energy burned over an EXACT window -- same "arbitrary
+    /// caller-supplied interval" shape as fetchHeartRateSummary above (a
+    /// logged workout's start/end), not the trailing-24h rate
+    /// fetchCumulativeQuantity's basalEnergyBurned use computes. Feeds
+    /// CompletedWorkoutView's calorie hero stat as the real, measured
+    /// number when one exists; the estimate in WorkoutCalorieEstimator is
+    /// only ever a fallback for when this returns nil. Returns nil (never
+    /// a placeholder) if nothing was recorded in that exact window.
+    func fetchActiveEnergy(start: Date, end: Date) async -> Int? {
+        guard Self.isAvailable, let type = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) else { return nil }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, _ in
+                guard let sum = statistics?.sumQuantity() else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: Int(sum.doubleValue(for: .kilocalorie()).rounded()))
             }
             store.execute(query)
         }

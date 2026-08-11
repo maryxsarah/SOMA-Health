@@ -102,12 +102,23 @@ struct WeightDeltaReactionView: View {
     }
 }
 
-/// "A simpler way to workout and improve health" -- side-by-side
-/// comparison bars.
+/// "A simpler way to workout and improve health" -- was a static "Without
+/// Soma / With Soma" bar illustration with no real data behind it at all
+/// (fixed heights, same for every user); now the same real trajectory
+/// chart as the other survey chart screens, reinforcing the actual plan
+/// rather than a generic comparison prop.
 struct ComparisonStepView: View {
     let progress: Double
+    let weightDeltaKg: Double
+    let pace: GoalPace
+    let startWeightKg: Double?
+    let goalWeightKg: Double?
     let onBack: () -> Void
     let onContinue: () -> Void
+
+    private var estimatedMonths: Int {
+        GoalPace.estimatedMonths(deltaKg: weightDeltaKg, pace: pace)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -126,7 +137,11 @@ struct ComparisonStepView: View {
 
             Spacer()
 
-            ComparisonBarView()
+            GoalTrajectoryChartView(
+                startWeightKg: startWeightKg, goalWeightKg: goalWeightKg,
+                estimatedMonths: estimatedMonths, chartHeight: 160
+            )
+            .padding(.horizontal, 24)
 
             Spacer()
 
@@ -147,6 +162,16 @@ struct OnTrackStepView: View {
     let progress: Double
     let weightDeltaKg: Double
     let pace: GoalPace
+    let startWeightKg: Double?
+    let goalWeightKg: Double?
+    /// By this point in the survey (see SurveyStep's order in
+    /// OnboardingSurveyView) goal/journeyStage/blockers/dietType have all
+    /// already been answered -- the last chart screen where a real,
+    /// non-thin "Highlights of your plan" list is honest to show.
+    let goalTags: Set<GoalTag>
+    let journeyStage: JourneyStage?
+    let blockers: Set<BlockerTag>
+    let dietType: DietType?
     let onBack: () -> Void
     let onContinue: () -> Void
 
@@ -180,9 +205,12 @@ struct OnTrackStepView: View {
                 .padding(.horizontal, 24)
                 .padding(.top, 4)
 
-            UpwardTrendChartView(xAxisLabels: ["Now", "Halfway", monthLabel])
-                .padding(.horizontal, 24)
-                .padding(.top, 20)
+            GoalTrajectoryChartView(
+                startWeightKg: startWeightKg, goalWeightKg: goalWeightKg,
+                estimatedMonths: estimatedMonths, chartHeight: 130
+            )
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
 
             Text("At a \(pace.displayName.lowercased()) pace, most people following their plan consistently reach a goal like this in about \(monthLabel). Consistency in the early weeks matters most.")
                 .font(.body)
@@ -190,6 +218,17 @@ struct OnTrackStepView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
                 .padding(.top, 16)
+
+            // Capped to 3 (not the full 4) -- this screen has no
+            // ScrollView, unlike PlanSummaryStepView's own use of this
+            // same list, so a 4th line risks pushing Continue off a small
+            // device's screen.
+            PlanHighlightsListView(items: PlanHighlightsListView.build(
+                goalTags: goalTags, journeyStage: journeyStage,
+                blockers: blockers, dietType: dietType, maxItems: 3
+            ))
+            .padding(.horizontal, 32)
+            .padding(.top, 14)
 
             Spacer()
 

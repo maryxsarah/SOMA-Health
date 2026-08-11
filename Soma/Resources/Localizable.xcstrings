@@ -54116,6 +54116,60 @@
         }
       },
       "comment": "Schedule rule row subtitle for 'When readiness allows'"
+    },
+    "profile.save.injuryError": {
+      "extractionState": "manual",
+      "comment": "Error shown when the profile itself saved but the separate injury-tag write failed",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profile saved, but couldn't update injury info. Try again."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Perfil guardado, pero no se pudo actualizar la información de lesiones. Inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profil enregistré, mais impossible de mettre à jour les informations sur les blessures. Veuillez réessayer."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profilo salvato, ma non è stato possibile aggiornare le informazioni sugli infortuni. Riprova."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profil gespeichert, aber die Verletzungsinfos konnten nicht aktualisiert werden. Versuche es erneut."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Профиль сохранён, но не удалось обновить данные о травмах. Попробуй ещё раз."
+          }
+        },
+        "ka": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "პროფილი შენახულია, მაგრამ ტრავმის ინფორმაციის განახლება ვერ მოხერხდა. სცადე ხელახლა."
+          }
+        },
+        "hy": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Պրոֆիլը պահպանվեց, բայց վնասվածքի տվյալները չհաջողվեց թարմացնել։ Փորձիր նորից։"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

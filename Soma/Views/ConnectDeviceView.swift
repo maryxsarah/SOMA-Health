@@ -51,6 +51,14 @@ struct ConnectDeviceView: View {
             .padding(.bottom, 32)
         }
         .somaBackground()
+        // Belt-and-suspenders alongside markSignedIn's own fire-and-forget
+        // call -- guarantees this screen always shows the real,
+        // server/OS-verified state (a provider connected in an earlier
+        // session, before this sign-out, still shows Connected) no matter
+        // which path led here. See AppState.refreshConnectedProviders.
+        .task {
+            await appState.refreshConnectedProviders()
+        }
     }
 
     private func connect(_ provider: Provider) {

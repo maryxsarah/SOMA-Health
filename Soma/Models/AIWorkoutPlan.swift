@@ -11,6 +11,13 @@ struct AIExercise: Codable, Identifiable {
     let weightGuidance: String
     let intensity: String
     let durationMinutes: Int
+    /// Real prescriptive rest AFTER this exercise, in seconds -- only
+    /// populated by generate-workout-plan (Phase 2: see
+    /// docs/coaching-personalization-plan.md); nil for the gym-photo flow,
+    /// which doesn't send this field, and for any plan cached before it
+    /// existed. Display-only -- durationMinutes above already includes
+    /// rest in its own total, this is never separately added to it.
+    let restSeconds: Int?
     let instructions: String
     /// Which muscles/body area this exercise targets -- currently only
     /// populated by the gym-photo-workout flow (deterministic, set per
@@ -32,8 +39,21 @@ struct AIExercise: Codable, Identifiable {
         case name, sets, reps, intensity, instructions
         case weightGuidance = "weight_guidance"
         case durationMinutes = "duration_minutes"
+        case restSeconds = "rest_seconds"
         case targetArea = "target_area"
         case libraryId = "library_id"
+    }
+
+    /// Compact display string for restSeconds -- e.g. "45s rest", "90s
+    /// rest". Nil (not just an empty string) when there's nothing to show,
+    /// so callers can decide whether to render a row at all rather than an
+    /// empty one. 0 is a real, meaningful value (a stretch/warm-up item
+    /// with no prescribed rest), so it still renders as "0s rest" rather
+    /// than being treated the same as "not sent".
+    var restLabel: String? {
+        guard let restSeconds else { return nil }
+        if restSeconds <= 0 { return "no rest needed" }
+        return "\(restSeconds)s rest"
     }
 }
 
@@ -123,6 +143,14 @@ struct AIWorkoutPlan: Codable {
     /// Non-nil only when the plan actually includes a goal block -- gates
     /// the GOAL BLOCK eyebrow (an active goal alone doesn't imply one today).
     let goalBlock: AIGoalBlockMarker?
+    /// Non-nil only when outdoor cardio was actually excluded from today's
+    /// candidate pool for weather -- e.g. "It's 42°C (feels like) right
+    /// now -- too hot for safe outdoor cardio." Real feedback: "when the
+    /// user is in Dubai, and the temperature ... is 42 degrees celsius,
+    /// SOMA should not recommend a run outside." See
+    /// _shared/weatherSafety.ts server-side. Absent-means-nil for plans
+    /// cached before this field existed.
+    let weatherNote: String?
 
     enum CodingKeys: String, CodingKey {
         case date, category, focus, blocks, source
@@ -133,6 +161,7 @@ struct AIWorkoutPlan: Codable {
         case templateBodyPart = "bodyPart"
         case exceptionalFinisher = "exceptional_finisher"
         case goalBlock = "goal_block"
+        case weatherNote = "weather_note"
     }
 
     init(from decoder: Decoder) throws {
@@ -160,6 +189,7 @@ struct AIWorkoutPlan: Codable {
         source = try container.decodeIfPresent(String.self, forKey: .source) ?? "suggestion"
         // Lenient: absent, null, or an unexpected shape all mean "no marker".
         goalBlock = try? container.decodeIfPresent(AIGoalBlockMarker.self, forKey: .goalBlock)
+        weatherNote = try container.decodeIfPresent(String.self, forKey: .weatherNote)
     }
 }
 

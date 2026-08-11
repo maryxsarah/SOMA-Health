@@ -18,6 +18,18 @@ export interface NutritionTargetsInput {
   sex: "male" | "female" | "other";
   activityLevel: ActivityLevel;
   trainingEmphasis: TrainingEmphasis;
+  /// Device-reported resting energy (HealthKit basalEnergyBurned, trailing
+  /// 24h) when a recent-enough reading exists -- see
+  /// MEASURED_BMR_MAX_AGE_DAYS. Takes over from baseMetabolicRate()'s
+  /// formula as the BMR feeding TDEE below; everything downstream (activity
+  /// multiplier, emphasis adjustment, macro split) is unchanged. Optional/
+  /// null is the normal case for any user without a connected Apple Watch
+  /// or with a stale reading -- falls back to the formula, never guesses.
+  /// Not a clinical/lab-measured BMR (indirect calorimetry) -- Apple's own
+  /// estimate, itself algorithmic -- but it reflects this specific user's
+  /// actual weight/activity trends rather than a population formula, and is
+  /// the only device-level resting-energy signal this app has access to.
+  measuredBmrKcal?: number | null;
 }
 
 export interface NutritionTargets {
@@ -94,7 +106,14 @@ const KCAL_PER_G_FAT = 9;
 /// missing rather than guessing -- same "omit rather than fabricate" rule
 /// as generate-workout-plan's buildLoadGuidance when bodyweight is unknown.
 export function computeNutritionTargets(input: NutritionTargetsInput): NutritionTargets {
-  const bmr = baseMetabolicRate(input.weightKg, input.heightCm, input.age, input.sex);
+  // A measured reading of exactly 0 or negative is a bad sample (HealthKit
+  // returning "nothing accumulated yet" from a partial trailing window,
+  // never a real BMR), not a legitimate override -- falls back to the
+  // formula rather than computing calorie targets off zero.
+  const hasMeasuredBmr = input.measuredBmrKcal != null && input.measuredBmrKcal > 0;
+  const bmr = hasMeasuredBmr
+    ? input.measuredBmrKcal!
+    : baseMetabolicRate(input.weightKg, input.heightCm, input.age, input.sex);
   const tdee = bmr * ACTIVITY_MULTIPLIER[input.activityLevel];
   const calories = Math.max(1200, Math.round(tdee + CALORIE_ADJUSTMENT[input.trainingEmphasis]));
 
@@ -106,11 +125,62 @@ export function computeNutritionTargets(input: NutritionTargetsInput): Nutrition
   // this from going pathological, but clamp defensively anyway).
   const carbsG = Math.max(0, Math.round((calories - proteinAndFatKcal) / KCAL_PER_G_CARB));
 
+  const basisPrefix = hasMeasuredBmr ? "measured_bmr" : "mifflin_st_jeor";
   return {
     dailyCalories: calories,
     dailyProteinG: proteinG,
     dailyCarbsG: carbsG,
     dailyFatG: fatG,
-    basis: `mifflin_st_jeor:${input.trainingEmphasis}:activity=${input.activityLevel}:sex=${input.sex}`,
+    basis: `${basisPrefix}:${input.trainingEmphasis}:activity=${input.activityLevel}:sex=${input.sex}`,
   };
+}
+
+/// How stale a HealthKit basalEnergyBurned reading can be before
+/// computeNutritionTargets should get the formula BMR instead -- a user who
+/// stopped wearing their Watch (or uninstalled/reinstalled) shouldn't have
+/// a months-old resting-energy number silently driving today's calorie
+/// target forever. 7 days: generous enough to survive a few days of not
+/// wearing the Watch/opening the app, matched to the same order of
+/// magnitude as this app's other trailing-window signals (recentLogs' 14
+/// days), without letting a truly stale reading pass as "measured".
+export const MEASURED_BMR_MAX_AGE_DAYS = 7;
+
+/// Whether a daily_snapshot row dated `snapshotDate` is still fresh enough
+/// (relative to `today`, both "YYYY-MM-DD") to feed computeNutritionTargets
+/// as measuredBmrKcal. Pure date-string math, no Date parsing surprises
+/// across timezones -- callers pass their own already-resolved date
+/// strings, same convention as generate-workout-plan's daysBetween.
+export function isMeasuredBmrFresh(snapshotDate: string, today: string): boolean {
+  const from = new Date(`${snapshotDate}T00:00:00.000Z`).getTime();
+  const to = new Date(`${today}T00:00:00.000Z`).getTime();
+  const ageDays = Math.floor((to - from) / 86400000);
+  return ageDays >= 0 && ageDays <= MEASURED_BMR_MAX_AGE_DAYS;
+}
+
+/// Deterministic training_emphasis fallback for when there's no goal/
+/// current body photo pair to run analyze-body-photo's vision comparison
+/// against -- real feedback: "a lot of users likely won't want to upload
+/// their photos, and calories can already be estimated roughly from the
+/// target weight and the current one." Both inputs are already collected
+/// at onboarding regardless of whether the (separate, optional) body-
+/// photo feature is ever used.
+///
+/// Cannot distinguish "recomp" from "maintain" without photos -- both
+/// look identical as just "a similar target weight" -- so a close target
+/// reads as maintain, the honest simpler answer, rather than guessing.
+/// A percentage-of-bodyweight threshold (not a flat kg one) so "2kg"
+/// means something proportionally consistent whether someone weighs 50kg
+/// or 120kg.
+export function trainingEmphasisFromWeights(
+  weightKg: number | null,
+  desiredWeightKg: number | null,
+): TrainingEmphasis | null {
+  if (weightKg === null || desiredWeightKg === null || weightKg <= 0) return null;
+  const deltaFraction = (desiredWeightKg - weightKg) / weightKg;
+  // Inside +/-2% of current bodyweight is comfortably within normal
+  // day-to-day fluctuation -- below that, a direction would be reading
+  // noise, not an actual stated goal.
+  if (deltaFraction <= -0.02) return "cut";
+  if (deltaFraction >= 0.02) return "bulk";
+  return "maintain";
 }

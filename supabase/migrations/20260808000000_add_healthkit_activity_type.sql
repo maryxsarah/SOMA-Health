@@ -1,0 +1,16 @@
+-- Lets a synced HealthKit workout carry its HKWorkoutActivityType (e.g.
+-- "walking", "running") so a walk detected on one device can be told apart
+-- from a real workout session once read back on another -- real feedback:
+-- "I went for a 2k steps walk, but SOMA is not giving me a workout ...
+-- only a real workout should mark the day done, not just a walk."
+--
+-- The client-side fix (WorkoutTimelineEntry.isWalk /
+-- qualifyingAutoLogCandidate, HomeView.autoLogDeviceDetectedWorkoutIfNeeded)
+-- already excludes walks using this device's own live HealthKit query,
+-- which is unaffected by this column not existing yet. This column only
+-- extends that same exclusion to a walk synced in from a DIFFERENT device
+-- -- SupabaseClient.swift's syncHealthKitWorkouts/fetchSyncedHealthKitWorkouts
+-- deliberately don't reference this column yet (see their comments) to
+-- avoid a hard PostgREST 400 on the still-unmigrated remote. Wire that up
+-- once this deploys.
+alter table healthkit_workout_sync add column activity_type text;

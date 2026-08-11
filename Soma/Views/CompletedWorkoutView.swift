@@ -1,18 +1,27 @@
 import SwiftUI
+import UIKit
 
 /// Guide 04's completed-workout screen -- the fuller detail behind
 /// DayDetailView's "See full log" button. Built entirely from real,
 /// attributable data (HealthKit/wearable summaries, the plan actually
-/// snapshotted at log time); no estimated numbers.
+/// snapshotted at log time); no estimated numbers presented as measured.
 ///
 /// Per the handoff's own "open item": there's no coach/creator feature in
 /// this app, so the session is attributed generically ("Your session"),
 /// not to a named coach, and the screen uses the app's one existing accent
 /// (never a per-person one).
+///
+/// This is the app's single biggest post-workout trust-and-reward moment,
+/// and every source (AI plan, manual, device-detected) must land here with
+/// real content -- an exercise breakdown, a calorie number, and a visible
+/// "why today" explanation -- never a near-empty screen. See
+/// WorkoutCalorieEstimator and WorkoutReasonResolver for the two honest
+/// fallbacks that make that true for sources with no plan_snapshot.
 struct CompletedWorkoutView: View {
     let isBestReadinessDay: Bool
-    /// Called after a successful "Edit this log" save, so the presenting
-    /// screen (DayDetailView) can refresh its own copy.
+    /// Called after a successful "Edit this log" save, or after the lazy
+    /// calorie/reason backfill below, so the presenting screen
+    /// (DayDetailView) can refresh its own copy.
     var onUpdate: (WorkoutLogEntry) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
@@ -25,6 +34,16 @@ struct CompletedWorkoutView: View {
     @State private var showRepeatSheet = false
     @State private var repeatRecommendation: DailyRecommendation?
     @State private var isLoadingRepeat = false
+    /// Resolved "why this workout today" text -- always non-empty once
+    /// load() finishes. Held separately from log.reasonSnapshot so the
+    /// card has something to show even before the backfill write (if any)
+    /// completes.
+    @State private var resolvedReason: String = ""
+    /// Drives the calorie hero's count-up -- starts at 0 every time this
+    /// screen appears and animates toward log.caloriesBurned.
+    @State private var displayedCalories: Int = 0
+    /// The first-open checkmark scale-bounce (see markFlourishIfFirstOpen).
+    @State private var showFlourish = false
 
     init(log: WorkoutLogEntry, isBestReadinessDay: Bool, onUpdate: @escaping (WorkoutLogEntry) -> Void = { _ in }) {
         _log = State(initialValue: log)
@@ -38,11 +57,16 @@ struct CompletedWorkoutView: View {
                 header
                 sessionEyebrow
 
+                caloriesHero
+
+                metricTiles
+
+                whyTodayCard
+
                 if let plan = log.planSnapshot {
-                    metricTiles(plan: plan)
                     adherenceRow(plan: plan)
-                    whatYouDid(plan: plan)
                 }
+                whatYouDidSection
 
                 howItFelt
                 streakRow
@@ -98,6 +122,19 @@ struct CompletedWorkoutView: View {
             }
         }
         .padding(.bottom, 4)
+        // Proportionate to a routine daily action -- a small badge next to
+        // the header, not a full-screen celebration. See
+        // markFlourishIfFirstOpen: plays once per log, ever.
+        .overlay(alignment: .topTrailing) {
+            if showFlourish {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(SomaTokens.success)
+                    .scaleEffect(showFlourish ? 1 : 0.4)
+                    .transition(.scale.combined(with: .opacity))
+                    .padding(.top, 2)
+            }
+        }
     }
 
     private func statusPill(label: LocalizedStringKey, background: Color, foreground: Color) -> some View {
@@ -130,9 +167,55 @@ struct CompletedWorkoutView: View {
         }
     }
 
-    // MARK: - Metrics
+    // MARK: - Calorie hero (requirement 2: hero stat, not buried)
 
-    private func metricTiles(plan: AIWorkoutPlan) -> some View {
+    @ViewBuilder
+    private var caloriesHero: some View {
+        if log.caloriesBurned != nil {
+            VStack(spacing: 2) {
+                Text("\(displayedCalories)")
+                    .font(.system(size: 42, weight: .bold, design: .rounded))
+                    .foregroundStyle(SomaTokens.ink)
+                    .contentTransition(.numericText())
+                HStack(spacing: 6) {
+                    Text("kcal burned")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink3)
+                    // Never presented as measured when it isn't -- see
+                    // WorkoutCalorieEstimator's own doc comment.
+                    if log.caloriesEstimated {
+                        Text("ESTIMATED")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .tracking(0.4)
+                            .foregroundStyle(SomaTokens.ink4)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(SomaTokens.surface3))
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        } else {
+            // Neither a real reading nor an estimate was possible (no
+            // device data for this window AND no weight on file) -- an
+            // honest "--", never a fabricated number.
+            VStack(spacing: 2) {
+                Text("—")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(SomaTokens.ink4)
+                Text("Calories unavailable for this session")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(SomaTokens.ink4)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: - Metrics (unconditional -- every source gets these three)
+
+    private var metricTiles: some View {
         HStack(spacing: 10) {
             metricTile(label: "Duration", value: durationText ?? "—")
             metricTile(label: "Strain", value: dayStrain.map { String(format: "%.1f", $0) } ?? "—")
@@ -173,7 +256,46 @@ struct CompletedWorkoutView: View {
         return nil
     }
 
-    // MARK: - Adherence
+    /// Whole-minute duration for WorkoutCalorieEstimator -- same two
+    /// sources as durationText above, just as an Int rather than a display
+    /// string.
+    private var durationMinutesForEstimate: Int? {
+        if let startedAt = log.startedAt, let endedAt = log.endedAt,
+           let start = Self.parseDate(startedAt), let end = Self.parseDate(endedAt) {
+            let minutes = Int(end.timeIntervalSince(start) / 60)
+            return minutes > 0 ? minutes : nil
+        }
+        return log.planSnapshot?.actualDurationMinutes
+    }
+
+    // MARK: - Why this workout today (requirement 3: visible, no tap)
+
+    /// Deliberately NOT a SomaDisclosure -- this is the app's biggest
+    /// post-workout trust moment, and hiding the reasoning behind a tap is
+    /// exactly the pattern this requirement calls out as wrong here.
+    private var whyTodayCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SomaTokens.accent)
+                Text("WHY THIS WORKOUT TODAY")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(SomaTokens.accent)
+            }
+            Text(resolvedReason.isEmpty ? " " : resolvedReason)
+                .font(.system(size: 13.5))
+                .foregroundStyle(SomaTokens.ink2)
+                .redacted(reason: resolvedReason.isEmpty ? .placeholder : [])
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+    }
+
+    // MARK: - Adherence (ai_plan only -- this app has no per-block partial
+    // completion for any other source)
 
     /// "Matched the plan" -- this app doesn't track partial completion per
     /// block, only whether the session as a whole was logged done, so this
@@ -193,13 +315,22 @@ struct CompletedWorkoutView: View {
         .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.successSoft))
     }
 
-    // MARK: - What you did
+    // MARK: - What you did (requirement 1: always some itemized breakdown)
+
+    @ViewBuilder
+    private var whatYouDidSection: some View {
+        if let plan = log.planSnapshot {
+            whatYouDid(plan: plan)
+        } else {
+            fallbackWhatYouDid
+        }
+    }
 
     private func whatYouDid(plan: AIWorkoutPlan) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("What you did")
                 .font(.system(size: 15, weight: .bold))
-            ForEach(plan.blocks) { block in
+            ForEach(Array(plan.blocks.enumerated()), id: \.offset) { index, block in
                 HStack {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .bold))
@@ -211,11 +342,62 @@ struct CompletedWorkoutView: View {
                         .font(.system(size: 12.5))
                         .foregroundStyle(SomaTokens.ink3)
                 }
+                .staggerReveal(index)
             }
             HStack(spacing: 6) {
                 metaChip(BodyPartFocus(rawValue: log.bodyPart)?.displayName ?? log.bodyPart)
                 metaChip(log.category.capitalized)
             }
+        }
+    }
+
+    /// Manual and device-detected logs have no plan_snapshot -- this app
+    /// never asks a manually-logged sport session for a per-exercise
+    /// breakdown (LogManualWorkoutView only captures title/body
+    /// part/effort/duration/notes), and HealthKitManager exposes no
+    /// route/segment data to build one for a device-detected session
+    /// either. Rather than leaving "What you did" blank, this shows the
+    /// one itemized row that IS real: the session actually logged, with
+    /// whatever free-text notes the user (or the auto-log feedback string)
+    /// left. Every source still gets a real breakdown, just a one-row one.
+    private var fallbackWhatYouDid: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("What you did")
+                .font(.system(size: 15, weight: .bold))
+            HStack(alignment: .top) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(SomaTokens.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(log.title)
+                        .font(.system(size: 14, weight: .semibold))
+                    if let feedback = log.feedback, !feedback.isEmpty {
+                        Text(feedback)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(SomaTokens.ink3)
+                    }
+                }
+                Spacer()
+                if let durationText {
+                    Text(durationText)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(SomaTokens.ink3)
+                }
+            }
+            .staggerReveal(0)
+            HStack(spacing: 6) {
+                metaChip(BodyPartFocus(rawValue: log.bodyPart)?.displayName ?? log.bodyPart)
+                metaChip(log.category.capitalized)
+                metaChip(Self.sourceDisplayName(log.source))
+            }
+        }
+    }
+
+    private static func sourceDisplayName(_ source: String) -> String {
+        switch source {
+        case "manual": "Self-logged"
+        case "device_detected": "Detected automatically"
+        default: "AI plan"
         }
     }
 
@@ -324,21 +506,153 @@ struct CompletedWorkoutView: View {
     // MARK: - Data
 
     private func load() async {
+        // Subtle, once per presentation -- requirement 4.
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
         async let summaryFetch = WearableSessionSummary.fetch(for: log)
         async let snapshotsFetch: [DailySnapshotRow] = (try? await SupabaseClient.shared.fetchTodaysSnapshots(date: log.date)) ?? []
         async let completedDatesFetch: Set<String> = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates(days: 30)) ?? []
+        // Any date, not just today -- this screen is also opened for past
+        // days via DayDetailView, and fetchTodaysRecommendation already
+        // takes an arbitrary date despite its name.
+        async let recommendationFetch: DailyRecommendation? = try? await SupabaseClient.shared.fetchTodaysRecommendation(date: log.date)
 
-        wearableSummary = await summaryFetch
-        dayStrain = await snapshotsFetch.first(where: { $0.strainScore != nil })?.strainScore
+        let summary = await summaryFetch
+        let snapshots = await snapshotsFetch
+        let recommendation = await recommendationFetch
+        wearableSummary = summary
+        dayStrain = snapshots.first(where: { $0.strainScore != nil })?.strainScore
         completedDates = await completedDatesFetch
         isLoading = false
+
+        await backfillComputedFieldsIfNeeded(snapshots: snapshots, recommendation: recommendation)
+        markFlourishIfFirstOpen()
+        await animateCaloriesIfNeeded()
+    }
+
+    /// Lazy backfill, same shape as NutritionView.autoRateUnratedEntries():
+    /// resolve once, persist, and every later open of this log reads the
+    /// frozen result instead of recomputing. Historical (pre-migration)
+    /// rows fall back to a live resolve every time until this runs once.
+    private func backfillComputedFieldsIfNeeded(snapshots: [DailySnapshotRow], recommendation: DailyRecommendation?) async {
+        var caloriesBurned = log.caloriesBurned
+        var caloriesEstimated = log.caloriesEstimated
+        var reasonSnapshot = log.reasonSnapshot
+        var needsWrite = false
+
+        if caloriesBurned == nil {
+            if let measured = await measuredCalories() {
+                caloriesBurned = measured
+                caloriesEstimated = false
+                needsWrite = true
+            } else if let duration = durationMinutesForEstimate,
+                      let category = RecommendationCategory(rawValue: log.category) {
+                let weight = await Self.fetchUserWeightKg()
+                if let estimate = WorkoutCalorieEstimator.estimateCalories(category: category, durationMinutes: duration, weightKg: weight) {
+                    caloriesBurned = estimate
+                    caloriesEstimated = true
+                    needsWrite = true
+                }
+            }
+        }
+
+        if reasonSnapshot?.isEmpty ?? true {
+            reasonSnapshot = WorkoutReasonResolver.reason(for: log, recommendation: recommendation, snapshots: snapshots)
+            needsWrite = true
+        }
+
+        log.caloriesBurned = caloriesBurned
+        log.caloriesEstimated = caloriesEstimated
+        log.reasonSnapshot = reasonSnapshot
+        resolvedReason = reasonSnapshot ?? ""
+
+        guard needsWrite else { return }
+        do {
+            try await SupabaseClient.shared.updateWorkoutLogComputedFields(
+                id: log.id, caloriesBurned: caloriesBurned, caloriesEstimated: caloriesEstimated, reasonSnapshot: reasonSnapshot
+            )
+            onUpdate(log)
+        } catch {
+            // Best-effort -- the freshly-resolved values still render this
+            // time either way; the next open just retries the write.
+        }
+    }
+
+    /// Real calorie reading for this log's exact session window, same
+    /// two-tier shape as WearableSessionSummary.fetch (on-device HealthKit
+    /// first, connected-provider timeline fallback) -- kept independent of
+    /// WearableSessionSummary itself since that struct's own nil-gating is
+    /// heart-rate-specific and DayDetailView depends on that staying
+    /// unchanged.
+    private func measuredCalories() async -> Int? {
+        guard let startedAtString = log.startedAt, let endedAtString = log.endedAt,
+              let start = Self.parseDate(startedAtString), let end = Self.parseDate(endedAtString)
+        else { return nil }
+
+        if HealthKitManager.isAvailable,
+           let kcal = await HealthKitManager.shared.fetchActiveEnergy(start: start, end: end) {
+            return kcal
+        }
+        guard let entries = try? await SupabaseClient.shared.fetchProviderWorkoutTimeline(date: log.date, startTime: start, endTime: end) else {
+            return nil
+        }
+        return entries.first(where: { $0.calories != nil })?.calories
+    }
+
+    private static func fetchUserWeightKg() async -> Double? {
+        guard let userId = SupabaseClient.shared.currentUserID,
+              let profile = try? await SupabaseClient.shared.fetchProfile(id: userId) else { return nil }
+        return profile.weightKg
+    }
+
+    /// Plays once, ever, per log id (tracked in UserDefaults) -- "first
+    /// time a given day's workout is marked complete" in practice means
+    /// "first time this log's detail screen is opened", since nothing in
+    /// this app navigates straight into CompletedWorkoutView at the actual
+    /// moment a workout is logged (every log site just dismisses a sheet;
+    /// the user always taps back in separately to see this screen).
+    private func markFlourishIfFirstOpen() {
+        var seen = Set(UserDefaults.standard.stringArray(forKey: Self.flourishSeenLogIdsKey) ?? [])
+        guard !seen.contains(log.id) else { return }
+        seen.insert(log.id)
+        UserDefaults.standard.set(Array(seen), forKey: Self.flourishSeenLogIdsKey)
+
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) {
+            showFlourish = true
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showFlourish = false
+            }
+        }
+    }
+
+    private static let flourishSeenLogIdsKey = "com.soma.app.completedWorkoutFlourishSeenLogIds"
+
+    /// Spring-based count-up from 0 to the resolved calorie total --
+    /// requirement 2. No-op (stays at 0, caloriesHero shows the "--" empty
+    /// state) when there's genuinely nothing to show.
+    private func animateCaloriesIfNeeded() async {
+        guard let target = log.caloriesBurned, target > 0 else { return }
+        displayedCalories = 0
+        let steps = 18
+        for step in 1...steps {
+            try? await Task.sleep(nanoseconds: 22_000_000)
+            let next = Int((Double(target) * Double(step) / Double(steps)).rounded())
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                displayedCalories = next
+            }
+        }
+        displayedCalories = target
     }
 
     private static func withFeelRating(_ log: WorkoutLogEntry, rating: WorkoutFeelRating?) -> WorkoutLogEntry {
         WorkoutLogEntry(
             id: log.id, date: log.date, title: log.title, bodyPart: log.bodyPart, category: log.category,
             completedAt: log.completedAt, feedback: log.feedback, planSnapshot: log.planSnapshot,
-            startedAt: log.startedAt, endedAt: log.endedAt, feelRating: rating
+            startedAt: log.startedAt, endedAt: log.endedAt, feelRating: rating, source: log.source,
+            caloriesBurned: log.caloriesBurned, caloriesEstimated: log.caloriesEstimated, reasonSnapshot: log.reasonSnapshot
         )
     }
 
@@ -372,6 +686,31 @@ struct CompletedWorkoutView: View {
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = .current
         return formatter.string(from: date)
+    }
+}
+
+/// Staggered fade+slide-in for each exercise/breakdown row (requirement 4)
+/// -- one small view-local animation, not a new shared component, since
+/// nothing else in the app currently needs a per-row stagger.
+private struct StaggerReveal: ViewModifier {
+    let index: Int
+    @State private var appeared = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared ? 0 : 8)
+            .onAppear {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.75).delay(Double(index) * 0.04)) {
+                    appeared = true
+                }
+            }
+    }
+}
+
+private extension View {
+    func staggerReveal(_ index: Int) -> some View {
+        modifier(StaggerReveal(index: index))
     }
 }
 
@@ -438,7 +777,9 @@ private struct EditWorkoutLogSheet: View {
             onSave(WorkoutLogEntry(
                 id: log.id, date: log.date, title: log.title, bodyPart: log.bodyPart, category: log.category,
                 completedAt: log.completedAt, feedback: feedbackText.isEmpty ? nil : feedbackText,
-                planSnapshot: log.planSnapshot, startedAt: log.startedAt, endedAt: log.endedAt, feelRating: feelRating
+                planSnapshot: log.planSnapshot, startedAt: log.startedAt, endedAt: log.endedAt, feelRating: feelRating,
+                source: log.source,
+                caloriesBurned: log.caloriesBurned, caloriesEstimated: log.caloriesEstimated, reasonSnapshot: log.reasonSnapshot
             ))
             dismiss()
         } catch {

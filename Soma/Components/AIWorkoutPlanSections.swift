@@ -28,6 +28,12 @@ struct AIWorkoutPlanView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if let weatherNote = plan.weatherNote {
+                Text("🌡️ \(weatherNote) Today's plan sticks to indoor cardio.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding(.top, 2)
+            }
             aiPhaseSection(title: "Warm-up", exercises: plan.warmUp)
             ForEach(Array(plan.blocks.enumerated()), id: \.element.id) { index, block in
                 // Only when this plan really carries a goal block -- an
@@ -146,7 +152,7 @@ struct AIWorkoutPlanView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)")
+                    Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)\(exercise.restLabel.map { " — \($0)" } ?? "")")
                         .font(.caption)
                         .foregroundStyle(Theme.pillFill)
                     // Only populated by the gym-photo-workout flow -- nil for the
