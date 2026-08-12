@@ -28,6 +28,11 @@ struct ProfileView: View {
     /// for a user who has already completed onboarding, so there's
     /// nothing left to mark.
     @State private var showHowSomaWorks = false
+    /// Non-nil right after picking a language different from the current
+    /// one -- drives the "restart to finish switching" alert in
+    /// `languageEditor`. Holds the newly-picked language (not just a Bool)
+    /// so the alert's message can name it.
+    @State private var languageNeedingRestartPrompt: AppLanguage?
 
     // Plain @State strings bound directly via `$` (not a computed
     // Binding(get:set:) built inline in the view body) -- the latter
@@ -629,17 +634,17 @@ struct ProfileView: View {
     private var nudges: [Nudge] {
         var items: [Nudge] = []
         if !appState.connectedProviders.contains(.appleHealth) {
-            items.append(Nudge(id: "health", text: "add Apple Health"))
+            items.append(Nudge(id: "health", text: String(localized: "profile.nudge.addAppleHealth", defaultValue: "add Apple Health", comment: "Profile completion nudge fragment, lowercase mid-sentence, e.g. 'add Apple Health and set a weekly target to sharpen suggestions.'")))
         }
         // No injury nudge: an empty injury list is a complete, valid
         // answer ("None noted"), not an unfinished profile item.
         if weeklySessionTarget == nil {
-            items.append(Nudge(id: "target", text: "set a weekly target"))
+            items.append(Nudge(id: "target", text: String(localized: "profile.nudge.setWeeklyTarget", defaultValue: "set a weekly target", comment: "Profile completion nudge fragment, lowercase mid-sentence, e.g. 'set a weekly target to sharpen suggestions.'")))
         }
         // Only nudged while the catalog is actually open and no goal is set
         // -- an empty catalog means the feature is off, not unfinished.
         if Config.enableSportGoals, sportCatalogAvailable, activeSportGoal == nil, pausedSportGoal == nil {
-            items.append(Nudge(id: "goal", text: "pick a goal"))
+            items.append(Nudge(id: "goal", text: String(localized: "profile.nudge.pickGoal", defaultValue: "pick a goal", comment: "Profile completion nudge fragment, lowercase mid-sentence, e.g. 'pick a goal to sharpen suggestions.'")))
         }
         return items
     }
@@ -684,9 +689,9 @@ struct ProfileView: View {
             ) { activeSheet = .experience }
 
             summaryRow(
-                title: "Your current lifts",
-                consequence: "Optional -- a real number beats an estimated one",
-                value: knownLifts.isEmpty ? "Not set" : "\(knownLifts.count) set"
+                title: LocalizedStringKey(String(localized: "profile.knownLifts.title", defaultValue: "Your current lifts", comment: "Row title for the known-lifts editor")),
+                consequence: LocalizedStringKey(String(localized: "profile.knownLifts.consequence", defaultValue: "Optional -- a real number beats an estimated one", comment: "Row consequence text for the known-lifts editor")),
+                value: knownLifts.isEmpty ? notSetLabel : String(localized: "profile.knownLifts.countLabel", defaultValue: "\(knownLifts.count) set", comment: "Known-lifts row value: number of lift patterns with a saved value, e.g. '3 set'")
             ) { activeSheet = .knownLifts }
 
             summaryRow(
@@ -702,9 +707,9 @@ struct ProfileView: View {
             ) { activeSheet = .equipment }
 
             summaryRow(
-                title: "Kitchen equipment",
-                consequence: "Only suggests recipes you can actually cook",
-                value: householdEquipment.isEmpty ? "Not set" : KitchenEquipmentTag.allCases.filter(householdEquipment.contains).map(\.displayName).joined(separator: ", ")
+                title: LocalizedStringKey(String(localized: "profile.kitchenEquipment.title", defaultValue: "Kitchen equipment", comment: "Row title for the kitchen-equipment editor")),
+                consequence: LocalizedStringKey(String(localized: "profile.kitchenEquipment.consequence", defaultValue: "Only suggests recipes you can actually cook", comment: "Row consequence text for the kitchen-equipment editor")),
+                value: householdEquipment.isEmpty ? notSetLabel : KitchenEquipmentTag.allCases.filter(householdEquipment.contains).map(\.displayName).joined(separator: ", ")
             ) { activeSheet = .kitchenEquipment }
 
             summaryRow(
@@ -716,8 +721,8 @@ struct ProfileView: View {
             ) { activeSheet = .weeklyTarget }
 
             summaryRow(
-                title: "Weekly anchor session",
-                consequence: "The rest of your week is built around it",
+                title: LocalizedStringKey(String(localized: "profile.anchorSession.title", defaultValue: "Weekly anchor session", comment: "Row title for the weekly anchor session editor")),
+                consequence: LocalizedStringKey(String(localized: "profile.anchorSession.consequence", defaultValue: "The rest of your week is built around it", comment: "Row consequence text for the weekly anchor session editor")),
                 value: anchorSessionRowValue
             ) { activeSheet = .anchorSession }
 
@@ -737,7 +742,7 @@ struct ProfileView: View {
     /// "Hot Yoga · Tue" / "Hot Yoga" (no day picked yet) / "Not set".
     private var anchorSessionRowValue: String {
         let name = anchorSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return "Not set" }
+        guard !name.isEmpty else { return notSetLabel }
         guard !anchorSessionDays.isEmpty else { return name }
         let days = anchorSessionDays.sorted().map(WeekdayMiniPicker.shortName(forValue:)).joined(separator: ", ")
         return "\(name) · \(days)"
@@ -780,9 +785,12 @@ struct ProfileView: View {
     }
 
     private var cycleTrackingRowValue: String {
-        guard let lastPeriodStartDate else { return "Not set" }
-        let lengthLabel = typicalCycleLengthDays.map { "\($0)d cycle" } ?? "~28d cycle"
-        return "\(Self.dobFormatter.string(from: lastPeriodStartDate)) · \(lengthLabel)"
+        guard let lastPeriodStartDate else { return notSetLabel }
+        let dateText = Self.dobFormatter.string(from: lastPeriodStartDate)
+        let lengthLabel = typicalCycleLengthDays.map {
+            String(localized: "profile.cycleTracking.lengthLabel", defaultValue: "\($0)d cycle", comment: "Cycle-tracking row value fragment: cycle length in days, e.g. '28d cycle'")
+        } ?? String(localized: "profile.cycleTracking.defaultLengthLabel", defaultValue: "~28d cycle", comment: "Cycle-tracking row value fragment shown when no custom cycle length has been set")
+        return String(localized: "profile.cycleTracking.summary", defaultValue: "\(dateText) · \(lengthLabel)", comment: "Cycle-tracking row value: last period start date and cycle length, e.g. 'Jan 1, 2024 · 28d cycle'")
     }
 
     private var healthSafetySection: some View {
@@ -806,8 +814,8 @@ struct ProfileView: View {
 
             if cycleTrackingRowVisible {
                 summaryRow(
-                    title: "Cycle tracking",
-                    consequence: "Adds one general training consideration -- opt-in, never assumed",
+                    title: LocalizedStringKey(String(localized: "profile.cycleTracking.title", defaultValue: "Cycle tracking", comment: "Row title for the cycle-tracking editor")),
+                    consequence: LocalizedStringKey(String(localized: "profile.cycleTracking.consequence", defaultValue: "Adds one general training consideration -- opt-in, never assumed", comment: "Row consequence text for the cycle-tracking editor")),
                     value: cycleTrackingRowValue
                 ) { activeSheet = .cycleTracking }
             }
@@ -851,7 +859,7 @@ struct ProfileView: View {
 
             summaryRow(
                 title: "Date of birth",
-                consequence: "Needed to unlock Goal Body progress photos",
+                consequence: LocalizedStringKey(String(localized: "profile.dateOfBirth.consequence", defaultValue: "Needed to unlock Goal Body progress photos", comment: "Row consequence text explaining why date of birth is needed")),
                 value: dateOfBirthDate.map { Self.dobFormatter.string(from: $0) } ?? notSetLabel
             ) { activeSheet = .dateOfBirth }
 
@@ -886,7 +894,11 @@ struct ProfileView: View {
             summaryRow(title: "Feedback", consequence: "Spotted a bug, or have an idea?", value: "") {
                 FeedbackPresenter.present()
             }
-            summaryRow(title: "How Soma works", consequence: "A quick refresher on what's in the app", value: "") {
+            summaryRow(
+                title: LocalizedStringKey(String(localized: "profile.howSomaWorks.title", defaultValue: "How Soma works", comment: "Row title opening the How Soma Works tour refresher")),
+                consequence: LocalizedStringKey(String(localized: "profile.howSomaWorks.consequence", defaultValue: "A quick refresher on what's in the app", comment: "Row consequence text describing the How Soma Works tour refresher")),
+                value: ""
+            ) {
                 showHowSomaWorks = true
             }
 
@@ -1138,7 +1150,7 @@ struct ProfileView: View {
 
     private var kitchenEquipmentEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("So we only ever suggest recipes you can actually cook.")
+            Text(String(localized: "profile.kitchenEquipment.explainer", defaultValue: "So we only ever suggest recipes you can actually cook.", comment: "Explainer text at top of the kitchen-equipment editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             FlowLayout {
@@ -1149,7 +1161,7 @@ struct ProfileView: View {
                 }
             }
             if householdEquipment.contains(.other) {
-                TextField("What else? (comma-separated)", text: $otherHouseholdEquipmentText)
+                TextField(String(localized: "profile.kitchenEquipment.otherPlaceholder", defaultValue: "What else? (comma-separated)", comment: "Placeholder text for the free-text 'other kitchen equipment' field"), text: $otherHouseholdEquipmentText)
                     .textFieldStyle(.roundedBorder)
             }
         }
@@ -1182,7 +1194,7 @@ struct ProfileView: View {
     /// leaving the others on the estimate.
     private var knownLiftsEditor: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("If you know your comfortable working weight for any of these, Soma uses it directly for the AI plan instead of estimating from your bodyweight and experience level. Leave any blank to keep using the estimate.")
+            Text(String(localized: "profile.knownLifts.explainer", defaultValue: "If you know your comfortable working weight for any of these, Soma uses it directly for the AI plan instead of estimating from your bodyweight and experience level. Leave any blank to keep using the estimate.", comment: "Explainer text at top of the known-lifts editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ForEach(LiftPattern.allCases) { pattern in
@@ -1296,11 +1308,11 @@ struct ProfileView: View {
     /// so there's no sex picker/gate needed inside the editor itself.
     private var cycleTrackingEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Optional, and never assumed -- only set if you tell us. Soma will factor your cycle phase into training suggestions as one general consideration among others. This is general guidance only, not medical advice, and not a fertility or ovulation tracker.")
+            Text(String(localized: "profile.cycleTracking.explainer", defaultValue: "Optional, and never assumed -- only set if you tell us. Soma will factor your cycle phase into training suggestions as one general consideration among others. This is general guidance only, not medical advice, and not a fertility or ovulation tracker.", comment: "Explainer text at top of the cycle-tracking editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             DatePicker(
-                "Last period start date",
+                String(localized: "profile.cycleTracking.lastPeriodLabel", defaultValue: "Last period start date", comment: "Date picker label for the start date of the user's last period"),
                 selection: Binding(
                     get: { lastPeriodStartDate ?? Date() },
                     set: { lastPeriodStartDate = $0 }
@@ -1309,13 +1321,16 @@ struct ProfileView: View {
                 displayedComponents: .date
             )
             if lastPeriodStartDate != nil {
+                let lengthText = typicalCycleLengthDays.map {
+                    String(localized: "profile.cycleTracking.daysCount", defaultValue: "\($0) days", comment: "Number of days shown in the typical-cycle-length stepper, e.g. '28 days'")
+                } ?? String(localized: "profile.cycleTracking.stepperDefault", defaultValue: "not set (defaults to 28)", comment: "Shown in the typical-cycle-length stepper title when no custom length has been set yet")
                 Stepper(
-                    "Typical cycle length: \(typicalCycleLengthDays.map { "\($0) days" } ?? "not set (defaults to 28)")",
+                    String(localized: "profile.cycleTracking.stepperTitle", defaultValue: "Typical cycle length: \(lengthText)", comment: "Stepper title showing the current typical cycle length setting, e.g. 'Typical cycle length: 28 days'"),
                     value: Binding(get: { typicalCycleLengthDays ?? 28 }, set: { typicalCycleLengthDays = $0 }),
                     in: 21...35
                 )
                 .font(.caption)
-                Button("Clear") {
+                Button(String(localized: "profile.cycleTracking.clear", defaultValue: "Clear", comment: "Button clearing the entered cycle-tracking dates")) {
                     lastPeriodStartDate = nil
                     typicalCycleLengthDays = nil
                 }
@@ -1373,13 +1388,21 @@ struct ProfileView: View {
 
     private var languageEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Most of Soma updates immediately; the rest applies next time you open the app.")
+            Text(String(localized: "profile.language.explainer", defaultValue: "Most of Soma updates immediately; the rest applies next time you open the app.", comment: "Explainer text at top of the language picker sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             VStack(spacing: 0) {
                 ForEach(AppLanguage.allCases) { language in
                     Button {
+                        let changed = languageManager.selected != language
                         languageManager.selected = language
+                        // Only worth interrupting the user when the choice
+                        // actually changed -- re-tapping the already-active
+                        // language shouldn't nag them with a restart prompt
+                        // for a no-op.
+                        if changed {
+                            languageNeedingRestartPrompt = language
+                        }
                     } label: {
                         HStack {
                             Text(language.displayName(locale: languageManager.effectiveLocale))
@@ -1405,6 +1428,28 @@ struct ProfileView: View {
                 }
             }
         }
+        // A passive caption is easy to skim past -- this makes the "you'll
+        // need to reopen the app" tradeoff an explicit, hard-to-miss step
+        // right when it's actually relevant, instead of leaving someone
+        // wondering why half the screen didn't change language. Apple's own
+        // guidance is that an app should never terminate itself
+        // programmatically (no exit(0) auto-relaunch) -- this just tells
+        // the user plainly and lets them close the app themselves.
+        .alert(
+            String(localized: "profile.language.restartAlert.title", defaultValue: "Restart Soma to finish switching", comment: "Alert title shown after picking a new app language"),
+            isPresented: Binding(
+                get: { languageNeedingRestartPrompt != nil },
+                set: { if !$0 { languageNeedingRestartPrompt = nil } }
+            )
+        ) {
+            Button(String(localized: "profile.language.restartAlert.confirm", defaultValue: "Got it", comment: "Dismiss button on the language-restart alert")) {
+                languageNeedingRestartPrompt = nil
+            }
+        } message: {
+            if let language = languageNeedingRestartPrompt {
+                Text(String(localized: "profile.language.restartAlert.message", defaultValue: "Most of the app already switched. Close Soma (swipe it away from the app switcher) and reopen it to see everything in \(language.displayName(locale: languageManager.effectiveLocale)).", comment: "Alert message telling the user to manually close and reopen the app to finish a language switch; placeholder is the newly-selected language's own display name"))
+            }
+        }
     }
 
     /// Same field pair as onboarding's AnchorSessionQuestionView, same
@@ -1412,13 +1457,13 @@ struct ProfileView: View {
     /// onboarding set it later, or fix the wrong day.
     private var anchorSessionEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("A recurring class or activity (e.g. a Tuesday hot yoga class) the rest of your week gets built around.")
+            Text(String(localized: "profile.anchorSession.explainer", defaultValue: "A recurring class or activity (e.g. a Tuesday hot yoga class) the rest of your week gets built around.", comment: "Explainer text at top of the weekly anchor session editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            TextField("e.g. \"Hot Yoga\", \"Tennis league\"", text: $anchorSessionName)
+            TextField(String(localized: "profile.anchorSession.namePlaceholder", defaultValue: "e.g. \"Hot Yoga\", \"Tennis league\"", comment: "Placeholder text for the anchor session name field"), text: $anchorSessionName)
                 .textFieldStyle(.roundedBorder)
             VStack(alignment: .leading, spacing: 10) {
-                Text("Which day(s) is it usually on?")
+                Text(String(localized: "profile.anchorSession.dayPrompt", defaultValue: "Which day(s) is it usually on?", comment: "Prompt above the weekday picker for the anchor session"))
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
                 WeekdayMiniPicker(selected: $anchorSessionDays)
@@ -1433,7 +1478,7 @@ struct ProfileView: View {
     /// the onboarding step (DateOfBirthQuestionView) for a consistent feel.
     private var dateOfBirthEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Confirms you're 18+ to unlock Goal Body progress photos. Never shown to other users.")
+            Text(String(localized: "profile.dateOfBirth.explainer", defaultValue: "Confirms you're 18+ to unlock Goal Body progress photos. Never shown to other users.", comment: "Explainer text at top of the date-of-birth editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             DatePicker(
@@ -1747,7 +1792,7 @@ struct ProfileView: View {
                 // moments earlier. Bail out here before reportInjury runs,
                 // so a genuine profile-fields failure is reported
                 // accurately and isn't masked by/blamed on injury state.
-                errorMessage = "Couldn't save profile. Try again."
+                errorMessage = String(localized: "profile.save.genericError", defaultValue: "Couldn't save profile. Try again.", comment: "Error shown when the profile-fields save request itself fails")
                 return
             }
             do {
@@ -1800,16 +1845,16 @@ private enum ProfileSheet: String, Identifiable {
         case .experience: localizedString("Experience", locale: locale)
         case .goals: localizedString("Goals", locale: locale)
         case .equipment: localizedString("Equipment & access", locale: locale)
-        case .kitchenEquipment: localizedString("Kitchen equipment", locale: locale)
+        case .kitchenEquipment: localizedString("profile.kitchenEquipment.title", locale: locale)
         case .weeklyTarget: localizedString("Weekly target", locale: locale)
         case .injuries: localizedString("Injuries", locale: locale)
         case .pregnancy: localizedString("Pregnancy", locale: locale)
         case .contactEmail: localizedString("Contact email", locale: locale)
         case .region: localizedString("Region", locale: locale)
-        case .knownLifts: localizedString("Your current lifts", locale: locale)
+        case .knownLifts: localizedString("profile.knownLifts.title", locale: locale)
         case .dateOfBirth: localizedString("Date of birth", locale: locale)
-        case .anchorSession: localizedString("Weekly anchor session", locale: locale)
-        case .cycleTracking: localizedString("Cycle tracking", locale: locale)
+        case .anchorSession: localizedString("profile.anchorSession.title", locale: locale)
+        case .cycleTracking: localizedString("profile.cycleTracking.title", locale: locale)
         case .language: localizedString("Language", locale: locale)
         }
     }

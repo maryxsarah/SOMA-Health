@@ -321,12 +321,12 @@ struct RecommendationDetailView: View {
                             .foregroundStyle(.orange)
                     }
                     if recommendation.injuryProtocolRestApplied {
-                        Text("Note: today is a full rest day because of a severe injury you reported recently, or one that's been trending worse -- your safety comes before intensity here.")
+                        Text(String(localized: "recommendationDetail.cap.injuryProtocolRest", defaultValue: "Note: today is a full rest day because of a severe injury you reported recently, or one that's been trending worse -- your safety comes before intensity here.", comment: "Cap explanation shown in the Why-this disclosure when today is a full rest day due to a severe injury recovery protocol"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.moodCapApplied {
-                        Text("Note: today's intensity was eased based on how you said you're feeling, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.mood", defaultValue: "Note: today's intensity was eased based on how you said you're feeling, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was eased due to reported mood"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -629,7 +629,7 @@ struct RecommendationDetailView: View {
     /// original per-reason tip only when none of the richer signals apply.
     private var personalizedTomorrowTip: String {
         if recommendation.injuryProtocolRestApplied {
-            return "Today is a full rest day for your injury's sake. Tomorrow, only resume light activity if a check-in shows things are trending better -- pushing through too soon is what turns a short setback into a long one."
+            return String(localized: "recommendationDetail.tomorrowTip.injuryProtocolRest", defaultValue: "Today is a full rest day for your injury's sake. Tomorrow, only resume light activity if a check-in shows things are trending better -- pushing through too soon is what turns a short setback into a long one.", comment: "Tomorrow's-tip card, shown when today is a full rest day due to a severe injury recovery protocol")
         }
         if recommendation.volumeCapApplied {
             return String(localized: "recommendationDetail.tomorrowTip.volumeCap", defaultValue: "Today was capped for high training volume over the last week. Tomorrow, favor a lighter session or full rest -- accumulated fatigue, not just last night's sleep, is driving this one.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for high training volume")
@@ -644,7 +644,7 @@ struct RecommendationDetailView: View {
             return String(localized: "recommendationDetail.tomorrowTip.pregnancy", defaultValue: "General guidance for tomorrow: favor controlled, moderate sessions and listen to how your body responds -- your care provider's advice takes priority over this app's recommendation.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for pregnancy")
         }
         if recommendation.moodCapApplied {
-            return "Today's session eased off based on how you said you were feeling. If tomorrow's check-in is better, intensity can pick back up -- this app tracks how you feel, not just how your wearable reads you."
+            return String(localized: "recommendationDetail.tomorrowTip.mood", defaultValue: "Today's session eased off based on how you said you were feeling. If tomorrow's check-in is better, intensity can pick back up -- this app tracks how you feel, not just how your wearable reads you.", comment: "Tomorrow's-tip card, shown when today's intensity was eased due to reported mood")
         }
         // Body-part imbalance: the same focus trained on most of the last
         // 4 logged days -- a real, evidence-based nudge toward variety
@@ -937,7 +937,7 @@ struct RecommendationDetailView: View {
                 .font(.subheadline)
             HStack(spacing: 10) {
                 ForEach([InjuryCheckinResponse.better, .same, .worse], id: \.self) { response in
-                    Button(response.rawValue.capitalized) {
+                    Button(Self.checkinResponseLabel(response)) {
                         Task { await submitCheckin(tag: state.injuryTag, response: response) }
                     }
                     .buttonStyle(.bordered)
@@ -946,6 +946,17 @@ struct RecommendationDetailView: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    /// `response.rawValue.capitalized` alone would build a plain String at
+    /// the call site (not a literal), which skips catalog lookup entirely --
+    /// hence the explicit per-case localization here.
+    private static func checkinResponseLabel(_ response: InjuryCheckinResponse) -> String {
+        switch response {
+        case .better: String(localized: "recommendationDetail.checkinResponse.better", defaultValue: "Better", comment: "Injury check-in response button: things feel better today")
+        case .same: String(localized: "recommendationDetail.checkinResponse.same", defaultValue: "Same", comment: "Injury check-in response button: things feel the same today")
+        case .worse: String(localized: "recommendationDetail.checkinResponse.worse", defaultValue: "Worse", comment: "Injury check-in response button: things feel worse today")
+        }
     }
 
     private func submitCheckin(tag: String, response: InjuryCheckinResponse) async {

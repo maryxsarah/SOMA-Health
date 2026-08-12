@@ -865,7 +865,7 @@ final class SupabaseClient {
     /// meal", same estimate-then-review shape as parseMealText.
     func generateMealRecommendation(ingredients: String) async throws -> MealRecommendation {
         var request = try await authorizedRequest(path: "functions/v1/generate-meal-recommendation", method: "POST")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["ingredients": ingredients])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["ingredients": ingredients, "language": await currentAILanguageCode()])
 
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)

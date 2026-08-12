@@ -13,6 +13,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
   ru: "Russian",
   ka: "Georgian",
   hy: "Armenian",
+  sr: "Serbian",
 };
 
 /// The English name of the requested language, for embedding in a prompt

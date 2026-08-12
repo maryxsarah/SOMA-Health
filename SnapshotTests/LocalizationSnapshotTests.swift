@@ -3,8 +3,8 @@ import SwiftUI
 import XCTest
 @testable import Soma
 
-/// One test per top-level screen, each rendering that screen under all 8
-/// shipped locales (en/es/fr/it/de/ru/ka/hy) in one run -- catches broken layouts,
+/// One test per top-level screen, each rendering that screen under all 9
+/// shipped locales (en/es/fr/it/de/ru/ka/hy/sr) in one run -- catches broken layouts,
 /// truncated text, and keys that resolve to their raw name instead of
 /// translated text (see LanguageManager.swift's `.environment(\.locale, ...)`
 /// note: this only proves out the SwiftUI `Text(...)` path, not
@@ -23,7 +23,7 @@ final class LocalizationSnapshotTests: XCTestCase {
     /// All shipped locale codes, in `AppLanguage.allCases` order minus
     /// `.system` (a snapshot needs a concrete locale, not "whatever the
     /// simulator happens to be set to").
-    static let localeCodes = ["en", "es", "fr", "it", "de", "ru", "ka", "hy"]
+    static let localeCodes = ["en", "es", "fr", "it", "de", "ru", "ka", "hy", "sr"]
 
     var record: Bool {
         ProcessInfo.processInfo.environment["SNAPSHOT_RECORD"] == "1"

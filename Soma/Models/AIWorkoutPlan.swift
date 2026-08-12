@@ -52,8 +52,10 @@ struct AIExercise: Codable, Identifiable {
     /// than being treated the same as "not sent".
     var restLabel: String? {
         guard let restSeconds else { return nil }
-        if restSeconds <= 0 { return "no rest needed" }
-        return "\(restSeconds)s rest"
+        if restSeconds <= 0 {
+            return String(localized: "aiExercise.restLabel.none", defaultValue: "no rest needed", comment: "Compact rest label for an exercise with zero prescribed rest, e.g. a stretch or warm-up item")
+        }
+        return String(localized: "aiExercise.restLabel.seconds", defaultValue: "\(restSeconds)s rest", comment: "Compact rest label showing prescribed rest in seconds, e.g. '45s rest'")
     }
 }
 

@@ -36,8 +36,8 @@ struct LogManualWorkoutView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("e.g. Soccer training, Hot yoga, Volleyball", text: $title)
-                    Picker("Focus", selection: $bodyPart) {
+                    TextField(String(localized: "logWorkout.title.placeholder", defaultValue: "e.g. Soccer training, Hot yoga, Volleyball", comment: "Log-activity form: placeholder for the activity title text field"), text: $title)
+                    Picker(String(localized: "logWorkout.focus.label", defaultValue: "Focus", comment: "Log-activity form: label for the body-part-focus picker"), selection: $bodyPart) {
                         ForEach(Self.focusOptions, id: \.self) { part in
                             Text(part.displayName).tag(part)
                         }
@@ -48,14 +48,14 @@ struct LogManualWorkoutView: View {
                         }
                     }
                 } header: {
-                    Text("What did you do?")
+                    Text(String(localized: "logWorkout.section.whatDidYouDo", defaultValue: "What did you do?", comment: "Log-activity form: header for the activity/focus/effort section"))
                 } footer: {
-                    Text("Effort helps Soma calibrate tomorrow's plan around today's real training load.")
+                    Text(String(localized: "logWorkout.section.effortFooter", defaultValue: "Effort helps Soma calibrate tomorrow's plan around today's real training load.", comment: "Log-activity form: footer explaining why effort is captured"))
                 }
 
                 Section {
-                    DatePicker("Date", selection: $date, in: ...Date(), displayedComponents: .date)
-                    DatePicker("Start time", selection: $startTime, displayedComponents: .hourAndMinute)
+                    DatePicker(String(localized: "logWorkout.date.label", defaultValue: "Date", comment: "Log-activity form: label for the date picker"), selection: $date, in: ...Date(), displayedComponents: .date)
+                    DatePicker(String(localized: "logWorkout.startTime.label", defaultValue: "Start time", comment: "Log-activity form: label for the start-time picker"), selection: $startTime, displayedComponents: .hourAndMinute)
                     Stepper(value: $durationMinutes, in: 5...300, step: 5) {
                         HStack {
                             Text("Duration")
@@ -65,13 +65,13 @@ struct LogManualWorkoutView: View {
                         }
                     }
                 } header: {
-                    Text("When")
+                    Text(String(localized: "logWorkout.section.when", defaultValue: "When", comment: "Log-activity form: header for the date/time/duration section"))
                 } footer: {
-                    Text("Used to pull your real heart rate for this exact window from Apple Health or a connected wearable, if one reported it.")
+                    Text(String(localized: "logWorkout.section.whenFooter", defaultValue: "Used to pull your real heart rate for this exact window from Apple Health or a connected wearable, if one reported it.", comment: "Log-activity form: footer explaining why start time/duration is captured"))
                 }
 
                 Section("Notes (optional)") {
-                    TextField("Anything worth remembering", text: $notes, axis: .vertical)
+                    TextField(String(localized: "logWorkout.notes.placeholder", defaultValue: "Anything worth remembering", comment: "Log-activity form: placeholder for the optional free-text notes field"), text: $notes, axis: .vertical)
                         .lineLimit(1...3)
                 }
 
@@ -81,7 +81,7 @@ struct LogManualWorkoutView: View {
                         .foregroundStyle(SomaTokens.danger)
                 }
             }
-            .navigationTitle("Log an activity")
+            .navigationTitle(String(localized: "logWorkout.navigationTitle", defaultValue: "Log an activity", comment: "Log-activity form: navigation title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -120,7 +120,7 @@ struct LogManualWorkoutView: View {
             )
             dismiss()
         } catch {
-            errorMessage = "Couldn't log that activity. Try again."
+            errorMessage = String(localized: "logWorkout.error.saveFailed", defaultValue: "Couldn't log that activity. Try again.", comment: "Log-activity form: shown when saving the manually-logged activity fails")
         }
     }
 
@@ -139,9 +139,9 @@ struct LogManualWorkoutView: View {
     private static func durationLabel(_ minutes: Int) -> String {
         let hours = minutes / 60
         let mins = minutes % 60
-        if hours == 0 { return "\(mins) min" }
-        if mins == 0 { return "\(hours)h" }
-        return "\(hours)h \(mins)m"
+        if hours == 0 { return String(localized: "logWorkout.duration.minutesOnly", defaultValue: "\(mins) min", comment: "Log-activity form: duration stepper value, minutes only") }
+        if mins == 0 { return String(localized: "logWorkout.duration.hoursOnly", defaultValue: "\(hours)h", comment: "Log-activity form: duration stepper value, whole hours only") }
+        return String(localized: "logWorkout.duration.hoursAndMinutes", defaultValue: "\(hours)h \(mins)m", comment: "Log-activity form: duration stepper value, hours and minutes")
     }
 }
 

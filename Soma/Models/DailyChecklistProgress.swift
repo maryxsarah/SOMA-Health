@@ -47,43 +47,43 @@ struct DailyChecklistProgress {
         let items = [
             DailyChecklistItem(
                 key: "onboarding_goal_profile",
-                title: "Set your goal & profile",
-                subtitle: "Weight, goal, and the basics Soma tailors your plan from.",
+                title: String(localized: "dailyChecklist.onboarding.goalProfile.title", defaultValue: "Set your goal & profile", comment: "Onboarding checklist item title"),
+                subtitle: String(localized: "dailyChecklist.onboarding.goalProfile.subtitle", defaultValue: "Weight, goal, and the basics Soma tailors your plan from.", comment: "Onboarding checklist item subtitle"),
                 isChecked: inputs.hasGoalsAndWeight,
                 isManual: false, deepLink: .profileGoals, daysUntilNextAvailable: nil
             ),
             DailyChecklistItem(
                 key: "onboarding_kitchen_equipment",
-                title: "Set your kitchen equipment",
-                subtitle: "So meal ideas only ever use what you actually have.",
+                title: String(localized: "dailyChecklist.onboarding.kitchenEquipment.title", defaultValue: "Set your kitchen equipment", comment: "Onboarding checklist item title"),
+                subtitle: String(localized: "dailyChecklist.onboarding.kitchenEquipment.subtitle", defaultValue: "So meal ideas only ever use what you actually have.", comment: "Onboarding checklist item subtitle"),
                 isChecked: inputs.kitchenEquipmentAcknowledged,
                 isManual: true, deepLink: .profileKitchenEquipment, daysUntilNextAvailable: nil
             ),
             DailyChecklistItem(
                 key: "onboarding_healthkit",
-                title: "Connect a health source",
-                subtitle: "Apple Health, Whoop, or Oura -- powers your daily readiness.",
+                title: String(localized: "dailyChecklist.onboarding.healthkit.title", defaultValue: "Connect a health source", comment: "Onboarding checklist item title"),
+                subtitle: String(localized: "dailyChecklist.onboarding.healthkit.subtitle", defaultValue: "Apple Health, Whoop, or Oura -- powers your daily readiness.", comment: "Onboarding checklist item subtitle"),
                 isChecked: inputs.healthKitConnected,
                 isManual: false, deepLink: .connectDevices, daysUntilNextAvailable: nil
             ),
             DailyChecklistItem(
                 key: "onboarding_notifications",
-                title: "Enable notifications",
-                subtitle: "So your morning plan actually reaches you.",
+                title: String(localized: "dailyChecklist.onboarding.notifications.title", defaultValue: "Enable notifications", comment: "Onboarding checklist item title"),
+                subtitle: String(localized: "dailyChecklist.onboarding.notifications.subtitle", defaultValue: "So your morning plan actually reaches you.", comment: "Onboarding checklist item subtitle"),
                 isChecked: inputs.notificationsEnabled,
                 isManual: false, deepLink: .enableNotifications, daysUntilNextAvailable: nil
             ),
             DailyChecklistItem(
                 key: "onboarding_review_plan",
-                title: "Review your first plan",
-                subtitle: "See why Soma suggested today's session.",
+                title: String(localized: "dailyChecklist.onboarding.reviewPlan.title", defaultValue: "Review your first plan", comment: "Onboarding checklist item title"),
+                subtitle: String(localized: "dailyChecklist.onboarding.reviewPlan.subtitle", defaultValue: "See why Soma suggested today's session.", comment: "Onboarding checklist item subtitle"),
                 isChecked: inputs.hasReviewedFirstPlan,
                 isManual: false, deepLink: .startWorkout, daysUntilNextAvailable: nil
             ),
             DailyChecklistItem(
                 key: "onboarding_first_workout",
-                title: "Log your first workout",
-                subtitle: "Follow today's plan, or log your own activity.",
+                title: String(localized: "dailyChecklist.onboarding.firstWorkout.title", defaultValue: "Log your first workout", comment: "Onboarding checklist item title"),
+                subtitle: String(localized: "dailyChecklist.onboarding.firstWorkout.subtitle", defaultValue: "Follow today's plan, or log your own activity.", comment: "Onboarding checklist item subtitle"),
                 isChecked: inputs.hasLoggedFirstWorkout,
                 // Was .startWorkout -- identical to "Review your first
                 // plan" above, which routed both through
@@ -98,15 +98,15 @@ struct DailyChecklistProgress {
             ),
             DailyChecklistItem(
                 key: "onboarding_first_meal",
-                title: "Log your first meal",
-                subtitle: "Type it, dictate it, or use \"What can I make?\"",
+                title: String(localized: "dailyChecklist.onboarding.firstMeal.title", defaultValue: "Log your first meal", comment: "Onboarding checklist item title"),
+                subtitle: String(localized: "dailyChecklist.onboarding.firstMeal.subtitle", defaultValue: "Type it, dictate it, or use \"What can I make?\"", comment: "Onboarding checklist item subtitle"),
                 isChecked: inputs.hasLoggedFirstMeal,
                 isManual: false, deepLink: .logMeal, daysUntilNextAvailable: nil
             ),
             DailyChecklistItem(
                 key: "onboarding_how_soma_works",
-                title: "See how Soma works",
-                subtitle: "A 6-card tour of what's actually in the app.",
+                title: String(localized: "dailyChecklist.onboarding.howSomaWorks.title", defaultValue: "See how Soma works", comment: "Onboarding checklist item title"),
+                subtitle: String(localized: "dailyChecklist.onboarding.howSomaWorks.subtitle", defaultValue: "A 6-card tour of what's actually in the app.", comment: "Onboarding checklist item subtitle"),
                 isChecked: inputs.hasSeenHowSomaWorks,
                 // Was isManual + .healthDashboard -- tapping used to mark
                 // this complete instantly (before showing anything real)
@@ -144,13 +144,13 @@ struct DailyChecklistProgress {
 
         let macroClause: String
         if let protein = inputs.targetProteinG, let carbs = inputs.targetCarbsG {
-            macroClause = "~\(protein)g protein, \(carbs)g carbs to stay fueled and full."
+            macroClause = String(localized: "dailyChecklist.standard.breakfast.macroSubtitle", defaultValue: "~\(protein)g protein, \(carbs)g carbs to stay fueled and full.", comment: "Standard-mode checklist item subtitle: today's remaining protein/carb targets")
         } else {
-            macroClause = "Log what you eat to keep today's bars filling in."
+            macroClause = String(localized: "dailyChecklist.standard.breakfast.noTargetSubtitle", defaultValue: "Log what you eat to keep today's bars filling in.", comment: "Standard-mode checklist item subtitle shown when no macro targets are on file")
         }
         items.append(DailyChecklistItem(
             key: "log_breakfast",
-            title: "Log breakfast",
+            title: String(localized: "dailyChecklist.standard.breakfast.title", defaultValue: "Log breakfast", comment: "Standard-mode checklist item title"),
             subtitle: macroClause,
             isChecked: inputs.mealLoggedToday,
             isManual: false, deepLink: .logMeal, daysUntilNextAvailable: nil
@@ -158,13 +158,13 @@ struct DailyChecklistProgress {
 
         let stepsSubtitle: String
         if let steps = inputs.todaysSteps {
-            stepsSubtitle = "\(steps.formatted()) / \(inputs.stepGoal.formatted()) steps today."
+            stepsSubtitle = String(localized: "dailyChecklist.standard.steps.progressSubtitle", defaultValue: "\(steps.formatted()) / \(inputs.stepGoal.formatted()) steps today.", comment: "Standard-mode checklist item subtitle: steps taken vs today's step goal")
         } else {
-            stepsSubtitle = "Target: \(inputs.stepGoal.formatted()) steps -- connect Apple Health to track it."
+            stepsSubtitle = String(localized: "dailyChecklist.standard.steps.noDataSubtitle", defaultValue: "Target: \(inputs.stepGoal.formatted()) steps -- connect Apple Health to track it.", comment: "Standard-mode checklist item subtitle shown when no step data is available")
         }
         items.append(DailyChecklistItem(
             key: "hit_step_goal",
-            title: "Hit your step goal",
+            title: String(localized: "dailyChecklist.standard.steps.title", defaultValue: "Hit your step goal", comment: "Standard-mode checklist item title"),
             subtitle: stepsSubtitle,
             isChecked: (inputs.todaysSteps ?? 0) >= inputs.stepGoal,
             isManual: false, deepLink: .healthDashboard, daysUntilNextAvailable: nil
@@ -172,16 +172,16 @@ struct DailyChecklistProgress {
 
         items.append(DailyChecklistItem(
             key: "mood_checkin",
-            title: "Check how you're feeling",
-            subtitle: "One tap -- helps Soma see what's actually working.",
+            title: String(localized: "dailyChecklist.standard.mood.title", defaultValue: "Check how you're feeling", comment: "Standard-mode checklist item title"),
+            subtitle: String(localized: "dailyChecklist.standard.mood.subtitle", defaultValue: "One tap -- helps Soma see what's actually working.", comment: "Standard-mode checklist item subtitle"),
             isChecked: inputs.moodLoggedToday,
             isManual: false, deepLink: .moodCheckIn, daysUntilNextAvailable: nil
         ))
 
         items.append(DailyChecklistItem(
             key: "complete_workout",
-            title: "Complete today's workout",
-            subtitle: "Follow today's plan, or log your own activity.",
+            title: String(localized: "dailyChecklist.standard.workout.title", defaultValue: "Complete today's workout", comment: "Standard-mode checklist item title"),
+            subtitle: String(localized: "dailyChecklist.standard.workout.subtitle", defaultValue: "Follow today's plan, or log your own activity.", comment: "Standard-mode checklist item subtitle"),
             isChecked: inputs.workoutLoggedToday,
             isManual: false, deepLink: .startWorkout, daysUntilNextAvailable: nil
         ))
@@ -192,18 +192,20 @@ struct DailyChecklistProgress {
         if showsToday {
             items.append(DailyChecklistItem(
                 key: "progress_picture",
-                title: "Progress picture",
+                title: String(localized: "dailyChecklist.standard.progressPicture.title", defaultValue: "Progress picture", comment: "Standard-mode checklist item title"),
                 subtitle: isCheckedToday
-                    ? "Done for this week -- see you next week."
-                    : "Compare against your goal photo -- a weekly gut-check that keeps you coming back.",
+                    ? String(localized: "dailyChecklist.standard.progressPicture.doneSubtitle", defaultValue: "Done for this week -- see you next week.", comment: "Standard-mode checklist item subtitle shown once this week's progress picture is done")
+                    : String(localized: "dailyChecklist.standard.progressPicture.dueSubtitle", defaultValue: "Compare against your goal photo -- a weekly gut-check that keeps you coming back.", comment: "Standard-mode checklist item subtitle shown when this week's progress picture is due"),
                 isChecked: isCheckedToday,
                 isManual: true, deepLink: .progressPicture, daysUntilNextAvailable: nil
             ))
         } else {
             items.append(DailyChecklistItem(
                 key: "progress_picture",
-                title: "Progress picture",
-                subtitle: "Next one in \(daysUntilNext) day\(daysUntilNext == 1 ? "" : "s").",
+                title: String(localized: "dailyChecklist.standard.progressPicture.title", defaultValue: "Progress picture", comment: "Standard-mode checklist item title"),
+                subtitle: daysUntilNext == 1
+                    ? String(localized: "dailyChecklist.standard.progressPicture.nextInOneDay", defaultValue: "Next one in \(daysUntilNext) day.", comment: "Standard-mode checklist item subtitle: progress picture becomes due in exactly 1 day")
+                    : String(localized: "dailyChecklist.standard.progressPicture.nextInDays", defaultValue: "Next one in \(daysUntilNext) days.", comment: "Standard-mode checklist item subtitle: progress picture becomes due in more than 1 day"),
                 isChecked: true, // Not actionable right now -- shown as a settled, upcoming moment, not an open task.
                 isManual: true, deepLink: nil, daysUntilNextAvailable: daysUntilNext
             ))

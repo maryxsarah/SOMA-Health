@@ -274,6 +274,9 @@ struct SportGoal: Codable, Identifiable, Hashable {
     /// Fixed English text -- legacy `baselineStage` rows persisted this
     /// literal string, always in English, regardless of display language.
     private static func legacyEnglishStageDisplayName(_ key: String) -> String {
+        // Deliberately always English, matching this function's own doc
+        // comment above.
+        // swiftlint:disable raw_string_return
         switch key {
         case "never_tried": return "Never tried"
         case "feet_lift": return "Feet lift"
@@ -283,6 +286,7 @@ struct SportGoal: Codable, Identifiable, Hashable {
             let words = key.replacingOccurrences(of: "_", with: " ")
             return words.prefix(1).uppercased() + words.dropFirst()
         }
+        // swiftlint:enable raw_string_return
     }
 
     /// Ruler bounds derived from the band edges when present.

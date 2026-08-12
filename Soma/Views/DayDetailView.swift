@@ -234,7 +234,7 @@ struct DayDetailView: View {
         switch state {
         case .done:
             if let wearableSummary {
-                Text("Avg \(wearableSummary.averageHeartRate) bpm, max \(wearableSummary.maxHeartRate) bpm (\(wearableSummary.sourceDisplayName))")
+                Text(String(localized: "day_detail.metaLine.wearableSummary", defaultValue: "Avg \(wearableSummary.averageHeartRate) bpm, max \(wearableSummary.maxHeartRate) bpm (\(wearableSummary.sourceDisplayName))", comment: "Heart-rate summary line for a completed workout day, e.g. 'Avg 120 bpm, max 165 bpm (Apple Health)'. First two placeholders are average/max heart rate in bpm, third is the wearable provider's display name."))
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink3)
             }

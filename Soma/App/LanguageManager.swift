@@ -4,7 +4,7 @@ import SwiftUI
 /// The languages Soma ships translations for. `.system` (the default)
 /// follows the device's language; the picker lets a user override it.
 enum AppLanguage: String, CaseIterable, Identifiable {
-    case system, en, es, fr, it, de, ru, ka, hy
+    case system, en, es, fr, it, de, ru, ka, hy, sr
 
     var id: String { rawValue }
 
@@ -27,7 +27,8 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .de: "Deutsch"
         case .ru: "Русский"
         case .ka: "ქართული"
-        case .hy: "Հայერեն"
+        case .hy: "Հայերեն"
+        case .sr: "Српски"
         }
     }
 

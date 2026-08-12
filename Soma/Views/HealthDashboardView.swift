@@ -169,9 +169,9 @@ struct HealthDashboardView: View {
             )
         } else {
             CardView {
-                Text("No sleep recorded last night")
+                Text(String(localized: "sleepSection.noData.title", defaultValue: "No sleep recorded last night", comment: "Sleep section title shown when no sleep data is available for last night"))
                     .font(.body.bold())
-                Text("Wear your device overnight to see sleep here.")
+                Text(String(localized: "sleepSection.noData.subtitle", defaultValue: "Wear your device overnight to see sleep here.", comment: "Sleep section subtitle shown when no sleep data is available for last night"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -266,7 +266,7 @@ struct HealthDashboardView: View {
             if let bmi = BodyMetrics.bmi(weightKg: weight, heightCm: profile?.heightCm) {
                 CardView {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("BMI")
+                        Text(String(localized: "bodySection.bmi.label", defaultValue: "BMI", comment: "Label for the BMI value card in the Body section"))
                             .font(.subheadline.bold())
                         Spacer()
                         Text(String(format: "%.1f", bmi))
@@ -275,7 +275,7 @@ struct HealthDashboardView: View {
                     Text(BodyMetrics.bmiCategory(bmi))
                         .font(.caption.bold())
                         .foregroundStyle(SomaTokens.ink2)
-                    Text("A general population screening measure, not a fitness or body-composition score -- it doesn't distinguish muscle from fat.")
+                    Text(String(localized: "bodySection.bmi.explainer", defaultValue: "A general population screening measure, not a fitness or body-composition score -- it doesn't distinguish muscle from fat.", comment: "Explainer text under the BMI value clarifying what it does and doesn't measure"))
                         .font(.caption2)
                         .foregroundStyle(SomaTokens.ink4)
                 }
@@ -288,7 +288,7 @@ struct HealthDashboardView: View {
                 goalPace: profile?.goalPace
             ) {
                 CardView {
-                    Text("Progress toward your goal")
+                    Text(String(localized: "bodySection.progress.title", defaultValue: "Progress toward your goal", comment: "Title for the goal progress bar in the Body section"))
                         .font(.subheadline.bold())
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
@@ -300,7 +300,7 @@ struct HealthDashboardView: View {
                     }
                     .frame(height: 10)
                     .clipShape(Capsule())
-                    Text("Day \(journey.daysElapsed) of roughly \(journey.estimatedTotalDays), at your chosen pace.")
+                    Text(String(localized: "bodySection.progress.caption", defaultValue: "Day \(journey.daysElapsed) of roughly \(journey.estimatedTotalDays), at your chosen pace.", comment: "Caption under the goal progress bar; both numbers are day counts"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -398,7 +398,7 @@ struct HealthDashboardView: View {
             let avg = prior.reduce(0, +) / Double(prior.count)
             let change = avg == 0 ? 0 : (current - avg) / avg * 100
             if abs(change) < 3 {
-                deltaText = "steady"
+                deltaText = String(localized: "steady", defaultValue: "steady", comment: "Metric row delta shown when the value hasn't moved meaningfully vs the prior average")
             } else {
                 deltaText = String(format: "%@ %.0f%%", change > 0 ? "↑" : "↓", abs(change))
                 deltaIsGood = (change > 0) == upIsGood
@@ -460,7 +460,7 @@ struct HealthDashboardView: View {
         if recentMoods.count > 1 {
             let values = recentMoods.map { (date: $0.date, value: Double($0.rating)) }
             CardView {
-                Text("How you've been feeling")
+                Text(String(localized: "moodTrend.title", defaultValue: "How you've been feeling", comment: "Title for the mood trend chart card"))
                     .font(.body.bold())
                 AxisLabeledTrendChart(values: values, showAverageLine: true)
                 if let comparison = Self.moodComparisonText(recentMoods) {
@@ -486,12 +486,14 @@ struct HealthDashboardView: View {
         let earlierAvg = Double(earlier.reduce(0) { $0 + $1.rating }) / Double(earlier.count)
         let recentAvg = Double(recent.reduce(0) { $0 + $1.rating }) / Double(recent.count)
         let delta = recentAvg - earlierAvg
+        let recentAvgText = String(format: "%.1f", recentAvg)
+        let earlierAvgText = String(format: "%.1f", earlierAvg)
         if abs(delta) < 0.3 {
-            return "Holding steady around \(String(format: "%.1f", recentAvg))/5 lately."
+            return String(localized: "moodTrend.comparison.steady", defaultValue: "Holding steady around \(recentAvgText)/5 lately.", comment: "Mood trend comparison when the recent average hasn't moved meaningfully; the value is a formatted rating out of 5")
         }
         return delta > 0
-            ? "Averaging \(String(format: "%.1f", recentAvg))/5 lately, up from \(String(format: "%.1f", earlierAvg))/5 earlier."
-            : "Averaging \(String(format: "%.1f", recentAvg))/5 lately, down from \(String(format: "%.1f", earlierAvg))/5 earlier."
+            ? String(localized: "moodTrend.comparison.up", defaultValue: "Averaging \(recentAvgText)/5 lately, up from \(earlierAvgText)/5 earlier.", comment: "Mood trend comparison when the recent average is higher than the earlier average; both values are formatted ratings out of 5")
+            : String(localized: "moodTrend.comparison.down", defaultValue: "Averaging \(recentAvgText)/5 lately, down from \(earlierAvgText)/5 earlier.", comment: "Mood trend comparison when the recent average is lower than the earlier average; both values are formatted ratings out of 5")
     }
 
     /// Guide 08's "What these mean": one open at a time, collapsed rows

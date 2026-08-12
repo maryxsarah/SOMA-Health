@@ -700,7 +700,7 @@ struct HomeView: View {
             Button {
                 showLogManualWorkout = true
             } label: {
-                Text("Log a different activity")
+                Text(String(localized: "home.readiness.logDifferentActivity", defaultValue: "Log a different activity", comment: "Home: readiness card link to log an activity outside the AI plan"))
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(SomaTokens.accent)
             }
@@ -738,7 +738,7 @@ struct HomeView: View {
         .buttonStyle(.plain)
         .disabled(isLoading)
         .animation(.easeInOut(duration: 0.2), value: isLoading)
-        .accessibilityLabel("Refresh today's readiness")
+        .accessibilityLabel(String(localized: "home.readiness.refreshAccessibilityLabel", defaultValue: "Refresh today's readiness", comment: "Home: accessibility label for the readiness card's manual refresh button"))
     }
 
     /// Lets the user directly ask for a rest/active-recovery day regardless
@@ -955,14 +955,14 @@ struct HomeView: View {
                 HStack(spacing: 10) {
                     Text(rating.emoji)
                         .font(.system(size: 22))
-                    Text("You're feeling \(rating.displayName.lowercased()) today")
+                    Text(String(localized: "home.moodCheckIn.feelingToday", defaultValue: "You're feeling \(rating.displayName.lowercased()) today", comment: "Home: shown after the user logs today's mood; the placeholder is the lowercased mood name (e.g. 'good')"))
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(SomaTokens.ink2)
                     Spacer()
                 }
             } else {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("How are you feeling today?")
+                    Text(String(localized: "home.moodCheckIn.prompt", defaultValue: "How are you feeling today?", comment: "Home: mood check-in prompt shown before the user has logged today's mood"))
                         .font(.system(size: 14.5, weight: .semibold))
                     HStack(spacing: 8) {
                         ForEach(MoodRating.allCases) { rating in
@@ -1103,8 +1103,8 @@ struct HomeView: View {
             } label: {
                 scanRowBody(
                     plate: SomaTokens.accentSoft, icon: "person.fill.questionmark", iconColor: SomaTokens.accent,
-                    title: "Add your date of birth",
-                    subtitle: "Confirms you're 18+ to unlock Goal Body progress photos"
+                    title: LocalizedStringKey(String(localized: "home.goalProgress.addDOB.title", defaultValue: "Add your date of birth", comment: "Home: goal-progress row title shown when date of birth is missing, blocking goal photo uploads")),
+                    subtitle: LocalizedStringKey(String(localized: "home.goalProgress.addDOB.subtitle", defaultValue: "Confirms you're 18+ to unlock Goal Body progress photos", comment: "Home: goal-progress row subtitle shown when date of birth is missing"))
                 ) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 13, weight: .semibold))
@@ -1197,9 +1197,9 @@ struct HomeView: View {
 
     private static func todaysWorkoutCardEyebrow(for source: String) -> String {
         switch source {
-        case "manual": "Today's activity"
-        case "device_detected": "Detected automatically"
-        default: "Today's workout"
+        case "manual": String(localized: "home.workoutCard.eyebrow.manual", defaultValue: "Today's activity", comment: "Home: eyebrow label over today's workout card when the log was manually entered")
+        case "device_detected": String(localized: "home.workoutCard.eyebrow.deviceDetected", defaultValue: "Detected automatically", comment: "Home: eyebrow label over today's workout card when the log was auto-detected from a connected device")
+        default: String(localized: "home.workoutCard.eyebrow.aiPlan", defaultValue: "Today's workout", comment: "Home: eyebrow label over today's workout card when the log came from the AI-generated plan")
         }
     }
 
@@ -1404,7 +1404,7 @@ struct HomeView: View {
             // user taps on one of the emojis ... nothing happens." The
             // row of options stays tappable either way so the user can
             // retry without leaving the screen.
-            moodError = "Couldn't save that -- check your connection and try again."
+            moodError = String(localized: "home.moodCheckIn.error", defaultValue: "Couldn't save that -- check your connection and try again.", comment: "Home: shown when saving the daily mood check-in fails")
         }
     }
 
