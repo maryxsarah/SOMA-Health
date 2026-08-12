@@ -17,7 +17,7 @@ struct AchievementCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("SOMA")
+                Text(String(localized: "achievementCard.brand.wordmark", defaultValue: "SOMA", comment: "Soma brand wordmark on the achievement share card; intentionally kept as 'SOMA' in every locale"))
                     .font(.system(size: 12, weight: .black))
                     .tracking(2.5)
                     .foregroundStyle(accentColor)

@@ -32,20 +32,20 @@ enum KitchenEquipmentTag: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .stove: "Stove"
-        case .oven: "Oven"
-        case .microwave: "Microwave"
-        case .airFryer: "Air Fryer"
-        case .blender: "Blender"
-        case .mixer: "Mixer"
-        case .thermomix: "Thermomix"
-        case .grill: "Grill"
-        case .riceCooker: "Rice Cooker"
-        case .slowCooker: "Slow Cooker"
-        case .pressureCooker: "Pressure Cooker / Instant Pot"
-        case .foodProcessor: "Food Processor"
-        case .toaster: "Toaster"
-        case .other: "Other"
+        case .stove: String(localized: "kitchenEquipmentTag.stove", defaultValue: "Stove", comment: "Kitchen equipment tag label")
+        case .oven: String(localized: "kitchenEquipmentTag.oven", defaultValue: "Oven", comment: "Kitchen equipment tag label")
+        case .microwave: String(localized: "kitchenEquipmentTag.microwave", defaultValue: "Microwave", comment: "Kitchen equipment tag label")
+        case .airFryer: String(localized: "kitchenEquipmentTag.airFryer", defaultValue: "Air Fryer", comment: "Kitchen equipment tag label")
+        case .blender: String(localized: "kitchenEquipmentTag.blender", defaultValue: "Blender", comment: "Kitchen equipment tag label")
+        case .mixer: String(localized: "kitchenEquipmentTag.mixer", defaultValue: "Mixer", comment: "Kitchen equipment tag label")
+        case .thermomix: String(localized: "kitchenEquipmentTag.thermomix", defaultValue: "Thermomix", comment: "Kitchen equipment tag label; Thermomix is a brand name, keep untranslated")
+        case .grill: String(localized: "kitchenEquipmentTag.grill", defaultValue: "Grill", comment: "Kitchen equipment tag label")
+        case .riceCooker: String(localized: "kitchenEquipmentTag.riceCooker", defaultValue: "Rice Cooker", comment: "Kitchen equipment tag label")
+        case .slowCooker: String(localized: "kitchenEquipmentTag.slowCooker", defaultValue: "Slow Cooker", comment: "Kitchen equipment tag label")
+        case .pressureCooker: String(localized: "kitchenEquipmentTag.pressureCooker", defaultValue: "Pressure Cooker / Instant Pot", comment: "Kitchen equipment tag label")
+        case .foodProcessor: String(localized: "kitchenEquipmentTag.foodProcessor", defaultValue: "Food Processor", comment: "Kitchen equipment tag label")
+        case .toaster: String(localized: "kitchenEquipmentTag.toaster", defaultValue: "Toaster", comment: "Kitchen equipment tag label")
+        case .other: String(localized: "kitchenEquipmentTag.other", defaultValue: "Other", comment: "Kitchen equipment tag label: catch-all option")
         }
     }
 

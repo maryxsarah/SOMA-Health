@@ -100,7 +100,7 @@ struct NutritionView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Get your daily targets.")
                 .font(Theme.display)
-            Text("Soma computes this from your weight, height, and goal weight -- normally already on file from onboarding. Add goal photos for an even more tailored target, or make sure those numbers are filled in.")
+            Text(String(localized: "nutrition.emptyState.body", defaultValue: "Soma computes this from your weight, height, and goal weight -- normally already on file from onboarding. Add goal photos for an even more tailored target, or make sure those numbers are filled in.", comment: "Explains how nutrition targets are computed, shown when no target exists yet"))
                 .font(.body)
                 .foregroundStyle(.secondary)
             Button {
@@ -122,7 +122,7 @@ struct NutritionView: View {
                         Text("Today")
                             .font(.subheadline.bold())
                         Spacer()
-                        Text("\(progress.caloriesRemaining) kcal left")
+                        Text(String(localized: "nutrition.today.caloriesRemaining", defaultValue: "\(progress.caloriesRemaining) kcal left", comment: "Calories remaining today, e.g. '450 kcal left'"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -165,10 +165,10 @@ struct NutritionView: View {
                             .foregroundStyle(SomaTokens.accent)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("What can I make?")
+                        Text(String(localized: "nutrition.mealIdea.title", defaultValue: "What can I make?", comment: "Title of the entry point card into AI meal recommendations"))
                             .font(.system(size: 14.5, weight: .semibold))
                             .foregroundStyle(SomaTokens.ink)
-                        Text("Tell Soma what's in your fridge -- get one full recipe, sized to what's left today.")
+                        Text(String(localized: "nutrition.mealIdea.subtitle", defaultValue: "Tell Soma what's in your fridge -- get one full recipe, sized to what's left today.", comment: "Subtitle of the entry point card into AI meal recommendations"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -192,7 +192,7 @@ struct NutritionView: View {
                 Text(label)
                     .font(isPrimary ? .subheadline.bold() : .caption.bold())
                 Spacer()
-                Text("\(consumed) / \(target) \(unit)")
+                Text(String(localized: "nutrition.macroBar.value", defaultValue: "\(consumed) / \(target) \(unit)", comment: "Consumed vs target amount for a macro today, e.g. '30 / 120 g'"))
                     .font(isPrimary ? .subheadline.bold() : .caption)
                     .foregroundStyle(.secondary)
             }
@@ -279,9 +279,12 @@ struct NutritionView: View {
     }
 
     private func macroSummary(_ entry: MealLogEntry) -> String {
-        var parts = ["\(entry.calories) kcal", "\(entry.proteinG)g protein"]
-        if let carbsG = entry.carbsG { parts.append("\(carbsG)g carbs") }
-        if let fatG = entry.fatG { parts.append("\(fatG)g fat") }
+        var parts = [
+            String(localized: "nutrition.macroSummary.calories", defaultValue: "\(entry.calories) kcal", comment: "Calorie amount in a meal log row's macro summary"),
+            String(localized: "nutrition.macroSummary.protein", defaultValue: "\(entry.proteinG)g protein", comment: "Protein amount in a meal log row's macro summary"),
+        ]
+        if let carbsG = entry.carbsG { parts.append(String(localized: "nutrition.macroSummary.carbs", defaultValue: "\(carbsG)g carbs", comment: "Carb amount in a meal log row's macro summary")) }
+        if let fatG = entry.fatG { parts.append(String(localized: "nutrition.macroSummary.fat", defaultValue: "\(fatG)g fat", comment: "Fat amount in a meal log row's macro summary")) }
         return parts.joined(separator: " · ")
     }
 

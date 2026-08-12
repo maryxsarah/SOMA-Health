@@ -56,9 +56,13 @@ struct LogMealView: View {
                         dictateButton
                     }
                     if speechRecognizer.isListening {
-                        Label("Listening -- tap the mic when you're done, or just stop talking.", systemImage: "waveform")
-                            .font(.caption2)
-                            .foregroundStyle(SomaTokens.accent)
+                        Label {
+                            Text(String(localized: "logMeal.input.listening", defaultValue: "Listening -- tap the mic when you're done, or just stop talking.", comment: "Hint shown while dictating a meal description with the mic"))
+                        } icon: {
+                            Image(systemName: "waveform")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(SomaTokens.accent)
                     }
                     if isEstimating {
                         // Shuffled per appearance so back-to-back estimates
@@ -76,7 +80,7 @@ struct LogMealView: View {
                         .disabled(!canEstimate)
                     }
                 } footer: {
-                    Text("Type it, dictate it, or describe your meal in words -- Soma fills in the fields below either way. Review and adjust anything before saving.")
+                    Text(String(localized: "logMeal.footer.description", defaultValue: "Type it, dictate it, or describe your meal in words -- Soma fills in the fields below either way. Review and adjust anything before saving.", comment: "Footer note explaining the meal entry section on the log meal screen"))
                 }
                 Section("Required") {
                     LabeledContent("Calories") {

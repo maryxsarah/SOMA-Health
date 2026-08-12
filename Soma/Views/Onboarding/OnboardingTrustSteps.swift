@@ -46,7 +46,10 @@ struct WeightDeltaReactionView: View {
     let onBack: () -> Void
     let onContinue: () -> Void
 
-    private var amountText: String { String(format: "%.1f kg", abs(deltaKg)) }
+    private var amountText: String {
+        let formatted = String(format: "%.1f", abs(deltaKg))
+        return String(localized: "onboarding.weightDelta.amountKg", defaultValue: "\(formatted) kg", comment: "Formatted weight-delta amount with kg unit, e.g. '5.0 kg'; used inline in the onboarding weight-delta reaction headline")
+    }
 
     /// Built as one localized sentence per direction (not concatenated
     /// English fragments) since word order and verb form vary by

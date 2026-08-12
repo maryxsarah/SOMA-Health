@@ -131,8 +131,8 @@ struct GoalTrajectoryChartView: View {
                         .stroke(Theme.pillFill, style: StrokeStyle(lineWidth: 3, lineCap: .round))
 
                     GeometryReader { geometry in
-                        marker(tag: "TODAY", weightKg: start, date: Date(), point: linePoints[0], geometry: geometry)
-                        marker(tag: "GOAL", weightKg: goal, date: goalDate, point: linePoints[1], geometry: geometry)
+                        marker(tag: Self.todayTagText, weightKg: start, date: Date(), point: linePoints[0], geometry: geometry)
+                        marker(tag: Self.goalTagText, weightKg: goal, date: goalDate, point: linePoints[1], geometry: geometry)
                     }
                     .opacity(markersVisible ? 1 : 0)
                 }
@@ -145,15 +145,15 @@ struct GoalTrajectoryChartView: View {
                 // Partial data (no goal weight set yet) -- an honest
                 // single reading rather than fabricating a goal line.
                 VStack(spacing: 6) {
-                    Text("\(Self.formattedWeight(start)) kg today")
+                    Text(String(localized: "onboardingCharts.trajectory.currentWeightToday", defaultValue: "\(Self.formattedWeight(start)) kg today", comment: "Shown when only a current weight is known yet (no goal weight set); placeholder is a formatted kg amount like '72.5'"))
                         .font(.system(.title3, design: .serif).italic())
-                    Text("Set a goal weight to see your projected timeline.")
+                    Text(String(localized: "onboardingCharts.trajectory.setGoalWeightPrompt", defaultValue: "Set a goal weight to see your projected timeline.", comment: "Shown under the current weight reading when no goal weight has been set yet"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: chartHeight)
             } else {
-                Text("Add your weight to see your projected timeline.")
+                Text(String(localized: "onboardingCharts.trajectory.addWeightPrompt", defaultValue: "Add your weight to see your projected timeline.", comment: "Shown when neither a current nor a goal weight is set yet"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: chartHeight)
@@ -161,13 +161,18 @@ struct GoalTrajectoryChartView: View {
         }
     }
 
+    /// Pre-resolved (not LocalizedStringKey) since `tag` is a plain String
+    /// parameter -- Text(tag) below can't do its own catalog lookup.
+    private static let todayTagText = String(localized: "TODAY", comment: "Marker label on the weight-trajectory chart for the 'today' anchor point")
+    private static let goalTagText = String(localized: "onboardingCharts.trajectory.goalTag", defaultValue: "GOAL", comment: "Marker label on the weight-trajectory chart for the 'goal' anchor point")
+
     private func marker(tag: String, weightKg: Double, date: Date, point: CGPoint, geometry: GeometryProxy) -> some View {
         VStack(spacing: 1) {
             Text(tag)
                 .font(.system(size: 10, weight: .bold))
                 .tracking(0.5)
                 .foregroundStyle(Theme.pillFill)
-            Text("\(Self.formattedWeight(weightKg)) kg")
+            Text(String(localized: "onboardingCharts.trajectory.markerWeight", defaultValue: "\(Self.formattedWeight(weightKg)) kg", comment: "Weight value shown under a TODAY/GOAL marker on the trajectory chart; placeholder is a formatted kg amount"))
                 .font(.system(.subheadline, design: .serif).italic().bold())
             Text(Self.monthFormatter.string(from: date))
                 .font(.system(size: 10))
@@ -202,7 +207,7 @@ struct PlanHighlightsListView: View {
     var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Highlights of your plan")
+                Text(String(localized: "onboardingCharts.planHighlights.title", defaultValue: "Highlights of your plan", comment: "Title above the list of plan-highlight bullet lines"))
                     .font(.body.bold())
                 ForEach(Array(items.enumerated()), id: \.offset) { _, text in
                     HStack(alignment: .top, spacing: 8) {
@@ -231,17 +236,17 @@ struct PlanHighlightsListView: View {
         var lines: [String] = []
         if !goalTags.isEmpty {
             let names = goalTags.map(\.displayName).sorted().prefix(3).joined(separator: ", ")
-            lines.append("Built around your goal: \(names)")
+            lines.append(String(localized: "onboardingCharts.planHighlights.goal", defaultValue: "Built around your goal: \(names)", comment: "Plan-highlights bullet line naming the user's selected goal(s); placeholder is a comma-separated list of goal names"))
         }
         if let journeyStage {
-            lines.append("Paced for where you are: \(journeyStage.displayName.lowercased())")
+            lines.append(String(localized: "onboardingCharts.planHighlights.journeyStage", defaultValue: "Paced for where you are: \(journeyStage.displayName.lowercased())", comment: "Plan-highlights bullet line naming the user's journey stage; placeholder is the lowercased journey stage name"))
         }
         if !blockers.isEmpty {
             let names = blockers.map(\.displayName).sorted().prefix(2).joined(separator: ", ")
-            lines.append("Designed around what's gotten in the way: \(names)")
+            lines.append(String(localized: "onboardingCharts.planHighlights.blockers", defaultValue: "Designed around what's gotten in the way: \(names)", comment: "Plan-highlights bullet line naming the user's selected blockers; placeholder is a comma-separated list of blocker names"))
         }
         if let dietType {
-            lines.append("Nutrition guidance tuned to: \(dietType.displayName)")
+            lines.append(String(localized: "onboardingCharts.planHighlights.dietType", defaultValue: "Nutrition guidance tuned to: \(dietType.displayName)", comment: "Plan-highlights bullet line naming the user's diet type; placeholder is the diet type name"))
         }
         return Array(lines.prefix(maxItems))
     }

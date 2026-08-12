@@ -99,7 +99,7 @@ final class LocalizationUITests: XCTestCase {
         let app = launch()
         openLanguageSheet(app)
 
-        for code in ["system", "en", "es", "fr", "it", "de", "ru", "ka", "hy"] {
+        for code in ["system", "en", "es", "fr", "it", "de", "ru", "ka", "hy", "sr"] {
             XCTAssertTrue(app.buttons["language-option-\(code)"].waitForExistence(timeout: 10),
                           "Language sheet should list the '\(code)' option")
         }

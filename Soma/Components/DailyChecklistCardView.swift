@@ -62,8 +62,12 @@ struct DailyChecklistCardView: View {
     // MARK: - Header
 
     private var title: String {
-        guard let progress else { return "Today's checklist" }
-        return progress.streak > 0 && progress.totalCount == 8 ? "Getting started" : "Today's checklist"
+        guard let progress else {
+            return String(localized: "dailyChecklist.title.default", defaultValue: "Today's checklist", comment: "Daily checklist card header title shown in the standard (non-onboarding) daily mode")
+        }
+        return progress.streak > 0 && progress.totalCount == 8
+            ? String(localized: "dailyChecklist.title.gettingStarted", defaultValue: "Getting started", comment: "Daily checklist card header title shown during the one-time onboarding checklist")
+            : String(localized: "dailyChecklist.title.default", defaultValue: "Today's checklist", comment: "Daily checklist card header title shown in the standard (non-onboarding) daily mode")
     }
 
     private var header: some View {
@@ -72,7 +76,7 @@ struct DailyChecklistCardView: View {
                 .font(.subheadline.bold())
             Spacer()
             if let progress {
-                Text("\(progress.checkedCount)/\(progress.totalCount) today")
+                Text(String(localized: "dailyChecklist.header.progressCount", defaultValue: "\(progress.checkedCount)/\(progress.totalCount) today", comment: "Daily checklist header pill showing checked items out of total for today, e.g. '3/8 today'"))
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(progress.isComplete ? SomaTokens.success : SomaTokens.ink3)
                     .padding(.horizontal, 9)
@@ -154,7 +158,9 @@ struct DailyChecklistCardView: View {
         HStack(spacing: 8) {
             Image(systemName: "flame.fill")
                 .foregroundStyle(SomaTokens.warn)
-            Text(streak > 1 ? "Perfect day -- \(streak) days in a row." : "Perfect day. That's how streaks start.")
+            Text(streak > 1
+                ? String(localized: "dailyChecklist.completion.streak", defaultValue: "Perfect day -- \(streak) days in a row.", comment: "Daily checklist completion flourish shown when the user has a multi-day streak; placeholder is the streak count")
+                : String(localized: "dailyChecklist.completion.firstDay", defaultValue: "Perfect day. That's how streaks start.", comment: "Daily checklist completion flourish shown on the first day of a new streak"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SomaTokens.ink2)
         }

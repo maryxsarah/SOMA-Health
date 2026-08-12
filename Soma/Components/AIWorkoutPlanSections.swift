@@ -29,7 +29,7 @@ struct AIWorkoutPlanView: View {
                     .foregroundStyle(.secondary)
             }
             if let weatherNote = plan.weatherNote {
-                Text("🌡️ \(weatherNote) Today's plan sticks to indoor cardio.")
+                Text(String(localized: "aiWorkoutPlan.weatherNote", defaultValue: "🌡️ \(weatherNote) Today's plan sticks to indoor cardio.", comment: "Weather-driven note shown above the plan when today's session was moved indoors; placeholder is a free-text weather reason"))
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .padding(.top, 2)
@@ -152,7 +152,9 @@ struct AIWorkoutPlanView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)\(exercise.restLabel.map { " — \($0)" } ?? "")")
+                    Text(exercise.restLabel.map { restLabel in
+                        String(localized: "exerciseDetail.summary.withRest", defaultValue: "\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity) — \(restLabel)", comment: "Exercise detail: sets/reps/weight/intensity/rest summary line, with a rest period")
+                    } ?? String(localized: "exerciseDetail.summary.noRest", defaultValue: "\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)", comment: "Exercise detail: sets/reps/weight/intensity summary line, no rest period"))
                         .font(.caption)
                         .foregroundStyle(Theme.pillFill)
                     // Only populated by the gym-photo-workout flow -- nil for the

@@ -178,13 +178,13 @@ struct CompletedWorkoutView: View {
                     .foregroundStyle(SomaTokens.ink)
                     .contentTransition(.numericText())
                 HStack(spacing: 6) {
-                    Text("kcal burned")
+                    Text(String(localized: "completedWorkout.calories.unit", defaultValue: "kcal burned", comment: "Completed workout: unit label under the calorie count"))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(SomaTokens.ink3)
                     // Never presented as measured when it isn't -- see
                     // WorkoutCalorieEstimator's own doc comment.
                     if log.caloriesEstimated {
-                        Text("ESTIMATED")
+                        Text(String(localized: "completedWorkout.calories.estimatedBadge", defaultValue: "ESTIMATED", comment: "Completed workout: badge shown when the calorie count is an estimate, not a measured reading"))
                             .font(.system(size: 9.5, weight: .bold))
                             .tracking(0.4)
                             .foregroundStyle(SomaTokens.ink4)
@@ -204,7 +204,7 @@ struct CompletedWorkoutView: View {
                 Text("—")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .foregroundStyle(SomaTokens.ink4)
-                Text("Calories unavailable for this session")
+                Text(String(localized: "completedWorkout.calories.unavailable", defaultValue: "Calories unavailable for this session", comment: "Completed workout: shown when no calorie reading or estimate could be produced"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(SomaTokens.ink4)
             }
@@ -279,7 +279,7 @@ struct CompletedWorkoutView: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(SomaTokens.accent)
-                Text("WHY THIS WORKOUT TODAY")
+                Text(String(localized: "completedWorkout.whyToday.eyebrow", defaultValue: "WHY THIS WORKOUT TODAY", comment: "Completed workout: eyebrow label over the why-this-workout explanation"))
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.6)
                     .foregroundStyle(SomaTokens.accent)
@@ -346,7 +346,7 @@ struct CompletedWorkoutView: View {
             }
             HStack(spacing: 6) {
                 metaChip(BodyPartFocus(rawValue: log.bodyPart)?.displayName ?? log.bodyPart)
-                metaChip(log.category.capitalized)
+                metaChip(Self.categoryDisplayName(log.category))
             }
         }
     }
@@ -387,7 +387,7 @@ struct CompletedWorkoutView: View {
             .staggerReveal(0)
             HStack(spacing: 6) {
                 metaChip(BodyPartFocus(rawValue: log.bodyPart)?.displayName ?? log.bodyPart)
-                metaChip(log.category.capitalized)
+                metaChip(Self.categoryDisplayName(log.category))
                 metaChip(Self.sourceDisplayName(log.source))
             }
         }
@@ -395,10 +395,19 @@ struct CompletedWorkoutView: View {
 
     private static func sourceDisplayName(_ source: String) -> String {
         switch source {
-        case "manual": "Self-logged"
-        case "device_detected": "Detected automatically"
-        default: "AI plan"
+        case "manual": String(localized: "completedWorkout.source.manual", defaultValue: "Self-logged", comment: "Completed workout: meta chip source label for a manually-logged activity")
+        case "device_detected": String(localized: "completedWorkout.source.deviceDetected", defaultValue: "Detected automatically", comment: "Completed workout: meta chip source label for an auto-detected activity")
+        default: String(localized: "completedWorkout.source.aiPlan", defaultValue: "AI plan", comment: "Completed workout: meta chip source label for an AI-generated plan")
         }
+    }
+
+    /// Prefers the already-localized RecommendationCategory display name --
+    /// log.category is the raw enum rawValue ("moderate", "push_hard"), and
+    /// simply capitalizing it (the previous behavior) always showed English
+    /// regardless of locale. Falls back to the capitalized raw value only
+    /// for a category string that doesn't match a known case.
+    private static func categoryDisplayName(_ category: String) -> String {
+        RecommendationCategory(rawValue: category)?.displayTitle ?? category.capitalized
     }
 
     private func metaChip(_ text: String) -> some View {
