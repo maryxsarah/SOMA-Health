@@ -1,4 +1,5 @@
 import SwiftUI
+import SuperwallKit
 
 /// Sheet shown when tapping the Home recommendation card. Everything here
 /// is fixed, template-driven content (per-category step target/workouts,
@@ -31,6 +32,11 @@ struct RecommendationDetailView: View {
     @State private var isLoadingAIPlan = false
     @State private var isRegenerating = false
     @State private var aiPlanError: String?
+    /// Set instead of `aiPlanError` specifically for a generation-limit
+    /// hit -- 13a turns that one case into a calm amber nudge with an
+    /// Upgrade link, distinct from the plain red text every other
+    /// generation-failure case still gets.
+    @State private var generationLimitMessage: String?
     /// True once "Add to today's plan" has been confirmed for `aiPlan` --
     /// distinct from `isCompletedToday` (a separate, later, explicit action).
     @State private var addedToPlan = false
@@ -168,28 +174,34 @@ struct RecommendationDetailView: View {
                             .padding(.top, 4)
                         }
 
-                        AIWorkoutPlanView(plan: aiPlan, goalEyebrow: goalBlockEyebrow)
-
-                        // 11d: fixed, non-LLM-generated safety note -- same
-                        // standing rule as the pregnancy disclaimer above.
-                        if !isCompletedToday {
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(SomaTokens.success)
-                                    .padding(.top, 1)
-                                Text("Weights start conservative — Soma adjusts from what you actually lift.")
-                                    .font(.caption)
-                                    .foregroundStyle(SomaTokens.ink3)
-                            }
-                            .padding(.top, 8)
-                        }
+                        // 13a: the conservative-weights note now lives
+                        // inside AIWorkoutPlanView itself, merged into the
+                        // same sentence/icon as the RPE explainer (used to
+                        // be two separate footnotes on two screens).
+                        AIWorkoutPlanView(plan: aiPlan, goalEyebrow: goalBlockEyebrow, isCompletedToday: isCompletedToday)
 
                         if isCompletedToday {
-                            Label("Workout completed today", systemImage: "crown.fill")
-                                .font(.subheadline.bold())
-                                .foregroundStyle(.yellow)
-                                .padding(.top, 10)
+                            // 13c: the house gel-gold-on-amber-surface
+                            // treatment, same recipe as the generation-limit
+                            // nudge below (rXL card, tinted fill) instead of
+                            // plain text -- this is the one badge on the
+                            // whole screen that reads "you're done," so it
+                            // gets a bit more visual weight than a caption.
+                            HStack(spacing: 10) {
+                                Image(systemName: "crown.fill")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 28, height: 28)
+                                    .background(Circle().fill(Color.yellow.gradient))
+                                Text("Workout completed today")
+                                    .font(.system(size: 13.5, weight: .bold))
+                                    .foregroundStyle(.orange)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 11)
+                            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(Color.orange.opacity(0.12)))
+                            .padding(.top, 10)
 
                             if isFetchingAddons {
                                 HStack {
@@ -212,7 +224,9 @@ struct RecommendationDetailView: View {
                                 .padding(.top, 6)
                             }
                         } else {
-                            if let aiPlanError {
+                            if let generationLimitMessage {
+                                generationLimitNudge(generationLimitMessage)
+                            } else if let aiPlanError {
                                 Text(aiPlanError)
                                     .font(.caption)
                                     .foregroundStyle(.red)
@@ -232,25 +246,34 @@ struct RecommendationDetailView: View {
                             // Committing (complete / add to plan) moved to
                             // the bottom bar -- one commitment area per
                             // screen (guide 00 §6), not buttons mid-card.
+                            // No upper bound -- an upper-bounded lineLimit
+                            // makes the field scroll its own text once full,
+                            // which fights the outer ScrollView's drag when
+                            // you touch down over the text itself.
                             TextField("Feedback for next time (optional)", text: $feedbackText, axis: .vertical)
                                 .textFieldStyle(.roundedBorder)
-                                .lineLimit(2...4)
+                                .lineLimit(2...)
                                 .padding(.top, 8)
                         }
                     } else if isLoadingAIPlan {
                         GenerationProgressView(estimatedSeconds: 8)
                             .padding(.top, 4)
                     } else {
-                        if let aiPlanError {
+                        if let generationLimitMessage {
+                            generationLimitNudge(generationLimitMessage)
+                        } else if let aiPlanError {
                             Text(aiPlanError)
                                 .font(.caption)
                                 .foregroundStyle(.red)
                         }
                         // Generation itself fires from the bottom bar's
                         // "Start workout" -- only the optional note lives here.
+                        // See the feedback field above -- no upper bound,
+                        // same reason (avoids the internal-scroll-vs-outer-
+                        // ScrollView drag conflict).
                         TextField("Anything Soma should know for today's workout? (optional)", text: $preGenerationNotes, axis: .vertical)
                             .textFieldStyle(.roundedBorder)
-                            .lineLimit(2...4)
+                            .lineLimit(2...)
                             .padding(.top, 4)
                     }
                 }
@@ -324,6 +347,37 @@ struct RecommendationDetailView: View {
             .foregroundStyle(SomaTokens.accent)
             .frame(width: 30, height: 30)
             .glassLens(cornerRadius: SomaTokens.rPill)
+    }
+
+    /// 13a: replaces the old plain-red error text for a generation-limit
+    /// hit with a calm amber nudge + a real "Upgrade" action -- the server
+    /// message itself is shown verbatim (it already spells out the current
+    /// tier's quota and reset timing), only the container changes.
+    private func generationLimitNudge(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(.orange))
+                .padding(.top, 1)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.orange)
+            Spacer(minLength: 8)
+            Button {
+                Superwall.shared.register(placement: "view_premium")
+            } label: {
+                Text(String(localized: "recommendationDetail.generationLimit.upgrade", defaultValue: "Upgrade", comment: "Button in the amber generation-limit nudge card that opens the premium paywall"))
+                    .font(.caption.bold())
+                    .foregroundStyle(SomaTokens.accent)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(Color.orange.opacity(0.12)))
+        .padding(.top, 4)
     }
 
     // MARK: - Why this? disclosure (was the "Why today" card)
@@ -668,8 +722,12 @@ struct RecommendationDetailView: View {
                                 .foregroundStyle(SomaTokens.ink4)
                         }
                     }
-                    .contentShape(Rectangle())
                     .padding(.vertical, 6)
+                    // Must come after the padding above, not before -- a
+                    // contentShape fixed on the pre-padding HStack leaves
+                    // the row's own vertical padding as a dead tap zone
+                    // (row visually spans it, but taps there don't land).
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 // Already the pick -- tapping again would be a no-op; only
@@ -862,6 +920,7 @@ struct RecommendationDetailView: View {
 
         if forceRegenerate { isRegenerating = true } else { isLoadingAIPlan = true }
         aiPlanError = nil
+        generationLimitMessage = nil
         defer { if forceRegenerate { isRegenerating = false } else { isLoadingAIPlan = false } }
         let trimmedNotes = preGenerationNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         AnalyticsManager.shared.promptSubmitted()
@@ -889,7 +948,9 @@ struct RecommendationDetailView: View {
         } catch SupabaseError.workoutLocked(let message) {
             aiPlanError = message
         } catch SupabaseError.generationLimitReached(let message) {
-            aiPlanError = message
+            // 13a: this specific case gets the amber nudge, not plain red
+            // text -- see generationLimitNudge.
+            generationLimitMessage = message
         } catch SupabaseError.serviceUnavailable {
             // Distinct from the generic case below -- an Anthropic-side
             // failure (rate limit, exhausted credits, bad key), not

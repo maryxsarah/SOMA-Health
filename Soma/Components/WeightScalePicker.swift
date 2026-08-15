@@ -55,7 +55,7 @@ struct WeightScalePicker: View {
             .frame(height: 72)
             .contentShape(Rectangle())
             .gesture(
-                DragGesture()
+                DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         if dragStartWeight == nil { dragStartWeight = weightKg }
                         let delta = Double(value.translation.width / pointsPerKg)
@@ -70,6 +70,9 @@ struct WeightScalePicker: View {
                     }
             )
         }
+        // Ticks off a whole-kg crossing, same feel as Apple Health's own
+        // scale picker -- fires on every integer, not every 0.1 snap.
+        .sensoryFeedback(.selection, trigger: Int(weightKg.rounded()))
     }
 }
 

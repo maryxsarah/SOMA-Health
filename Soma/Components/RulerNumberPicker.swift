@@ -58,7 +58,7 @@ struct RulerNumberPicker: View {
             // Stable hook for XCUITest drags (see UITests/CASES.md).
             .accessibilityIdentifier("ruler-number-picker")
             .gesture(
-                DragGesture()
+                DragGesture(minimumDistance: 0)
                     .onChanged { drag in
                         if dragStartValue == nil { dragStartValue = value }
                         let delta = Double(drag.translation.width / pointsPerUnit)
@@ -73,6 +73,9 @@ struct RulerNumberPicker: View {
                     }
             )
         }
+        // Ticks off a whole-unit crossing, same feel as Apple Health's own
+        // scale picker -- fires on every integer, not every `step` snap.
+        .sensoryFeedback(.selection, trigger: Int(value.rounded()))
     }
 }
 
