@@ -287,6 +287,12 @@ Deno.serve(async (req: Request) => {
     const languageCode = normalizeLanguageCode(body.language);
     const language = languageName(body.language);
     const notes: string | undefined = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : undefined;
+    // "Regenerate" (11d): the user wants a fresh take on the SAME
+    // selection, not just whatever's already cached for today. Only
+    // bypasses the cache-hit return below -- the already-logged guard a
+    // few lines down still wins regardless, so a completed workout can
+    // never be swapped out from under its own log.
+    const forceRegenerate = body.forceRegenerate === true;
     const targetDurationRange: DurationRange | undefined =
       body.targetDurationRange && typeof body.targetDurationRange.min === "number" && typeof body.targetDurationRange.max === "number"
         ? body.targetDurationRange
@@ -390,6 +396,7 @@ Deno.serve(async (req: Request) => {
       (cachedInjurySignature !== null ? cachedInjurySignature === injurySignature : injurySignature === "");
     if (
       cached && cached.selected_title === selection.title &&
+      (cachedSelectionLogged || !forceRegenerate) &&
       (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged) &&
       (cachedLanguage === null || cachedLanguage === languageCode || cachedSelectionLogged) &&
       injurySignatureOk

@@ -84,7 +84,7 @@ struct GymPhotoWorkoutView: View {
                         }
                         .padding(20)
                     }
-                    .somaBackground()
+                    .somaSheetBackground()
                 }
             }
             .navigationTitle(step == .result ? "" : "Scan your gym")
@@ -129,26 +129,96 @@ struct GymPhotoWorkoutView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
 
-            Button {
-                Task { await startCamera() }
-            } label: {
-                Label("Take a photo", systemImage: "camera.fill")
-            }
-            .buttonStyle(.borderedProminent)
+            photoDropZone
 
-            libraryPicker(fullWidth: false)
+            HStack(spacing: 10) {
+                SomaButton(title: "Take photo", size: .md, variant: .primary) {
+                    Task { await startCamera() }
+                }
+                libraryPicker(fullWidth: true, title: "Choose photo", showIcon: false)
+            }
+
+            analysisPreview
         }
         .frame(maxWidth: .infinity)
     }
 
+    /// Decorative preview of the drop target -- the actual tap targets are
+    /// the buttons below it, this is just the "Then, while Soma looks"
+    /// invitation the mockup leads with.
+    private var photoDropZone: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "camera")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(SomaTokens.accent)
+                .frame(width: 56, height: 56)
+                .glassLens(cornerRadius: 28)
+
+            Text("Take or choose a photo")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink2)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 220)
+        .background(
+            RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
+                .fill(Color.white.opacity(0.35))
+                .overlay(
+                    RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
+                        .strokeBorder(SomaTokens.accent.opacity(0.28), style: StrokeStyle(lineWidth: 2, dash: [7, 6]))
+                )
+        )
+    }
+
+    /// A preview of `loadingContent`'s own stage copy for `.analyzing` --
+    /// sets expectations before the tap, at ascending opacity to read as
+    /// "this is coming up next", not as live progress.
+    private var analysisPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("THEN, WHILE SOMA LOOKS")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(SomaTokens.inkPlaceholder)
+
+            analysisPreviewLine("Looking at your photo…", opacity: 0.5)
+            analysisPreviewLine("Identifying equipment…", opacity: 0.75)
+            analysisPreviewLine("Checking what's usable…", opacity: 1)
+        }
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func analysisPreviewLine(_ text: String, opacity: Double) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(SomaTokens.accent)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(SomaTokens.ink2)
+        }
+        .opacity(opacity)
+    }
+
     /// The library-pick affordance, shared by the pick step and the
     /// camera-blocked explainer so copy/filter/icon changes happen once.
-    private func libraryPicker(fullWidth: Bool) -> some View {
+    private func libraryPicker(fullWidth: Bool, title: LocalizedStringKey = "Choose from library", showIcon: Bool = true) -> some View {
         PhotosPicker(selection: $photoItem, matching: .images) {
-            Label("Choose from library", systemImage: "photo.on.rectangle")
-                .frame(maxWidth: fullWidth ? .infinity : nil)
+            Group {
+                if showIcon {
+                    Label(title, systemImage: "photo.on.rectangle")
+                } else {
+                    Text(title)
+                }
+            }
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(SomaTokens.accent)
+            .frame(maxWidth: fullWidth ? .infinity : nil)
+            .frame(height: 46)
+            .padding(.horizontal, 18)
+            .glassLens()
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
     }
 
     /// Shown instead of the camera when access isn't granted. Without
@@ -190,20 +260,16 @@ struct GymPhotoWorkoutView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.systemGray6)))
+            .glassCardFlat(cornerRadius: 16)
 
             VStack(spacing: 10) {
                 // Restricted devices have no Soma camera toggle to reach,
                 // so sending them to the app's settings page would be a
                 // dead end -- only the recoverable case gets the button.
                 if !cameraRestricted {
-                    Button {
+                    SomaButton(title: "Open Settings", size: .lg, variant: .primary) {
                         SystemSettings.open()
-                    } label: {
-                        Text("Open Settings")
-                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
 
                 libraryPicker(fullWidth: true)
@@ -331,7 +397,7 @@ struct GymPhotoWorkoutView: View {
                         .font(.caption.bold())
                         .tracking(1)
                 }
-                .foregroundStyle(Theme.pillFill)
+                .foregroundStyle(SomaTokens.accent)
 
                 Text(resultPlan != nil
                     ? "Based on your setup and health, here's today's workout to reach your goal:"
@@ -369,15 +435,20 @@ struct GymPhotoWorkoutView: View {
                         Button {
                             Task { await addToTodaysPlan() }
                         } label: {
-                            if isAddingToPlan {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Text("Add to today's plan")
-                                    .frame(maxWidth: .infinity)
+                            Group {
+                                if isAddingToPlan {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Text("Add to today's plan")
+                                }
                             }
+                            .font(.system(size: 16.5, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .foregroundStyle(.white)
+                        .glassGel(.blue)
                         .disabled(isAddingToPlan)
                         .padding(.top, 4)
 
@@ -385,13 +456,9 @@ struct GymPhotoWorkoutView: View {
                         // workout stays on screen (resultPlan is never
                         // cleared by this tap), it's just a re-entry into
                         // the equipment step in case the plan isn't right.
-                        Button {
+                        SomaButton(title: "Adjust manually", size: .lg, variant: .secondary) {
                             step = .confirmingEquipment
-                        } label: {
-                            Text("Adjust manually")
-                                .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
                     }
                 }
             }
@@ -403,19 +470,9 @@ struct GymPhotoWorkoutView: View {
     }
 
     private func equipmentChip(_ item: String) -> some View {
-        HStack(spacing: 4) {
-            Text(item)
-                .font(.subheadline.weight(.medium))
-            Button {
-                equipment.removeAll { $0 == item }
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.caption)
-            }
+        SomaChip(title: LocalizedStringKey(item), isSelected: true, showsRemoveIcon: true) {
+            equipment.removeAll { $0 == item }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Capsule().fill(Color(.systemGray6)))
     }
 
     private func addEquipment() {

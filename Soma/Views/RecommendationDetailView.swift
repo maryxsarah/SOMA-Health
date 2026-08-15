@@ -7,6 +7,7 @@ import SwiftUI
 struct RecommendationDetailView: View {
     let recommendation: DailyRecommendation
 
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
 
     @State private var snapshots: [DailySnapshotRow] = []
@@ -28,6 +29,7 @@ struct RecommendationDetailView: View {
     /// window later, instead of the whole day.
     @State private var planStartedAt: Date?
     @State private var isLoadingAIPlan = false
+    @State private var isRegenerating = false
     @State private var aiPlanError: String?
     /// True once "Add to today's plan" has been confirmed for `aiPlan` --
     /// distinct from `isCompletedToday` (a separate, later, explicit action).
@@ -83,13 +85,18 @@ struct RecommendationDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                // 11a: this sheet had no visible dismiss affordance at all
+                // (swipe-down only) -- a back chevron + "TODAY" eyebrow row,
+                // same glass-circle recipe as the step pill/section icons.
+                topNavRow
+
                 // Guide 04 header sheet: serif category, ONE line of
                 // guidance, then a row pairing the "Why this?" disclosure
                 // with the step tracker pill. The prose that used to fill
                 // the top 40% of the screen now lives in the disclosure.
                 VStack(alignment: .leading, spacing: 10) {
                     Text(recommendation.category.displayTitle)
-                        .font(.system(size: 34, design: .serif).italic())
+                        .font(SomaType.screenTitle)
                     Text(recommendation.message)
                         .font(.system(size: 14))
                         .foregroundStyle(SomaTokens.ink2)
@@ -108,9 +115,12 @@ struct RecommendationDetailView: View {
                 }
 
                 CardView {
-                    Text("AI-generated workout")
-                        .font(.body.bold())
-                    Text("Exact exercises, sets, weights, and how to do each one -- built around the workout you picked above.")
+                    HStack(spacing: 9) {
+                        sectionIcon("sparkles")
+                        Text("AI-generated workout")
+                            .font(.body.bold())
+                    }
+                    Text("Exact exercises, sets, weights, and how to do each one — built around the workout you picked above.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -126,7 +136,54 @@ struct RecommendationDetailView: View {
                     }
 
                     if let aiPlan {
+                        // 11d: "Try another" becomes "Regenerate", same icon
+                        // same spot -- once a plan exists the choice is
+                        // made, so pickCard's own reshuffle affordance hides
+                        // (see `pickCard`) and this one takes over instead.
+                        if !isCompletedToday {
+                            HStack {
+                                Text("YOUR WORKOUT")
+                                    .font(SomaType.eyebrow)
+                                    .tracking(0.7)
+                                    .foregroundStyle(SomaTokens.accent)
+                                Spacer()
+                                Button {
+                                    Task { await loadAIPlan(forceRegenerate: true) }
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        if isRegenerating {
+                                            ProgressView().controlSize(.mini)
+                                        } else {
+                                            Image(systemName: "arrow.triangle.2.circlepath")
+                                                .font(.system(size: 12, weight: .semibold))
+                                        }
+                                        Text("Regenerate")
+                                            .font(.system(size: 12.5, weight: .semibold))
+                                    }
+                                    .foregroundStyle(SomaTokens.accent)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isRegenerating)
+                            }
+                            .padding(.top, 4)
+                        }
+
                         AIWorkoutPlanView(plan: aiPlan, goalEyebrow: goalBlockEyebrow)
+
+                        // 11d: fixed, non-LLM-generated safety note -- same
+                        // standing rule as the pregnancy disclaimer above.
+                        if !isCompletedToday {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(SomaTokens.success)
+                                    .padding(.top, 1)
+                                Text("Weights start conservative — Soma adjusts from what you actually lift.")
+                                    .font(.caption)
+                                    .foregroundStyle(SomaTokens.ink3)
+                            }
+                            .padding(.top, 8)
+                        }
 
                         if isCompletedToday {
                             Label("Workout completed today", systemImage: "crown.fill")
@@ -215,21 +272,58 @@ struct RecommendationDetailView: View {
                 }
 
                 CardView {
-                    Text("Look out for tomorrow")
-                        .font(.body.bold())
-                    Text(personalizedTomorrowTip)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    HStack(alignment: .top, spacing: 12) {
+                        sectionIcon("moon.fill")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Look out for tomorrow")
+                                .font(.body.bold())
+                            Text(personalizedTomorrowTip)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .padding(20)
             .padding(.bottom, 90)
         }
         .safeAreaInset(edge: .bottom) { bottomBar }
-        .somaBackground()
+        .somaSheetBackground()
         .task {
             await loadContext()
         }
+    }
+
+    // MARK: - Top nav row
+
+    private var topNavRow: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(SomaTokens.accent)
+                    .frame(width: 40, height: 40)
+                    .glassLens(cornerRadius: SomaTokens.rPill)
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            Text("TODAY")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.8)
+                .foregroundStyle(SomaTokens.ink4)
+            Spacer()
+            Color.clear.frame(width: 40, height: 40)
+        }
+    }
+
+    /// Small glass-circle icon badge -- same recipe as `topNavRow`'s
+    /// chevron, just 30pt, for the AI-workout/tomorrow-tip card headers.
+    private func sectionIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 13, weight: .regular))
+            .foregroundStyle(SomaTokens.accent)
+            .frame(width: 30, height: 30)
+            .glassLens(cornerRadius: SomaTokens.rPill)
     }
 
     // MARK: - Why this? disclosure (was the "Why today" card)
@@ -379,11 +473,13 @@ struct RecommendationDetailView: View {
                 .foregroundStyle(reached ? SomaTokens.success : SomaTokens.accentDeep)
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(
-                    Capsule()
-                        .fill(reached ? SomaTokens.successSoft : SomaTokens.surface)
-                        .overlay(Capsule().stroke(reached ? SomaTokens.successSoft : SomaTokens.hairline, lineWidth: 1))
-                )
+                .background {
+                    if reached {
+                        Capsule().fill(SomaTokens.successSoft)
+                    } else {
+                        Color.clear.glassLens()
+                    }
+                }
             } else if appState.connectedProviders.isEmpty {
                 // No device at all -- say so instead of a silent target.
                 // (Step counts come from Apple Health on-device; Oura/Whoop
@@ -397,11 +493,7 @@ struct RecommendationDetailView: View {
                 .foregroundStyle(SomaTokens.ink3)
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(
-                    Capsule()
-                        .fill(SomaTokens.surface)
-                        .overlay(Capsule().stroke(SomaTokens.hairline, lineWidth: 1))
-                )
+                .glassLens()
             } else {
                 // A device is connected but reported no steps (yet) --
                 // state the target plainly rather than fabricating a count.
@@ -410,11 +502,7 @@ struct RecommendationDetailView: View {
                     .foregroundStyle(SomaTokens.accentDeep)
                     .padding(.horizontal, 10)
                     .frame(height: 30)
-                    .background(
-                        Capsule()
-                            .fill(SomaTokens.surface)
-                            .overlay(Capsule().stroke(SomaTokens.hairline, lineWidth: 1))
-                    )
+                    .glassLens()
             }
         }
     }
@@ -443,7 +531,10 @@ struct RecommendationDetailView: View {
                     .tracking(0.5)
                     .foregroundStyle(SomaTokens.accent)
                 Spacer()
-                if !isCompletedToday {
+                // 11d: hides once a plan exists -- the choice is made, and
+                // "Regenerate" (inside the AI-workout card below) takes over
+                // as this screen's one reshuffle affordance.
+                if !isCompletedToday, aiPlan == nil {
                     Button {
                         shuffleSeed += 1
                         selectTopSuggestion()
@@ -470,13 +561,19 @@ struct RecommendationDetailView: View {
                 pickTile(label: "Exercises", value: pickExerciseCountText)
             }
 
-            Text(isCompletedToday
-                ? String(localized: "recommendationDetail.pickStatus.completed", defaultValue: "Today's pick, completed.", comment: "Pick-card status line once today's workout has been logged as complete")
-                : aiPlan != nil
-                    ? String(localized: "recommendationDetail.pickStatus.planReady", defaultValue: "Exact sets, weights and how to do each one — ready below.", comment: "Pick-card status line once an AI plan has been generated")
-                    : String(localized: "recommendationDetail.pickStatus.planPending", defaultValue: "Exact sets, weights and how to do each one — built when you start.", comment: "Pick-card status line before an AI plan has been generated"))
-                .font(.caption)
-                .foregroundStyle(SomaTokens.ink3)
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(SomaTokens.success)
+                    .padding(.top, 1)
+                Text(isCompletedToday
+                    ? String(localized: "recommendationDetail.pickStatus.completed", defaultValue: "Today's pick, completed.", comment: "Pick-card status line once today's workout has been logged as complete")
+                    : aiPlan != nil
+                        ? String(localized: "recommendationDetail.pickStatus.planReady", defaultValue: "Exact sets, weights and how to do each one — ready below.", comment: "Pick-card status line once an AI plan has been generated")
+                        : String(localized: "recommendationDetail.pickStatus.planPending", defaultValue: "Exact sets, weights and how to do each one — built when you start.", comment: "Pick-card status line before an AI plan has been generated"))
+                    .font(.caption)
+                    .foregroundStyle(SomaTokens.ink3)
+            }
         }
     }
 
@@ -521,10 +618,7 @@ struct RecommendationDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous)
-                .fill(SomaTokens.surface3)
-        )
+        .glassCardFlat(cornerRadius: SomaTokens.rMD)
     }
 
     // MARK: - Alternatives (guide 04: single-line rows, choosing opens it)
@@ -552,15 +646,22 @@ struct RecommendationDetailView: View {
                             Text(suggestion.title)
                                 .font(.system(size: 14, weight: .medium))
                                 .multilineTextAlignment(.leading)
+                                // Muted once selected -- this same title is
+                                // already the pick card's own headline right
+                                // above, at full emphasis; repeating that
+                                // emphasis here would just be visual noise.
+                                .foregroundStyle(isSelected ? SomaTokens.ink4 : SomaTokens.ink)
                             Text("\(suggestion.bodyPart.displayName) · \(suggestion.equipment.displayName)")
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(SomaTokens.ink4)
                         }
                         Spacer()
                         if isSelected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(SomaTokens.accent)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 22, height: 22)
+                                .glassGel(.blue, cornerRadius: 11)
                         } else {
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 12, weight: .semibold))
@@ -616,6 +717,17 @@ struct RecommendationDetailView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 22)
+            // Docks over a fade, not a hard white bar -- scrolled content
+            // (the alternatives list, tomorrow's tip) reads through softly
+            // instead of hard-clipping under an opaque strip.
+            .background(
+                LinearGradient(
+                    colors: [SomaTokens.surface.opacity(0), SomaTokens.surface.opacity(0.85), SomaTokens.surface.opacity(0.98)],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .padding(.top, -34)
+                .allowsHitTesting(false)
+            )
         }
     }
 
@@ -740,12 +852,17 @@ struct RecommendationDetailView: View {
     /// looking the title up in `recommendation.category.workoutSuggestions`
     /// -- a gym-photo-generated workout's title/bodyPart aren't in that
     /// fixed list, so a lookup would silently fail for it.
-    private func loadAIPlan() async {
+    /// `forceRegenerate` is 11d's "Regenerate" -- same call, just telling
+    /// the server to skip today's cached plan for this selection and build
+    /// a fresh one. Shares this function (rather than a near-duplicate)
+    /// since both are "get me a plan for the current selection", differing
+    /// only in whether the cache is honored and which loading flag to flip.
+    private func loadAIPlan(forceRegenerate: Bool = false) async {
         guard let selectedTitle, let selectedBodyPart else { return }
 
-        isLoadingAIPlan = true
+        if forceRegenerate { isRegenerating = true } else { isLoadingAIPlan = true }
         aiPlanError = nil
-        defer { isLoadingAIPlan = false }
+        defer { if forceRegenerate { isRegenerating = false } else { isLoadingAIPlan = false } }
         let trimmedNotes = preGenerationNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         AnalyticsManager.shared.promptSubmitted()
         do {
@@ -754,7 +871,8 @@ struct RecommendationDetailView: View {
                 selectedTitle: selectedTitle,
                 selectedBodyPart: selectedBodyPart,
                 notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
-                targetDurationMinutes: selectedDurationRange
+                targetDurationMinutes: selectedDurationRange,
+                forceRegenerate: forceRegenerate
             )
             AnalyticsManager.shared.aiResponseReceived()
             if planStartedAt == nil { planStartedAt = Date() }
@@ -937,11 +1055,9 @@ struct RecommendationDetailView: View {
                 .font(.subheadline)
             HStack(spacing: 10) {
                 ForEach([InjuryCheckinResponse.better, .same, .worse], id: \.self) { response in
-                    Button(Self.checkinResponseLabel(response)) {
+                    SomaChip(title: LocalizedStringKey(Self.checkinResponseLabel(response))) {
                         Task { await submitCheckin(tag: state.injuryTag, response: response) }
                     }
-                    .buttonStyle(.bordered)
-                    .font(.caption.bold())
                 }
             }
         }

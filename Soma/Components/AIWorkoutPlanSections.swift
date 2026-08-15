@@ -74,6 +74,15 @@ struct AIWorkoutPlanView: View {
         plan.warmUp + plan.blocks.flatMap(\.exercises) + plan.coolDown
     }
 
+    /// 11d: exercises arrive numbered in one continuous sequence spanning
+    /// warm-up/blocks/cool-down, not restarting per phase.
+    private var exerciseNumbers: [String: Int] {
+        // uniquingKeysWith, not uniqueKeysWithValues: the backend's dedup is
+        // only best-effort, so a repeated exercise name (== AIExercise.id)
+        // across warm-up/blocks/cool-down must not crash the plan's render.
+        Dictionary(allExercises.enumerated().map { ($1.id, $0 + 1) }, uniquingKeysWith: { first, _ in first })
+    }
+
     private func aiPhaseSection(title: LocalizedStringKey, exercises: [AIExercise]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
@@ -118,6 +127,7 @@ struct AIWorkoutPlanView: View {
 
     private func aiExerciseRow(_ exercise: AIExercise) -> some View {
         let isDone = checkedExerciseIDs.contains(exercise.id)
+        let number = exerciseNumbers[exercise.id] ?? 1
         return HStack(alignment: .top, spacing: 10) {
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -128,12 +138,23 @@ struct AIWorkoutPlanView: View {
                     }
                 }
             } label: {
-                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 21))
-                    .foregroundStyle(isDone ? SomaTokens.success : SomaTokens.ink4)
+                // 11d: unchecked = a numbered glass lens badge (position in
+                // the plan), checked = the same green checkmark as before --
+                // tapping still toggles session-local completion either way.
+                if isDone {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 21))
+                        .foregroundStyle(SomaTokens.success)
+                } else {
+                    Text("\(number)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(SomaTokens.accent)
+                        .frame(width: 26, height: 26)
+                        .glassLens(cornerRadius: SomaTokens.rPill)
+                }
             }
             .buttonStyle(.plain)
-            .padding(.top, 7)
+            .padding(.top, 4)
 
             Button {
                 selectedExercise = exercise

@@ -56,7 +56,7 @@ struct SignUpConsentStepView: View {
                 }
             }
             .padding(20)
-            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.white))
+            .glassCard(cornerRadius: 20)
             .padding(.horizontal, 24)
 
             Spacer()
@@ -85,9 +85,9 @@ struct SignUpConsentStepView: View {
             isOn.wrappedValue.toggle()
         } label: {
             HStack(alignment: .top, spacing: 12) {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(isOn.wrappedValue ? Theme.pillFill : Color(.systemGray4), lineWidth: 2)
-                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(isOn.wrappedValue ? Theme.pillFill : .clear))
+                RoundedRectangle(cornerRadius: SomaTokens.rCheck, style: .continuous)
+                    .strokeBorder(isOn.wrappedValue ? SomaTokens.accent : Color(.systemGray4), lineWidth: 2)
+                    .background(RoundedRectangle(cornerRadius: SomaTokens.rCheck, style: .continuous).fill(isOn.wrappedValue ? SomaTokens.accent : .clear))
                     .frame(width: 22, height: 22)
                     .overlay(
                         Image(systemName: "checkmark")

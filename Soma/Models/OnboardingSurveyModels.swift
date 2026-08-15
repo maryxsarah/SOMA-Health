@@ -44,9 +44,9 @@ enum WorkoutFrequency: String, Codable, CaseIterable, Identifiable {
     }
     var systemImageName: String {
         switch self {
-        case .zeroToTwo: "circle.fill"
-        case .threeToFive: "square.grid.3x1.fill"
-        case .sixPlus: "square.grid.3x3.fill"
+        case .zeroToTwo: "dial.low.fill"
+        case .threeToFive: "dial.medium.fill"
+        case .sixPlus: "dial.high.fill"
         }
     }
 }

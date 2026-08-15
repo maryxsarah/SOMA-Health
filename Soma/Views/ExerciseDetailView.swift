@@ -89,9 +89,9 @@ struct ExerciseDetailView: View {
             // A lightweight placeholder, not a full-sheet blocker -- the
             // rest of the sheet (name/sets/reps/coaching cue above) is
             // already visible and interactive while this resolves.
-            RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous)
-                .fill(Color(.systemGray6))
+            Color.clear
                 .frame(height: 220)
+                .glassCard(cornerRadius: SomaTokens.r2XL)
                 .overlay(SomaLoadingBar())
         } else {
             noMediaPlaceholder
@@ -106,7 +106,7 @@ struct ExerciseDetailView: View {
         }
         .tabViewStyle(.page)
         .frame(height: 260)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
+        .glassCard(cornerRadius: SomaTokens.r2XL)
         .clipShape(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous))
     }
 
@@ -120,7 +120,7 @@ struct ExerciseDetailView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, minHeight: 180)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
+        .glassCard(cornerRadius: SomaTokens.r2XL)
     }
 
     private func tagsRow(_ entry: ExerciseLibraryEntry) -> some View {

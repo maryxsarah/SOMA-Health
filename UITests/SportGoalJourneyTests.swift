@@ -1,6 +1,6 @@
 import XCTest
 
-/// The sport-goal journeys from UITests/CASES.md (J1–J14), run against the
+/// The sport-goal journeys from UITests/CASES.md (J1–J17), run against the
 /// in-app fixture stub (UITestSupport.swift): `--ui-test-fixtures` +
 /// UITEST_SCENARIO select the world each test starts in. No real network.
 final class SportGoalJourneyTests: XCTestCase {
@@ -51,22 +51,26 @@ final class SportGoalJourneyTests: XCTestCase {
         goalRow.tap()
     }
 
-    // MARK: - J1 · SGP-B1 + SGP-A5
+    /// Taps the dock's "Goals" icon -- the only way into the sport-goal
+    /// flow now that the old promo-card + 4-slide onboarding popup front
+    /// door is gone (HomeView.openSportGoal: "the feature is opt-in now,
+    /// so the dock's Goals icon goes straight to sport selection instead
+    /// of forcing the first-time onboarding gallery in front of it"). The
+    /// icon itself is a stable nav anchor whether or not the catalog is
+    /// dark -- SportGoalFlowView decides what to show once it opens.
+    private func openSportGoalFlow(_ app: XCUIApplication) {
+        let goalsButton = app.buttons["dock-goals-button"]
+        XCTAssertTrue(goalsButton.waitForExistence(timeout: 20), "Home's dock should show the Goals icon")
+        goalsButton.tap()
+    }
+
+    // MARK: - J1 · SGP-B1 (SGP-A5's onboarding-popup gallery no longer
+    // exists -- the dock's Goals icon goes straight to sport selection now)
 
     func test_SGP_B1_createJumpGoal() {
         let app = launch(scenario: "catalogOpen")
 
-        // Beta front door + first-tap onboarding popup (SGP-A5).
-        let promo = text(app, containing: "Train for your sport")
-        XCTAssertTrue(promo.waitForExistence(timeout: 20), "Promo card should show while the catalog is open")
-        promo.tap()
-        let skip = app.buttons["Skip — I'll find it later"]
-        XCTAssertTrue(skip.waitForExistence(timeout: 10), "First tap must show the 4-slide popup")
-        skip.tap()
-
-        // Second tap goes straight to the sport list.
-        XCTAssertTrue(promo.waitForExistence(timeout: 10))
-        promo.tap()
+        openSportGoalFlow(app)
         XCTAssertTrue(text(app, containing: "What do you train for?").waitForExistence(timeout: 10))
         app.buttons.matching(NSPredicate(format: "label CONTAINS 'Volleyball'")).firstMatch.tap()
 
@@ -87,7 +91,16 @@ final class SportGoalJourneyTests: XCTestCase {
 
         let start = app.buttons["Start the block"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
+        // GoalStartView's content (measure card + baseline ruler + target
+        // card + phase strip) runs past one screen -- same "scroll down to
+        // the CTA" need as CustomGoalFormView (J7), same two-swipe fallback.
+        app.swipeUp()
+        if !start.isHittable { app.swipeUp() }
         start.tap()
+        sleep(3)
+        let debugShot = XCTAttachment(screenshot: app.screenshot())
+        debugShot.lifetime = .keepAlways
+        add(debugShot)
 
         // The flow lands on the hub for the new goal.
         XCTAssertTrue(text(app, containing: "VOLLEYBALL · GOAL").waitForExistence(timeout: 15))
@@ -265,10 +278,7 @@ final class SportGoalJourneyTests: XCTestCase {
     func test_SGP_B4_createCoachTask() {
         let app = launch(scenario: "customCoachFlow")
 
-        let promo = text(app, containing: "Train for your sport")
-        XCTAssertTrue(promo.waitForExistence(timeout: 20))
-        promo.tap()
-
+        openSportGoalFlow(app)
         XCTAssertTrue(text(app, containing: "What do you train for?").waitForExistence(timeout: 10))
         app.buttons.matching(NSPredicate(format: "label CONTAINS 'Volleyball'")).firstMatch.tap()
 
@@ -409,12 +419,20 @@ final class SportGoalJourneyTests: XCTestCase {
     func test_SGP_A4_betaToggleOpensCatalog() {
         let app = launch(scenario: "betaGate")
 
-        // Catalog is dark: readiness card renders, but no front door.
+        // Catalog is dark: readiness card renders. The dock's Goals icon
+        // is a stable nav anchor either way now (same "always present, the
+        // destination decides" posture as Scan gym) -- opening it must show
+        // the calm unavailable card, never the real sport list.
         XCTAssertTrue(app.buttons["Start workout"].waitForExistence(timeout: 20))
-        XCTAssertFalse(text(app, containing: "Train for your sport").exists,
-                       "Dark catalog must mean zero sport-goal entry points")
+        openSportGoalFlow(app)
+        XCTAssertTrue(text(app, containing: "Goals aren't available right now").waitForExistence(timeout: 15),
+                      "Dark catalog must show the calm unavailable card, never the real sport list")
+        dismissSheet(app)
 
-        // Profile → Account → "Sport goals (beta)" toggle.
+        // Profile → Account → "Sport goals (beta)" toggle. Profile is only
+        // reachable through the dock's "More" sheet now (Soma Glass 3a has
+        // no nav-pill row above the week strip).
+        app.buttons["dock-more-button"].tap()
         app.buttons["profile-button"].tap()
         let accountTab = app.buttons["Account"]
         XCTAssertTrue(accountTab.waitForExistence(timeout: 15))
@@ -423,11 +441,12 @@ final class SportGoalJourneyTests: XCTestCase {
         let toggle = app.switches.firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         toggle.tap()
-
-        // Closing Profile refetches the catalog — the front door appears.
         dismissSheet(app)
-        XCTAssertTrue(text(app, containing: "Train for your sport").waitForExistence(timeout: 20),
-                      "Opting in must reveal the promo card in the same session")
+
+        // Closing Profile refetches the catalog — the real sport list opens now.
+        openSportGoalFlow(app)
+        XCTAssertTrue(text(app, containing: "What do you train for?").waitForExistence(timeout: 20),
+                      "Opting in must reveal the real catalog in the same session")
     }
 
     // MARK: - J15 · SGP-B8/B9 — coach-assignment AI assist
@@ -445,9 +464,7 @@ final class SportGoalJourneyTests: XCTestCase {
     func test_SGP_B8_autoFillAssignmentFromTextThenLowConfidence() {
         let app = launch(scenario: "customCoachFlow")
 
-        let promo = text(app, containing: "Train for your sport")
-        XCTAssertTrue(promo.waitForExistence(timeout: 20))
-        promo.tap()
+        openSportGoalFlow(app)
         XCTAssertTrue(text(app, containing: "What do you train for?").waitForExistence(timeout: 10))
         app.buttons.matching(NSPredicate(format: "label CONTAINS 'Volleyball'")).firstMatch.tap()
         let customRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "coach's task")).firstMatch
@@ -493,10 +510,12 @@ final class SportGoalJourneyTests: XCTestCase {
             formatter.string(from: Date().addingTimeInterval(TimeInterval(-daysAgo * 86400)))
         }
 
+        // No crown assertion here -- the week strip's crown glyph isn't
+        // part of the Soma Glass 3a design (removed; the underlying
+        // `bestReadinessDate` data still feeds DayDetailView's own "Best
+        // readiness of the week" line, just not an inline strip icon).
         let todayStar = app.images["calendarStar-\(dateString(daysAgo: 0))"]
-        let todayCrown = app.images["calendarCrown-\(dateString(daysAgo: 0))"]
         XCTAssertTrue(todayStar.waitForExistence(timeout: 20), "today has a real goal_block, star should show")
-        XCTAssertTrue(todayCrown.waitForExistence(timeout: 5), "star and crown must coexist on the same day")
 
         let twoDaysAgoStar = app.images["calendarStar-\(dateString(daysAgo: 2))"]
         XCTAssertTrue(twoDaysAgoStar.waitForExistence(timeout: 5))
@@ -510,14 +529,7 @@ final class SportGoalJourneyTests: XCTestCase {
     func test_SGP_B10_presetGoalGetsScheduleAndNamedProgram() {
         let app = launch(scenario: "catalogOpen")
 
-        let promo = text(app, containing: "Train for your sport")
-        XCTAssertTrue(promo.waitForExistence(timeout: 20))
-        promo.tap()
-        let skip = app.buttons["Skip — I'll find it later"]
-        XCTAssertTrue(skip.waitForExistence(timeout: 10))
-        skip.tap()
-        XCTAssertTrue(promo.waitForExistence(timeout: 10))
-        promo.tap()
+        openSportGoalFlow(app)
         XCTAssertTrue(text(app, containing: "What do you train for?").waitForExistence(timeout: 10))
         app.buttons.matching(NSPredicate(format: "label CONTAINS 'Volleyball'")).firstMatch.tap()
 
@@ -534,7 +546,11 @@ final class SportGoalJourneyTests: XCTestCase {
                       "the matched band's program name should render pre-creation")
 
         // Schedule step: pick specific weekdays instead of the 2/3/4x default.
-        let customChip = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Custom")).firstMatch
+        // "Custom…" (with the ellipsis), not bare "Custom" -- Home's new
+        // "Custom training" toggle button also matches a loose CONTAINS
+        // "Custom" predicate and can still be present (non-hittable, but
+        // matchable) underneath this sheet, making firstMatch ambiguous.
+        let customChip = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Custom…")).firstMatch
         XCTAssertTrue(customChip.waitForExistence(timeout: 5))
         customChip.tap()
         let weekdaysRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Specific weekdays")).firstMatch
@@ -546,6 +562,8 @@ final class SportGoalJourneyTests: XCTestCase {
 
         let start = app.buttons["Start the block"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
+        app.swipeUp()
+        if !start.isHittable { app.swipeUp() }
         start.tap()
 
         // Hub: the named program persists post-creation, and the new

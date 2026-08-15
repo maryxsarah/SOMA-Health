@@ -83,7 +83,8 @@ struct GoalKindBadge: View {
                 .foregroundStyle(isAccent ? SomaTokens.accent : SomaTokens.ink2)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
-                .background(Capsule().fill(isAccent ? SomaTokens.accentSoft : SomaTokens.surface4))
+                .background(Capsule().fill(isAccent ? SomaTokens.accentSoft : SomaTokens.surface3))
+                .overlay(Capsule().strokeBorder(isAccent ? SomaTokens.accentSoft22 : SomaTokens.hairline, lineWidth: 1))
         }
     }
 }
@@ -112,12 +113,20 @@ struct WeekdayMiniPicker: View {
                 Button {
                     if isOn { selected.remove(day) } else { selected.insert(day) }
                 } label: {
-                    Text(Self.labels[index])
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isOn ? SomaTokens.accent : SomaTokens.ink3)
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(isOn ? SomaTokens.accentSoft : SomaTokens.surface))
-                        .overlay(Circle().strokeBorder(isOn ? SomaTokens.accent : SomaTokens.hairline, lineWidth: isOn ? 2 : 1))
+                    Group {
+                        if isOn {
+                            Text(Self.labels[index])
+                                .font(.system(size: 13, weight: .semibold))
+                                .frame(width: 34, height: 34)
+                                .glassGel(.blue, cornerRadius: 17)
+                        } else {
+                            Text(Self.labels[index])
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(SomaTokens.ink3)
+                                .frame(width: 34, height: 34)
+                                .glassLens(cornerRadius: 17)
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
                 // Labels alone are ambiguous ("T"/"S" repeat) -- a stable
@@ -284,11 +293,8 @@ struct GoalConflictWarningView: View {
                     .foregroundStyle(SomaTokens.warn)
                     .frame(maxWidth: .infinity)
                     .frame(height: 40)
-                    .background(
-                        RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous)
-                            .fill(SomaTokens.surface)
-                            .overlay(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).stroke(SomaTokens.warnLine, lineWidth: 1))
-                    )
+                    .glassCardFlat(cornerRadius: SomaTokens.rXL)
+                    .overlay(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).strokeBorder(SomaTokens.warnLine, lineWidth: 1))
             }
             .buttonStyle(.plain)
         }

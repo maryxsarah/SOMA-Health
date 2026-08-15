@@ -12,12 +12,13 @@ struct ConnectDeviceView: View {
             VStack(spacing: 8) {
                 Text("Connect your devices.")
                     .font(Theme.display)
-                Text("Connect at least one to get started.")
+                Text("Soma plans each day from your body's signals — sleep, HRV and workouts. Connect at least one source to get a tailored plan.")
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
             .multilineTextAlignment(.center)
             .padding(.top, 48)
+            .padding(.horizontal, 24)
 
             VStack(spacing: 16) {
                 ForEach(Provider.allCases) { provider in
@@ -30,6 +31,12 @@ struct ConnectDeviceView: View {
                 }
             }
             .padding(.horizontal, 20)
+
+            Text("Add or remove sources anytime in Settings → Health.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
 
             if let errorMessage {
                 Text(errorMessage)

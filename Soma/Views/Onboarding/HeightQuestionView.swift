@@ -26,7 +26,7 @@ struct HeightQuestionView: View {
 
             Spacer()
 
-            RulerNumberPicker(value: $heightCm, range: 120...220, unit: "cm", step: 1)
+            RulerNumberPicker(value: $heightCm, range: 120...220, unit: SportGoalFormat.localizedUnit("cm"), step: 1)
 
             Spacer()
 

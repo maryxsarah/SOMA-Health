@@ -14,7 +14,7 @@ private struct GoalListBlock: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: SomaTokens.rTile, style: .continuous)
                     .fill(plateColor)
                     .frame(width: 46, height: 46)
                     .overlay(
@@ -41,11 +41,7 @@ private struct GoalListBlock: View {
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
-                    .fill(SomaTokens.surface)
-                    .shadow(color: SomaTokens.ink.opacity(0.06), radius: 2, y: 1)
-            )
+            .glassCard()
         }
         .buttonStyle(.plain)
     }
@@ -178,7 +174,7 @@ struct GoalPickerView: View {
                     .foregroundStyle(SomaTokens.ink3)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+                    .glassCardFlat(cornerRadius: SomaTokens.rXL)
             }
             .padding(20)
         }

@@ -14,10 +14,16 @@ struct HealthDashboardView: View {
     @State private var profile: UserProfile?
     @State private var recentMoods: [DailyMoodEntry] = []
     @State private var isLoading = true
-    @State private var selectedSection: DashboardSection = .overview
+    @State private var selectedSection: DashboardSection
     @State private var openAccordionTitle: String?
 
-    private enum DashboardSection: String, CaseIterable, Identifiable {
+    /// Lets a caller (e.g. the dock's separate "Activity" quick action) open
+    /// straight into a specific section instead of always landing on Overview.
+    init(initialSection: DashboardSection = .overview) {
+        _selectedSection = State(initialValue: initialSection)
+    }
+
+    enum DashboardSection: String, CaseIterable, Identifiable {
         case overview, sleep, activity, body
 
         var id: String { rawValue }
@@ -76,17 +82,16 @@ struct HealthDashboardView: View {
                 } label: {
                     Text(section.title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isSelected ? SomaTokens.accent : SomaTokens.ink2)
+                        .foregroundStyle(isSelected ? .white : SomaTokens.ink2)
                         .frame(maxWidth: .infinity)
                         .frame(height: 34)
-                        .background(
-                            RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous)
-                                .fill(isSelected ? SomaTokens.accentSoft : SomaTokens.surface)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous)
-                                .strokeBorder(isSelected ? SomaTokens.accent : SomaTokens.hairline, lineWidth: isSelected ? 2 : 1)
-                        )
+                        .background {
+                            if isSelected {
+                                Color.clear.glassGel(.blue)
+                            } else {
+                                Color.clear.glassLens()
+                            }
+                        }
                 }
                 .buttonStyle(.plain)
             }
@@ -118,9 +123,9 @@ struct HealthDashboardView: View {
         }
 
         metricRowsCard(rows: [
-            metricRow(family: .sleep, label: "Sleep", unit: "h", format: "%.1f", upIsGood: true) { $0.sleepHours },
-            metricRow(family: .hrv, label: "HRV", unit: "ms", format: "%.0f", upIsGood: true) { $0.hrvMs },
-            metricRow(family: .restingHR, label: "Resting HR", unit: "bpm", format: "%.0f", upIsGood: false) { $0.restingHr },
+            metricRow(family: .sleep, label: "Sleep", unit: HealthMetricFamily.sleep.unit, format: "%.1f", upIsGood: true) { $0.sleepHours },
+            metricRow(family: .hrv, label: "HRV", unit: HealthMetricFamily.hrv.unit, format: "%.0f", upIsGood: true) { $0.hrvMs },
+            metricRow(family: .restingHR, label: "Resting HR", unit: HealthMetricFamily.restingHR.unit, format: "%.0f", upIsGood: false) { $0.restingHr },
         ])
 
         trendCard(title: "Recovery", series: series { $0.recoveryScore ?? $0.readinessScore }, format: "%.0f")
@@ -132,13 +137,13 @@ struct HealthDashboardView: View {
              todaysValueText(format: "%.0f", unit: "") { $0.recoveryScore ?? $0.readinessScore },
              String(localized: "overviewAccordion.recovery.text", defaultValue: "A single score blending your heart rate variability, resting heart rate, and sleep from last night -- Whoop calls it Recovery, Oura calls it Readiness. Higher generally means your body is better prepared for a harder effort today.", comment: "Accordion explainer text for the Recovery/Readiness score")),
             (String(localized: "overviewAccordion.hrv.title", defaultValue: "HRV", comment: "Accordion item title for heart rate variability (kept as the HRV acronym)"),
-             todaysValueText(format: "%.0f", unit: " ms") { $0.hrvMs },
+             todaysValueText(format: "%.0f", unit: " \(HealthMetricFamily.hrv.unit)") { $0.hrvMs },
              String(localized: "overviewAccordion.hrv.text", defaultValue: "The variation in time between heartbeats. Generally, a higher HRV relative to your own baseline suggests your nervous system is well-recovered; a lower one can signal fatigue, stress, or incomplete recovery.", comment: "Accordion explainer text for HRV")),
             (String(localized: "overviewAccordion.restingHR.title", defaultValue: "Resting HR", comment: "Accordion item title for resting heart rate"),
-             todaysValueText(format: "%.0f", unit: " bpm") { $0.restingHr },
+             todaysValueText(format: "%.0f", unit: " \(HealthMetricFamily.restingHR.unit)") { $0.restingHr },
              String(localized: "overviewAccordion.restingHR.text", defaultValue: "Your heart rate at rest, usually measured overnight. A notably higher-than-usual resting heart rate can be an early sign of accumulated fatigue, illness, or poor sleep.", comment: "Accordion explainer text for resting heart rate")),
             (String(localized: "overviewAccordion.sleep.title", defaultValue: "Sleep", comment: "Accordion item title for total sleep duration"),
-             todaysValueText(format: "%.1f", unit: " h") { $0.sleepHours },
+             todaysValueText(format: "%.1f", unit: " \(HealthMetricFamily.sleep.unit)") { $0.sleepHours },
              String(localized: "overviewAccordion.sleep.text", defaultValue: "Total time asleep. Both duration and consistency matter for recovery -- see the Sleep section for how that time was split between light, deep, and REM sleep.", comment: "Accordion explainer text for total sleep duration")),
         ])
     }
@@ -165,7 +170,7 @@ struct HealthDashboardView: View {
                 headline: hours >= 7
                     ? String(localized: "sleepHero.headline.good", defaultValue: "Solid night's sleep", comment: "Sleep hero headline when last night's sleep was 7 hours or more")
                     : String(localized: "sleepHero.headline.short", defaultValue: "Shorter than ideal", comment: "Sleep hero headline when last night's sleep was under 7 hours"),
-                context: averageDeltaContext(values: seriesValues { $0.sleepHours }, current: hours, unit: " h", format: "%+.1f")
+                context: averageDeltaContext(values: seriesValues { $0.sleepHours }, current: hours, unit: " \(HealthMetricFamily.sleep.unit)", format: "%+.1f")
             )
         } else {
             CardView {
@@ -178,9 +183,9 @@ struct HealthDashboardView: View {
         }
 
         metricRowsCard(rows: [
-            metricRow(family: .sleep, label: "Deep", unit: "h", format: "%.1f", upIsGood: true) { $0.sleepDeepHours },
-            metricRow(family: .sleep, label: "REM", unit: "h", format: "%.1f", upIsGood: true) { $0.sleepRemHours },
-            metricRow(family: .sleep, label: "Awake", unit: "h", format: "%.1f", upIsGood: false) { $0.sleepAwakeHours },
+            metricRow(family: .sleep, label: "Deep", unit: HealthMetricFamily.sleep.unit, format: "%.1f", upIsGood: true) { $0.sleepDeepHours },
+            metricRow(family: .sleep, label: "REM", unit: HealthMetricFamily.sleep.unit, format: "%.1f", upIsGood: true) { $0.sleepRemHours },
+            metricRow(family: .sleep, label: "Awake", unit: HealthMetricFamily.sleep.unit, format: "%.1f", upIsGood: false) { $0.sleepAwakeHours },
         ])
 
         let stageEntries = sleepStageEntries
@@ -224,7 +229,7 @@ struct HealthDashboardView: View {
 
         metricRowsCard(rows: [
             metricRow(family: .strain, label: "Strain", unit: "", format: "%.1f", upIsGood: false) { $0.strainScore },
-            metricRow(family: .stress, label: "High stress", unit: "min", format: "%.0f", upIsGood: false) { $0.stressScore },
+            metricRow(family: .stress, label: "High stress", unit: HealthMetricFamily.stress.unit, format: "%.0f", upIsGood: false) { $0.stressScore },
         ])
 
         trendCard(title: "Strain", series: series { $0.strainScore }, format: "%.1f")
@@ -234,7 +239,7 @@ struct HealthDashboardView: View {
              todaysValueText(format: "%.1f", unit: "") { $0.strainScore },
              String(localized: "activityAccordion.strain.text", defaultValue: "How much cardiovascular and muscular load your body has taken on. Whoop scores this 0-21; other sources report the count of harder sessions. Consistently high strain without matching recovery is what today's training caps are designed to catch.", comment: "Accordion explainer text for strain")),
             (String(localized: "activityAccordion.stress.title", defaultValue: "Stress", comment: "Accordion item title for high-stress minutes"),
-             todaysValueText(format: "%.0f", unit: " min") { $0.stressScore },
+             todaysValueText(format: "%.0f", unit: " \(HealthMetricFamily.stress.unit)") { $0.stressScore },
              String(localized: "activityAccordion.stress.text", defaultValue: "Time spent in a high-stress physiological state today, as reported by Oura. This reflects the body's stress response generally, not necessarily how you feel emotionally.", comment: "Accordion explainer text for stress")),
         ])
     }
@@ -247,7 +252,7 @@ struct HealthDashboardView: View {
             CardView {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(String(format: "%.1f", weight))
-                        .font(.system(size: 34, design: .serif).italic())
+                        .font(SomaType.screenTitle)
                     Text("KG")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(SomaTokens.ink4)
@@ -270,7 +275,7 @@ struct HealthDashboardView: View {
                             .font(.subheadline.bold())
                         Spacer()
                         Text(String(format: "%.1f", bmi))
-                            .font(.system(size: 22, design: .serif).italic())
+                            .font(SomaType.widgetValue)
                     }
                     Text(BodyMetrics.bmiCategory(bmi))
                         .font(.caption.bold())
@@ -346,7 +351,7 @@ struct HealthDashboardView: View {
                         .rotationEffect(.degrees(-90))
                     VStack(spacing: 0) {
                         Text(ringText)
-                            .font(.system(size: 26, design: .serif).italic())
+                            .font(SomaType.sheetTitle)
                         Text(ringUnit)
                             .font(.system(size: 9, weight: .bold))
                             .tracking(0.5)

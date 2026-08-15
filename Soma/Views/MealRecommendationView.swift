@@ -234,10 +234,10 @@ struct MealRecommendationView: View {
         CardView {
             Text(String(localized: "mealRecommendation.macroFit.title", defaultValue: "How this fits what's left today", comment: "Title of the card comparing a recommended meal's macros to what's left of today's target"))
                 .font(.subheadline.bold())
-            macroFitRow(label: "Calories", value: rec.calories, of: remaining.caloriesRemaining, unit: "kcal", color: SomaTokens.accent)
-            macroFitRow(label: "Protein", value: rec.proteinG, of: remaining.proteinRemainingG, unit: "g", color: Self.proteinColor)
-            macroFitRow(label: "Carbs", value: rec.carbsG, of: remaining.carbsRemainingG, unit: "g", color: Self.carbsColor)
-            macroFitRow(label: "Fat", value: rec.fatG, of: remaining.fatRemainingG, unit: "g", color: Self.fatColor)
+            macroFitRow(label: "Calories", value: rec.calories, of: remaining.caloriesRemaining, unit: String(localized: "kcal", comment: "Unit abbreviation for kilocalories, shown next to a macro fit value"), color: SomaTokens.accent)
+            macroFitRow(label: "Protein", value: rec.proteinG, of: remaining.proteinRemainingG, unit: String(localized: "g", comment: "Unit abbreviation for grams, shown next to a macro fit value"), color: Self.proteinColor)
+            macroFitRow(label: "Carbs", value: rec.carbsG, of: remaining.carbsRemainingG, unit: String(localized: "g", comment: "Unit abbreviation for grams, shown next to a macro fit value"), color: Self.carbsColor)
+            macroFitRow(label: "Fat", value: rec.fatG, of: remaining.fatRemainingG, unit: String(localized: "g", comment: "Unit abbreviation for grams, shown next to a macro fit value"), color: Self.fatColor)
         }
     }
 

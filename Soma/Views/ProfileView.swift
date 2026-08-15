@@ -2,305 +2,99 @@ import PhotosUI
 import SuperwallKit
 import SwiftUI
 
-/// Editable profile: contact email (display-only, never a login credential
-/// -- the app still signs in only via Sign in with Apple), training goals,
-/// available equipment/access, and injuries. Feeds into workout-suggestion
-/// filtering (RecommendationDetailView) and the injury-based intensity cap
-/// (generate-recommendation Edge Function).
-///
-/// Guide 05 of the handoff: three tabs (Training / Health & Safety /
-/// Account), each field collapsed to a summary row (label / one-line
-/// consequence / current value / chevron) that taps through to a detail
-/// sheet -- replacing the previous expand-in-place DisclosureGroup rows.
-/// The editor content inside each sheet is unchanged from before; only the
-/// container changed.
+/// Settings entry point, presented as a sheet from Home and from
+/// MealRecommendationView's kitchen-setup prompt. Redesigned per the "12b"
+/// mockup (Soma Refresh, Turn 12 -- "no tabs, a hub of four big cards,
+/// each opening its own small page"), replacing the old three-tab dense
+/// list (guide 05 / "9d"). All shared field state and load/save logic
+/// that used to live directly as @State on this view now lives on
+/// `ProfileStore`, owned here via @StateObject and handed down to every
+/// subpage -- the four cards below are NavigationLinks pushed inside this
+/// view's own NavigationStack, so each subpage gets a native back button
+/// for free.
 struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var languageManager: LanguageManager
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
-    @State private var section: ProfileSection = .training
-    @State private var activeSheet: ProfileSheet?
-    @State private var showReferralCodeSheet = false
-    /// Refresher entry point for the same tour the onboarding checklist's
-    /// "See how Soma works" item opens -- see HowSomaWorksTourView's own
-    /// doc comment. No completion write here: this row exists precisely
-    /// for a user who has already completed onboarding, so there's
-    /// nothing left to mark.
-    @State private var showHowSomaWorks = false
-    /// Non-nil right after picking a language different from the current
-    /// one -- drives the "restart to finish switching" alert in
-    /// `languageEditor`. Holds the newly-picked language (not just a Bool)
-    /// so the alert's message can name it.
-    @State private var languageNeedingRestartPrompt: AppLanguage?
-
-    // Plain @State strings bound directly via `$` (not a computed
-    // Binding(get:set:) built inline in the view body) -- the latter
-    // recreates a new closure identity on every keystroke-driven body
-    // re-evaluation, which is what was causing the keyboard to dismiss
-    // after each character typed. These get folded into `profile` only
-    // when loading/saving.
-    @State private var goals: Set<GoalTag> = []
-    @State private var equipment: Set<EquipmentTag> = []
-    @State private var householdEquipment: Set<KitchenEquipmentTag> = []
-    @State private var injuryTags: Set<InjuryTag> = []
-    @State private var injurySeverity: [InjuryTag: InjurySeverity] = [:]
-    @State private var injuryType: [InjuryTag: InjuryType] = [:]
-    @State private var injuryPainLevel: [InjuryTag: Int] = [:]
-    @State private var contactEmailText = ""
-    @State private var otherGoalText = ""
-    @State private var otherEquipmentText = ""
-    @State private var otherHouseholdEquipmentText = ""
-    @State private var injuryNotesText = ""
-    @State private var experienceLevel: ExperienceLevel?
-    @State private var pregnancy: Bool?
-    @State private var pregnancyWeek: Int?
-    /// Read-only pass-through -- see UserProfile.sex's own doc comment.
-    /// Gates the cycle-tracking row's visibility only, never edited here.
-    @State private var sex: Sex?
-    /// Opt-in cycle-phase tracking (Phase 5: see
-    /// docs/coaching-personalization-plan.md) -- Date here (not the wire
-    /// string) for DatePicker, same convention as dateOfBirthDate below;
-    /// converted via Self.dobFormatter (identical "yyyy-MM-dd" wire format).
-    @State private var lastPeriodStartDate: Date?
-    @State private var typicalCycleLengthDays: Int?
-    @State private var weeklySessionTarget: Int?
-    /// Text, not Double, per pattern -- same "let the user type freely,
-    /// parse on save" reasoning as LogMealView's numeric fields. A blank
-    /// entry for a pattern just means "keep using the estimate for this
-    /// one", not zero.
-    @State private var knownLiftsText: [LiftPattern: String] = [:]
-    /// Pass-through only -- this screen has no editor for these three yet
-    /// (set during onboarding), but updateProfile writes height_cm/
-    /// journey_stage/blockers_notes unconditionally (NSNull if absent).
-    /// Without loading and re-sending them, ANY save from this screen --
-    /// including something as unrelated as changing region -- silently
-    /// wiped all three, which in turn silently broke the Health
-    /// Dashboard's BMI card (needs height) on the next load. Loaded once
-    /// in load(), never mutated by any control here, sent back unchanged.
-    @State private var preservedHeightCm: Double?
-    @State private var preservedJourneyStage: JourneyStage?
-    @State private var preservedBlockersNotes: String?
-    /// Unlike the three above, THIS one now has a real editor
-    /// (dateOfBirthEditor) -- see UserProfile.dateOfBirth's doc comment.
-    /// nil means genuinely unset (an account that predates the onboarding
-    /// DOB step), distinct from "user picked today's date" which the
-    /// DatePicker binding below needs a concrete non-optional default for.
-    @State private var dateOfBirthDate: Date?
-    @State private var sessionsDoneThisWeek = 0
-    // Region (country ISO code + free-text city) -- powers the future
-    // nearby gyms/partners suggestions; saved via the normal profile flow.
-    @State private var countryCode: String?
-    @State private var cityText = ""
-    // Weekly anchor session (Phase 4: see docs/coaching-personalization-plan.md)
-    // -- a real editor, unlike preservedHeightCm/etc above, so these are
-    // loaded AND sent back live on every save, same as countryCode/cityText.
-    @State private var anchorSessionName = ""
-    @State private var anchorSessionDays: Set<Int> = []
-    // Beta opt-in -- reflects the user's own beta_optins row.
-    @State private var betaOptIn = false
-
-    @State private var isSaving = false
-    @State private var errorMessage: String?
-    @State private var savedConfirmation = false
-
-    // Connect-more-devices section -- same connect flow (system pop-up:
-    // ASWebAuthenticationSession for Whoop/Oura, HealthKit's native sheet
-    // for Apple Health) as the onboarding Connect Device screen, reusing
-    // the same ProviderCardView for a consistent look.
-    @State private var connecting: Set<Provider> = []
-    @State private var deviceErrorMessage: String?
-
+    @StateObject private var store = ProfileStore()
     @State private var showSignOutConfirmation = false
-    @State private var showTrainingHistory = false
-    // Sport goals -- entry renders only when the RLS-gated catalog is
-    // non-empty or a goal already exists (server kill switch looks natural).
-    @State private var showSportGoals = false
-    @State private var sportCatalogAvailable = false
-    @State private var activeSportGoal: UserGoal?
-    @State private var sportGoalCatalog: SportCatalog?
-    @State private var completedSportGoals = 0
-    @State private var pausedSportGoal: UserGoal?
-    @State private var showHealthDashboard = false
-    @State private var completedWorkoutStreak = 0
-
-    // Body photos -- gated by Config.enableBodyPhotoUpload. The actual
-    // photos/history/upload UI now lives entirely in GoalBodyProgressView
-    // (its own destination, not a Profile settings sheet) -- this row only
-    // needs to know whether to show the entry point at all.
-    /// Adult-only gate (App Store 4+ rating) -- fails closed until load()
-    /// confirms an 18+ date_of_birth, same posture as PostSetupFlowView's
-    /// matching gate on the onboarding version of this same feature.
-    @State private var isConfirmedAdultForBodyPhotos = false
-    @State private var showGoalBodyProgress = false
-
-    // Profile picture -- avatar_photo_path on `users`, its own private
-    // Storage bucket (avatars), same signed-URL pattern as body photos.
-    @State private var avatarImage: UIImage?
-    @State private var avatarPhotoPath: String?
-    @State private var avatarItem: PhotosPickerItem?
-    @State private var showAvatarPicker = false
-    @State private var isUploadingAvatar = false
-    /// Its own state, separate from the Account tab's save-flow
-    /// errorMessage -- the avatar button lives in the header, visible on
-    /// every tab, so its error needs to be visible there too rather than
-    /// only surfacing if the user happens to be on the Account tab.
-    @State private var avatarErrorMessage: String?
-
-    // Streak badges + share card -- completedWorkoutStreak above is the
-    // real number. Today's steps are fetched purely for the optional
-    // share-card chip (best-effort, nil if HealthKit is unavailable/
-    // unauthorized -- never blocks anything else on this screen).
-    @State private var showStreakShareSheet = false
-    @State private var todaysSteps: Int?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    identityRow
 
-                if let avatarErrorMessage {
-                    Text(avatarErrorMessage)
-                        .font(.caption)
-                        .foregroundStyle(SomaTokens.danger)
+                    if let avatarErrorMessage = store.avatarErrorMessage {
+                        Text(avatarErrorMessage)
+                            .font(.caption)
+                            .foregroundStyle(SomaTokens.danger)
+                    }
+
+                    streakSection
+
+                    if !nudges.isEmpty {
+                        completionNotice
+                    }
+
+                    cardsSection
+
+                    signOutRow
                 }
-
-                streakSection
-
-                if !nudges.isEmpty {
-                    completionNotice
-                }
-
-                SomaSegmentedControl(selection: $section) { $0.title }
-
-                switch section {
-                case .training: trainingSection
-                case .healthSafety: healthSafetySection
-                case .account: accountSection
+                .padding(20)
+            }
+            .somaBackground()
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
             }
-            .padding(20)
         }
-        .somaBackground()
-        .sheet(item: $activeSheet) { sheet in
-            detailSheet(for: sheet)
-        }
-        .sheet(isPresented: $showHowSomaWorks) {
-            HowSomaWorksTourView(onFinish: { showHowSomaWorks = false })
-        }
-        .sheet(isPresented: $showReferralCodeSheet) {
-            ReferralCodeSheet()
-        }
-        .sheet(isPresented: $showTrainingHistory) {
-            TrainingHistoryView()
-        }
-        .sheet(isPresented: $showSportGoals, onDismiss: {
-            Task { await loadSportGoalState() }
-        }) {
-            SportGoalFlowView()
-        }
-        .sheet(isPresented: $showHealthDashboard) {
-            HealthDashboardView()
-        }
-        .sheet(isPresented: $showGoalBodyProgress) {
-            GoalBodyProgressView()
-        }
-        .sheet(isPresented: $showStreakShareSheet) {
+        .sheet(isPresented: $store.showStreakShareSheet) {
             StreakShareSheet(
-                streakDays: completedWorkoutStreak,
+                streakDays: store.completedWorkoutStreak,
                 category: appState.currentRecommendation?.category,
-                steps: todaysSteps
+                steps: store.todaysSteps
             )
         }
-        .onChange(of: avatarItem) { _, newItem in
-            Task { await uploadAvatar(item: newItem) }
+        .onChange(of: store.avatarItem) { _, newItem in
+            Task { await store.uploadAvatar(item: newItem) }
         }
         .task {
-            await load()
+            await store.load(appState: appState)
         }
-        .confirmationDialog(
-            "Log out of Soma?",
-            isPresented: $showSignOutConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Log Out", role: .destructive) {
+        .sheet(isPresented: $showSignOutConfirmation) {
+            SignOutConfirmSheet {
                 appState.signOut()
             }
-            Button("Cancel", role: .cancel) {}
         }
     }
 
-    // MARK: - Header
+    // MARK: - Identity row
 
     /// No display-name field exists anywhere in this app (only contact
     /// email, which is optional and never shown as an identity) -- the
     /// avatar itself is the one piece of real personalization here.
-    private var header: some View {
+    private var identityRow: some View {
         HStack(spacing: 12) {
             avatarButton
             VStack(alignment: .leading, spacing: 2) {
                 Text("Your profile")
                     .font(Theme.display)
-                Text(headerStatusLine)
+                Text(identitySubtitle)
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink3)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.bottom, 4)
     }
 
-    /// Tap opens a menu (Choose Photo / Remove Photo, the latter only
-    /// once one exists) rather than jumping straight into the picker --
-    /// same discoverable-but-not-cluttered pattern as Contacts/Messages'
-    /// own avatar-edit affordance. The small camera badge signals it's
-    /// editable without needing separate always-visible chrome.
-    private var avatarButton: some View {
-        Menu {
-            Button {
-                showAvatarPicker = true
-            } label: {
-                Label("Choose Photo", systemImage: "photo")
-            }
-            if avatarImage != nil {
-                Button(role: .destructive) {
-                    Task { await removeAvatar() }
-                } label: {
-                    Label("Remove Photo", systemImage: "trash")
-                }
-            }
-        } label: {
-            ZStack(alignment: .bottomTrailing) {
-                Group {
-                    if let avatarImage {
-                        Image(uiImage: avatarImage)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Circle()
-                            .fill(SomaTokens.accentSoft)
-                            .overlay(Image(systemName: "person.fill").foregroundStyle(SomaTokens.accent))
-                    }
-                }
-                .frame(width: 52, height: 52)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(SomaTokens.hairline, lineWidth: 1))
-                .opacity(isUploadingAvatar ? 0.4 : 1)
-
-                if isUploadingAvatar {
-                    ProgressView()
-                        .frame(width: 52, height: 52)
-                } else {
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(5)
-                        .background(Circle().fill(SomaTokens.accent))
-                        .overlay(Circle().stroke(SomaTokens.surface, lineWidth: 2))
-                }
-            }
-        }
-        .disabled(isUploadingAvatar)
-        .photosPicker(isPresented: $showAvatarPicker, selection: $avatarItem, matching: .images)
+    private var identitySubtitle: String {
+        store.contactEmailText.isEmpty ? headerStatusLine : store.contactEmailText
     }
 
     /// Every clause here is real, currently-known data -- connected
@@ -315,8 +109,8 @@ struct ProfileView: View {
             let connectedNames = connected.map(\.displayName).joined(separator: " & ")
             parts.append(String(localized: "profile.header.connectedDevices", defaultValue: "\(connectedNames) connected", comment: "Profile header status line naming the connected device providers, e.g. 'Whoop & Oura connected'"))
         }
-        if completedWorkoutStreak > 0 {
-            parts.append(String(localized: "profile.header.streakDays", defaultValue: "\(completedWorkoutStreak)-day streak", comment: "Profile header status line: current workout streak length in days"))
+        if store.completedWorkoutStreak > 0 {
+            parts.append(String(localized: "profile.header.streakDays", defaultValue: "\(store.completedWorkoutStreak)-day streak", comment: "Profile header status line: current workout streak length in days"))
         }
         if let category = appState.currentRecommendation?.category.displayTitle {
             parts.append(category)
@@ -324,9 +118,63 @@ struct ProfileView: View {
         return parts.isEmpty ? String(localized: "profile.header.defaultTagline", defaultValue: "Soma uses this to tailor which workouts it suggests.", comment: "Default profile header subtitle shown before any status fragments are available") : parts.joined(separator: " · ")
     }
 
+    /// Tap opens a menu (Choose Photo / Remove Photo, the latter only
+    /// once one exists) rather than jumping straight into the picker --
+    /// same discoverable-but-not-cluttered pattern as Contacts/Messages'
+    /// own avatar-edit affordance. The small camera badge signals it's
+    /// editable without needing separate always-visible chrome.
+    private var avatarButton: some View {
+        Menu {
+            Button {
+                store.showAvatarPicker = true
+            } label: {
+                Label("Choose Photo", systemImage: "photo")
+            }
+            if store.avatarImage != nil {
+                Button(role: .destructive) {
+                    Task { await store.removeAvatar() }
+                } label: {
+                    Label("Remove Photo", systemImage: "trash")
+                }
+            }
+        } label: {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let avatarImage = store.avatarImage {
+                        Image(uiImage: avatarImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Circle()
+                            .fill(SomaTokens.accentSoft)
+                            .overlay(Image(systemName: "person.fill").foregroundStyle(SomaTokens.accent))
+                    }
+                }
+                .frame(width: 52, height: 52)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(SomaTokens.hairline, lineWidth: 1))
+                .opacity(store.isUploadingAvatar ? 0.4 : 1)
+
+                if store.isUploadingAvatar {
+                    ProgressView()
+                        .frame(width: 52, height: 52)
+                } else {
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(5)
+                        .background(Circle().fill(SomaTokens.accent))
+                        .overlay(Circle().stroke(SomaTokens.surface, lineWidth: 2))
+                }
+            }
+        }
+        .disabled(store.isUploadingAvatar)
+        .photosPicker(isPresented: $store.showAvatarPicker, selection: $store.avatarItem, matching: .images)
+    }
+
     // MARK: - Streak
 
-    /// Visible as soon as Settings opens, above every tab -- the real
+    /// Visible as soon as Settings opens, above the cards -- the real
     /// completedWorkoutStreak count (same source as the header line and
     /// Home's calendar strip), shown as badges instead of just a number,
     /// plus an Oura-style share card once there's something worth sharing.
@@ -343,16 +191,16 @@ struct ProfileView: View {
                             .foregroundStyle(.white)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(completedWorkoutStreak > 0 ? "\(completedWorkoutStreak)-day streak" : "No active streak")
+                        Text(store.completedWorkoutStreak > 0 ? "\(store.completedWorkoutStreak)-day streak" : "No active streak")
                             .font(.system(size: 16.5, weight: .bold))
-                        Text(completedWorkoutStreak > 0 ? "Keep showing up -- consistency compounds." : "Log a workout today to start one.")
+                        Text(store.completedWorkoutStreak > 0 ? "Keep showing up -- consistency compounds." : "Log a workout today to start one.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if completedWorkoutStreak > 0 {
+                    if store.completedWorkoutStreak > 0 {
                         Button {
-                            showStreakShareSheet = true
+                            store.showStreakShareSheet = true
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 15, weight: .semibold))
@@ -374,7 +222,7 @@ struct ProfileView: View {
     }
 
     private func streakBadge(_ milestone: StreakMilestone) -> some View {
-        let achieved = milestone.isAchieved(streak: completedWorkoutStreak)
+        let achieved = milestone.isAchieved(streak: store.completedWorkoutStreak)
         return VStack(spacing: 6) {
             ZStack {
                 Circle()
@@ -515,7 +363,7 @@ struct ProfileView: View {
     /// the app) and step count, both real and both optional, rather than
     /// always baking them in. Live preview so toggling actually shows what
     /// changes; the final image is only rendered once (here), not
-    /// speculatively on every Profile load.
+    /// speculatively on every Settings load.
     private struct StreakShareSheet: View {
         let streakDays: Int
         let category: RecommendationCategory?
@@ -569,7 +417,7 @@ struct ProfileView: View {
                                 }
                             }
                             .padding(14)
-                            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
+                            .glassCardFlat(cornerRadius: SomaTokens.rXL)
                         }
                         .padding(20)
                     }
@@ -581,10 +429,9 @@ struct ProfileView: View {
                         ) {
                             Label("Share streak", systemImage: "square.and.arrow.up")
                                 .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
-                                .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.accent))
+                                .glassGel(.blue, cornerRadius: SomaTokens.rXL)
                         }
                         .padding(.horizontal, 20)
                         .padding(.bottom, 12)
@@ -638,12 +485,12 @@ struct ProfileView: View {
         }
         // No injury nudge: an empty injury list is a complete, valid
         // answer ("None noted"), not an unfinished profile item.
-        if weeklySessionTarget == nil {
+        if store.weeklySessionTarget == nil {
             items.append(Nudge(id: "target", text: String(localized: "profile.nudge.setWeeklyTarget", defaultValue: "set a weekly target", comment: "Profile completion nudge fragment, lowercase mid-sentence, e.g. 'set a weekly target to sharpen suggestions.'")))
         }
         // Only nudged while the catalog is actually open and no goal is set
         // -- an empty catalog means the feature is off, not unfinished.
-        if Config.enableSportGoals, sportCatalogAvailable, activeSportGoal == nil, pausedSportGoal == nil {
+        if Config.enableSportGoals, store.sportCatalogAvailable, store.activeSportGoal == nil, store.pausedSportGoal == nil {
             items.append(Nudge(id: "goal", text: String(localized: "profile.nudge.pickGoal", defaultValue: "pick a goal", comment: "Profile completion nudge fragment, lowercase mid-sentence, e.g. 'pick a goal to sharpen suggestions.'")))
         }
         return items
@@ -678,69 +525,338 @@ struct ProfileView: View {
         )
     }
 
-    // MARK: - Training tab
+    // MARK: - Cards
 
-    private var trainingSection: some View {
+    /// Four cards, each a one-line real summary of its page -- "Intermediate
+    /// · Full gym, dumbbells · 2 selected" tells you what's missing without
+    /// opening it, same spirit as the old per-row summary values, just
+    /// rolled up one level. Every clause traces to real state, same rule as
+    /// `headerStatusLine` above -- nothing here is placeholder copy lifted
+    /// from the mockup's fictional "Vlad" persona.
+    private var cardsSection: some View {
         VStack(spacing: 10) {
-            summaryRow(
-                title: "Experience",
-                consequence: "Sets block count, supersets and rest",
-                value: experienceLevel?.displayName ?? notSetLabel
-            ) { activeSheet = .experience }
-
-            summaryRow(
-                title: LocalizedStringKey(String(localized: "profile.knownLifts.title", defaultValue: "Your current lifts", comment: "Row title for the known-lifts editor")),
-                consequence: LocalizedStringKey(String(localized: "profile.knownLifts.consequence", defaultValue: "Optional -- a real number beats an estimated one", comment: "Row consequence text for the known-lifts editor")),
-                value: knownLifts.isEmpty ? notSetLabel : String(localized: "profile.knownLifts.countLabel", defaultValue: "\(knownLifts.count) set", comment: "Known-lifts row value: number of lift patterns with a saved value, e.g. '3 set'")
-            ) { activeSheet = .knownLifts }
-
-            summaryRow(
-                title: "Goals",
-                consequence: "Prioritizes which workouts are suggested first",
-                value: goals.isEmpty ? notSetLabel : String(localized: "profile.goals.selectedCount", defaultValue: "\(goals.count) selected", comment: "Training goals row value: number of goals selected")
-            ) { activeSheet = .goals }
-
-            summaryRow(
-                title: "Equipment & access",
-                consequence: "Only suggests workouts you can actually do",
-                value: equipment.isEmpty ? notSetLabel : EquipmentTag.allCases.filter(equipment.contains).map(\.displayName).joined(separator: ", ")
-            ) { activeSheet = .equipment }
-
-            summaryRow(
-                title: LocalizedStringKey(String(localized: "profile.kitchenEquipment.title", defaultValue: "Kitchen equipment", comment: "Row title for the kitchen-equipment editor")),
-                consequence: LocalizedStringKey(String(localized: "profile.kitchenEquipment.consequence", defaultValue: "Only suggests recipes you can actually cook", comment: "Row consequence text for the kitchen-equipment editor")),
-                value: householdEquipment.isEmpty ? notSetLabel : KitchenEquipmentTag.allCases.filter(householdEquipment.contains).map(\.displayName).joined(separator: ", ")
-            ) { activeSheet = .kitchenEquipment }
-
-            summaryRow(
-                title: "Weekly target",
-                consequence: "Personal tracking goal only -- doesn't change suggestions",
-                value: weeklySessionTarget.map {
-                    String(localized: "profile.weeklyTarget.progress", defaultValue: "\($0)/wk · \(sessionsDoneThisWeek) done", comment: "Weekly target row value: target sessions per week and sessions done so far, e.g. '4/wk · 2 done'")
-                } ?? notSetLabel
-            ) { activeSheet = .weeklyTarget }
-
-            summaryRow(
-                title: LocalizedStringKey(String(localized: "profile.anchorSession.title", defaultValue: "Weekly anchor session", comment: "Row title for the weekly anchor session editor")),
-                consequence: LocalizedStringKey(String(localized: "profile.anchorSession.consequence", defaultValue: "The rest of your week is built around it", comment: "Row consequence text for the weekly anchor session editor")),
-                value: anchorSessionRowValue
-            ) { activeSheet = .anchorSession }
-
-            if showSportGoalRow {
-                summaryRow(
-                    title: "My goal",
-                    consequence: "Adds goal work to your daily plan",
-                    value: sportGoalRowValue
-                ) {
-                    AnalyticsManager.shared.featureUsed(name: "sport_goal_flow")
-                    showSportGoals = true
-                }
+            settingsCard(icon: "dumbbell.fill", title: "Training", subtitle: trainingCardSubtitle) {
+                TrainingSettingsView(store: store)
+            }
+            settingsCard(icon: "heart.fill", title: "Health & Safety", subtitle: healthCardSubtitle) {
+                HealthSafetySettingsView(store: store)
+            }
+            settingsCard(
+                icon: "antenna.radiowaves.left.and.right", title: "Devices & Data", subtitle: devicesCardSubtitle,
+                showsStatusDot: !appState.connectedProviders.isEmpty
+            ) {
+                DevicesSettingsView(store: store)
+            }
+            settingsCard(icon: "person.fill", title: "Account", subtitle: accountCardSubtitle) {
+                AccountSettingsView(store: store)
             }
         }
     }
 
+    private func settingsCard(
+        icon: String, title: LocalizedStringKey, subtitle: String, showsStatusDot: Bool = false,
+        @ViewBuilder destination: () -> some View
+    ) -> some View {
+        NavigationLink(destination: destination()) {
+            HStack(spacing: 13) {
+                ZStack {
+                    Circle().fill(SomaTokens.surface).frame(width: 38, height: 38)
+                    Image(systemName: icon)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(SomaTokens.ink)
+                    HStack(spacing: 5) {
+                        if showsStatusDot {
+                            Circle().fill(SomaTokens.successDot).frame(width: 6, height: 6)
+                        }
+                        Text(subtitle)
+                            .font(.system(size: 12))
+                            .foregroundStyle(showsStatusDot ? SomaTokens.success : SomaTokens.ink3)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SomaTokens.inkPlaceholder)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .glassCardFlat(cornerRadius: SomaTokens.rRow)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var trainingCardSubtitle: String {
+        let equipmentSummary = store.equipment.isEmpty ? store.notSetLabel : EquipmentTag.allCases.filter(store.equipment.contains).map(\.displayName).joined(separator: ", ")
+        let goalsSummary = store.goals.isEmpty ? store.notSetLabel : String(localized: "profile.goals.selectedCount", defaultValue: "\(store.goals.count) selected", comment: "Training goals row value: number of goals selected")
+        return "\(store.experienceLevel?.displayName ?? store.notSetLabel) · \(equipmentSummary) · \(goalsSummary)"
+    }
+
+    private var healthCardSubtitle: String {
+        var parts: [String] = []
+        parts.append(store.injuryTags.isEmpty
+            ? String(localized: "profile.injuries.noneNoted", defaultValue: "None noted", comment: "Injuries row value when no injuries are recorded")
+            : store.injuryTags.map(\.displayName).joined(separator: ", "))
+        if store.pregnancy == true {
+            parts.append(store.pregnancyWeek.map {
+                String(localized: "profile.pregnancy.week", defaultValue: "Week \($0)", comment: "Pregnancy row value showing the current week number, e.g. 'Week 12'")
+            } ?? String(localized: "profile.pregnancy.yes", defaultValue: "Yes", comment: "Pregnancy row value when pregnant but no week number is set"))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var devicesCardSubtitle: String {
+        let connected = Provider.allCases.filter { appState.connectedProviders.contains($0) }
+        guard !connected.isEmpty else {
+            return String(localized: "profile.hub.devices.none", defaultValue: "No devices connected", comment: "Devices & Data settings card subtitle shown when no wearable/health providers are connected")
+        }
+        let connectedNames = connected.map(\.displayName).joined(separator: " & ")
+        return String(localized: "profile.header.connectedDevices", defaultValue: "\(connectedNames) connected", comment: "Profile header status line naming the connected device providers, e.g. 'Whoop & Oura connected'")
+    }
+
+    private var accountCardSubtitle: String {
+        let plan = subscriptionStatusText(isSubscribed: subscriptionManager.isSubscribed, referralBonusUntil: appState.referralBonusUntil, locale: languageManager.effectiveLocale)
+        let notifications = store.notificationsAuthorized
+            ? String(localized: "profile.hub.notifications.on", defaultValue: "Notifications on", comment: "Account settings card subtitle fragment shown when system notifications are authorized")
+            : String(localized: "profile.hub.notifications.off", defaultValue: "Notifications off", comment: "Account settings card subtitle fragment shown when system notifications are not authorized")
+        return "\(plan) · \(notifications)"
+    }
+
+    // MARK: - Sign out
+
+    /// Moved here from the Account page (12b's redline: a centered
+    /// sign-out line under the cards, not a full-width danger button
+    /// buried inside Account) -- confirmed via `SignOutConfirmSheet`, a
+    /// custom glass sheet rather than the bare system confirmationDialog
+    /// this used to open.
+    private var signOutRow: some View {
+        Button {
+            showSignOutConfirmation = true
+        } label: {
+            Text(store.signOutLabel)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SomaTokens.danger)
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 6)
+    }
+}
+
+/// Replaces the old bare system `.confirmationDialog` with the same glass
+/// sheet language every other confirmation surface in this app uses --
+/// danger gel primary over a secondary-lens escape hatch, same stacking
+/// `GymPhotoWorkoutView`'s "Add to plan"/"Adjust manually" pair uses.
+private struct SignOutConfirmSheet: View {
+    let onConfirm: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "rectangle.portrait.and.arrow.right")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(SomaTokens.danger)
+                .frame(width: 56, height: 56)
+                .glassLens(cornerRadius: 28)
+
+            VStack(spacing: 6) {
+                Text(String(localized: "profile.signOutSheet.title", defaultValue: "Log out of Soma?", comment: "Title of the custom glass sheet confirming sign-out"))
+                    .font(SomaType.sheetTitle)
+                Text(String(localized: "profile.signOutSheet.message", defaultValue: "You'll need to sign back in to see your plan and progress.", comment: "Supporting line under the sign-out confirmation sheet's title"))
+                    .font(SomaType.sub)
+                    .foregroundStyle(SomaTokens.ink3)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(spacing: 10) {
+                SomaButton(title: LocalizedStringKey(String(localized: "profile.signOutSheet.confirm", defaultValue: "Log Out", comment: "Destructive confirm button on the sign-out sheet")), size: .lg, variant: .danger) {
+                    dismiss()
+                    onConfirm()
+                }
+                SomaButton(title: LocalizedStringKey(String(localized: "profile.signOutSheet.cancel", defaultValue: "Cancel", comment: "Cancel button on the sign-out sheet")), size: .lg, variant: .secondary) {
+                    dismiss()
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 28)
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity)
+        .somaSheetBackground()
+        .presentationDetents([.height(320)])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+// MARK: - ProfileStore
+
+/// Shared field state and load/save/connect logic for every settings
+/// subpage, extracted from what used to be `ProfileView`'s own `@State`
+/// when that view was a single tabbed screen. Owned by the hub
+/// (`ProfileView`) via `@StateObject`, handed to each subpage via
+/// `@ObservedObject` so a value edited on one page is instantly reflected
+/// in the hub's card subtitles the moment the user pops back. Methods that
+/// need `AppState` (itself only reachable via `@EnvironmentObject`, so
+/// unavailable to a plain `ObservableObject`) take it as an explicit
+/// parameter instead of storing a reference to it.
+@MainActor
+final class ProfileStore: ObservableObject {
+    @Published var goals: Set<GoalTag> = []
+    @Published var equipment: Set<EquipmentTag> = []
+    @Published var householdEquipment: Set<KitchenEquipmentTag> = []
+    @Published var injuryTags: Set<InjuryTag> = []
+    @Published var injurySeverity: [InjuryTag: InjurySeverity] = [:]
+    @Published var injuryType: [InjuryTag: InjuryType] = [:]
+    @Published var injuryPainLevel: [InjuryTag: Int] = [:]
+    @Published var contactEmailText = ""
+    @Published var otherGoalText = ""
+    @Published var otherEquipmentText = ""
+    @Published var otherHouseholdEquipmentText = ""
+    @Published var injuryNotesText = ""
+    @Published var experienceLevel: ExperienceLevel?
+    @Published var pregnancy: Bool?
+    @Published var pregnancyWeek: Int?
+    /// Read-only pass-through -- see UserProfile.sex's own doc comment.
+    /// Gates the cycle-tracking row's visibility only, never edited here.
+    @Published var sex: Sex?
+    /// Opt-in cycle-phase tracking (Phase 5: see
+    /// docs/coaching-personalization-plan.md) -- Date here (not the wire
+    /// string) for DatePicker, same convention as dateOfBirthDate below;
+    /// converted via Self.dobFormatter (identical "yyyy-MM-dd" wire format).
+    @Published var lastPeriodStartDate: Date?
+    @Published var typicalCycleLengthDays: Int?
+    @Published var weeklySessionTarget: Int?
+    /// Text, not Double, per pattern -- same "let the user type freely,
+    /// parse on save" reasoning as LogMealView's numeric fields. A blank
+    /// entry for a pattern just means "keep using the estimate for this
+    /// one", not zero.
+    @Published var knownLiftsText: [LiftPattern: String] = [:]
+    /// Pass-through only -- no editor for these three yet (set during
+    /// onboarding), but updateProfile writes height_cm/journey_stage/
+    /// blockers_notes unconditionally (NSNull if absent). Without loading
+    /// and re-sending them, ANY save -- including something as unrelated
+    /// as changing region -- silently wiped all three, which in turn
+    /// silently broke the Health Dashboard's BMI card (needs height) on
+    /// the next load. Loaded once in load(), never mutated by any control.
+    @Published var preservedHeightCm: Double?
+    @Published var preservedJourneyStage: JourneyStage?
+    @Published var preservedBlockersNotes: String?
+    /// Unlike the three above, THIS one has a real editor
+    /// (dateOfBirthEditor) -- see UserProfile.dateOfBirth's doc comment.
+    /// nil means genuinely unset (an account that predates the onboarding
+    /// DOB step), distinct from "user picked today's date" which the
+    /// DatePicker binding below needs a concrete non-optional default for.
+    @Published var dateOfBirthDate: Date?
+    @Published var sessionsDoneThisWeek = 0
+    // Region (country ISO code + free-text city) -- powers the future
+    // nearby gyms/partners suggestions; saved via the normal profile flow.
+    @Published var countryCode: String?
+    @Published var cityText = ""
+    // Weekly anchor session (Phase 4: see docs/coaching-personalization-plan.md)
+    // -- a real editor, unlike preservedHeightCm/etc above, so these are
+    // loaded AND sent back live on every save, same as countryCode/cityText.
+    @Published var anchorSessionName = ""
+    @Published var anchorSessionDays: Set<Int> = []
+    // Beta opt-in -- reflects the user's own beta_optins row.
+    @Published var betaOptIn = false
+
+    @Published var isSaving = false
+    @Published var errorMessage: String?
+    @Published var savedConfirmation = false
+
+    // Connect-more-devices -- same connect flow (system pop-up:
+    // ASWebAuthenticationSession for Whoop/Oura, HealthKit's native sheet
+    // for Apple Health) as the onboarding Connect Device screen, reusing
+    // the same ProviderCardView for a consistent look.
+    @Published var connecting: Set<Provider> = []
+    @Published var deviceErrorMessage: String?
+
+    @Published var showTrainingHistory = false
+    // Sport goals -- entry renders only when the RLS-gated catalog is
+    // non-empty or a goal already exists (server kill switch looks natural).
+    @Published var showSportGoals = false
+    @Published var sportCatalogAvailable = false
+    @Published var activeSportGoal: UserGoal?
+    @Published var sportGoalCatalog: SportCatalog?
+    @Published var completedSportGoals = 0
+    @Published var pausedSportGoal: UserGoal?
+    @Published var showHealthDashboard = false
+    @Published var completedWorkoutStreak = 0
+
+    // Body photos -- gated by Config.enableBodyPhotoUpload. The actual
+    // photos/history/upload UI lives entirely in GoalBodyProgressView (its
+    // own destination, not a settings sheet) -- this only needs to know
+    // whether to show the entry point at all.
+    /// Adult-only gate (App Store 4+ rating) -- fails closed until load()
+    /// confirms an 18+ date_of_birth, same posture as PostSetupFlowView's
+    /// matching gate on the onboarding version of this same feature.
+    @Published var isConfirmedAdultForBodyPhotos = false
+    @Published var showGoalBodyProgress = false
+
+    // Profile picture -- avatar_photo_path on `users`, its own private
+    // Storage bucket (avatars), same signed-URL pattern as body photos.
+    @Published var avatarImage: UIImage?
+    @Published var avatarPhotoPath: String?
+    @Published var avatarItem: PhotosPickerItem?
+    @Published var showAvatarPicker = false
+    @Published var isUploadingAvatar = false
+    /// Its own state, separate from the Account page's save-flow
+    /// errorMessage -- the avatar button lives on the hub, visible before
+    /// any page is opened, so its error needs to be visible there too
+    /// rather than only surfacing on the Account page.
+    @Published var avatarErrorMessage: String?
+
+    // Streak badges + share card -- completedWorkoutStreak above is the
+    // real number. Today's steps are fetched purely for the optional
+    // share-card chip (best-effort, nil if HealthKit is unavailable/
+    // unauthorized -- never blocks anything else here).
+    @Published var showStreakShareSheet = false
+    @Published var todaysSteps: Int?
+
+    /// Real, queryable local-notification authorization status -- backs
+    /// the hub's Account card subtitle. Never guessed/defaulted to "on".
+    @Published var notificationsAuthorized = false
+
+    // Which field editor sheet (if any) is open -- shared across every
+    // subpage since only one is ever on screen at a time.
+    @Published fileprivate var activeSheet: ProfileSheet?
+    @Published var showReferralCodeSheet = false
+    /// Refresher entry point for the same tour the onboarding checklist's
+    /// "See how Soma works" item opens -- see HowSomaWorksTourView's own
+    /// doc comment. No completion write here: this exists precisely for a
+    /// user who already completed onboarding, so there's nothing left to
+    /// mark.
+    @Published var showHowSomaWorks = false
+    /// Non-nil right after picking a language different from the current
+    /// one -- drives the "restart to finish switching" alert in the
+    /// language editor. Holds the newly-picked language (not just a Bool)
+    /// so the alert's message can name it.
+    @Published var languageNeedingRestartPrompt: AppLanguage?
+
+    /// Shared fallback text for an unset profile field, reused across
+    /// every summary row/card so its localization stays consistent.
+    var notSetLabel: String {
+        String(localized: "profile.notSet", defaultValue: "Not set", comment: "Fallback value shown when a profile field hasn't been set yet")
+    }
+
+    /// Lowercase variant used mid-sentence in Stepper titles.
+    var notSetLowerLabel: String {
+        String(localized: "profile.notSetLower", defaultValue: "not set", comment: "Lowercase 'not set' fallback used mid-sentence in a Stepper title")
+    }
+
+    var signOutLabel: String {
+        String(localized: "profile.signOut", defaultValue: "Sign out", comment: "Button to sign out of the account")
+    }
+
     /// "Hot Yoga · Tue" / "Hot Yoga" (no day picked yet) / "Not set".
-    private var anchorSessionRowValue: String {
+    var anchorSessionRowValue: String {
         let name = anchorSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return notSetLabel }
         guard !anchorSessionDays.isEmpty else { return name }
@@ -750,13 +866,13 @@ struct ProfileView: View {
 
     /// Kill switch: the row exists only when the server-gated catalog has
     /// content, or the user already has goal data to reach.
-    private var showSportGoalRow: Bool {
+    var showSportGoalRow: Bool {
         Config.enableSportGoals && (sportCatalogAvailable || activeSportGoal != nil || completedSportGoals > 0 || pausedSportGoal != nil)
     }
 
     /// Must mirror what the goal screen actually opens to -- a paused goal
     /// still names the row ("Not set" while the hub shows a goal is a lie).
-    private var sportGoalRowValue: String {
+    var sportGoalRowValue: String {
         let doneSuffix = completedSportGoals > 0
             ? String(localized: "profile.sportGoal.doneSuffix", defaultValue: " · \(completedSportGoals) done", comment: "Suffix on an active sport goal's name showing completed-goal count")
             : ""
@@ -773,18 +889,16 @@ struct ProfileView: View {
         return notSetLabel
     }
 
-    // MARK: - Health & Safety tab
-
     /// Gated on sex, not just the kill switch -- sexAwareGuidance.ts's
     /// underlying guidance only ever fires for sex == "female" (see
     /// describeSexAwareConsiderations), so showing this row to anyone else
     /// would just be collecting sensitive data that can never affect
     /// anything -- worse for data minimization than not showing it at all.
-    private var cycleTrackingRowVisible: Bool {
+    var cycleTrackingRowVisible: Bool {
         Config.enableCyclePhaseTracking && sex == .female
     }
 
-    private var cycleTrackingRowValue: String {
+    var cycleTrackingRowValue: String {
         guard let lastPeriodStartDate else { return notSetLabel }
         let dateText = Self.dobFormatter.string(from: lastPeriodStartDate)
         let lengthLabel = typicalCycleLengthDays.map {
@@ -793,751 +907,21 @@ struct ProfileView: View {
         return String(localized: "profile.cycleTracking.summary", defaultValue: "\(dateText) · \(lengthLabel)", comment: "Cycle-tracking row value: last period start date and cycle length, e.g. 'Jan 1, 2024 · 28d cycle'")
     }
 
-    private var healthSafetySection: some View {
-        VStack(spacing: 10) {
-            groupEyebrow("SAFETY")
-
-            summaryRow(
-                title: "Injuries",
-                consequence: injuryTags.isEmpty ? "None noted" : "Caps today's intensity at Moderate, hides high impact",
-                value: injuryTags.isEmpty ? String(localized: "profile.injuries.noneNoted", defaultValue: "None noted", comment: "Injuries row value when no injuries are recorded") : injuryTags.map(\.displayName).joined(separator: ", "),
-                valueColor: injuryTags.isEmpty ? nil : SomaTokens.danger
-            ) { activeSheet = .injuries }
-
-            summaryRow(
-                title: "Pregnancy",
-                consequence: "Withholds generated workouts until confirmed",
-                value: pregnancy == true
-                    ? (pregnancyWeek.map { String(localized: "profile.pregnancy.week", defaultValue: "Week \($0)", comment: "Pregnancy row value showing the current week number, e.g. 'Week 12'") } ?? String(localized: "profile.pregnancy.yes", defaultValue: "Yes", comment: "Pregnancy row value when pregnant but no week number is set"))
-                    : notSetLabel
-            ) { activeSheet = .pregnancy }
-
-            if cycleTrackingRowVisible {
-                summaryRow(
-                    title: LocalizedStringKey(String(localized: "profile.cycleTracking.title", defaultValue: "Cycle tracking", comment: "Row title for the cycle-tracking editor")),
-                    consequence: LocalizedStringKey(String(localized: "profile.cycleTracking.consequence", defaultValue: "Adds one general training consideration -- opt-in, never assumed", comment: "Row consequence text for the cycle-tracking editor")),
-                    value: cycleTrackingRowValue
-                ) { activeSheet = .cycleTracking }
-            }
-
-            if Config.enableBodyPhotoUpload && isConfirmedAdultForBodyPhotos {
-                summaryRow(
-                    title: "Your progress",
-                    consequence: "Goal photo, current photo, and how you'll get there",
-                    value: ""
-                ) { showGoalBodyProgress = true }
-            }
-
-            groupEyebrow("INSIGHTS")
-
-            summaryRow(title: "Training history", consequence: "Every logged workout", value: "") {
-                AnalyticsManager.shared.featureUsed(name: "training_history")
-                showTrainingHistory = true
-            }
-            summaryRow(title: "Health dashboard", consequence: "Recovery, sleep, HRV trends", value: "") {
-                AnalyticsManager.shared.featureUsed(name: "health_dashboard")
-                showHealthDashboard = true
+    /// Parses knownLiftsText into the wire shape -- a blank or
+    /// non-positive entry for a pattern is dropped rather than saved as
+    /// 0, so it falls back to the population estimate exactly like never
+    /// having entered anything.
+    var knownLifts: [String: Double] {
+        var result: [String: Double] = [:]
+        for (pattern, text) in knownLiftsText {
+            if let value = Double(text.trimmingCharacters(in: .whitespaces)), value > 0 {
+                result[pattern.rawValue] = value
             }
         }
+        return result
     }
 
-    // MARK: - Account tab
-
-    private var accountSection: some View {
-        VStack(spacing: 10) {
-            summaryRow(
-                title: "Contact email",
-                consequence: "Never used to sign in -- display only",
-                value: contactEmailText.isEmpty ? notSetLabel : contactEmailText
-            ) { activeSheet = .contactEmail }
-
-            summaryRow(
-                title: "Region",
-                consequence: "Powers nearby gym & coach suggestions",
-                value: UserProfile.regionDisplay(country: countryCode, city: cityText) ?? notSetLabel
-            ) { activeSheet = .region }
-
-            summaryRow(
-                title: "Date of birth",
-                consequence: LocalizedStringKey(String(localized: "profile.dateOfBirth.consequence", defaultValue: "Needed to unlock Goal Body progress photos", comment: "Row consequence text explaining why date of birth is needed")),
-                value: dateOfBirthDate.map { Self.dobFormatter.string(from: $0) } ?? notSetLabel
-            ) { activeSheet = .dateOfBirth }
-
-            groupEyebrow("PREFERENCES")
-            summaryRow(
-                title: "Language",
-                consequence: "Overrides your device's language just for Soma",
-                value: languageManager.selected.displayName(locale: languageManager.effectiveLocale)
-            ) { activeSheet = .language }
-            .accessibilityIdentifier("language-settings-row")
-
-            groupEyebrow("EARLY ACCESS")
-            betaOptInRow
-
-            groupEyebrow("CONNECTED DEVICES")
-            ForEach(Provider.allCases) { provider in
-                deviceRow(provider)
-            }
-            if let deviceErrorMessage {
-                Text(deviceErrorMessage)
-                    .font(.caption)
-                    .foregroundStyle(SomaTokens.danger)
-            }
-
-            groupEyebrow("PLAN")
-            summaryRow(title: "Subscription", consequence: LocalizedStringKey(subscriptionStatusText), value: "") {
-                if !subscriptionManager.isSubscribed { presentPremiumPaywall() }
-            }
-            summaryRow(title: "Referral code", consequence: "Redeem a code for free access", value: "") {
-                showReferralCodeSheet = true
-            }
-            summaryRow(title: "Feedback", consequence: "Spotted a bug, or have an idea?", value: "") {
-                FeedbackPresenter.present()
-            }
-            summaryRow(
-                title: LocalizedStringKey(String(localized: "profile.howSomaWorks.title", defaultValue: "How Soma works", comment: "Row title opening the How Soma Works tour refresher")),
-                consequence: LocalizedStringKey(String(localized: "profile.howSomaWorks.consequence", defaultValue: "A quick refresher on what's in the app", comment: "Row consequence text describing the How Soma Works tour refresher")),
-                value: ""
-            ) {
-                showHowSomaWorks = true
-            }
-
-            if let errorMessage {
-                Text(errorMessage).font(.caption).foregroundStyle(SomaTokens.danger)
-            }
-            if savedConfirmation {
-                Text("Saved.").font(.caption).foregroundStyle(SomaTokens.success)
-            }
-
-            SomaButton(title: LocalizedStringKey(signOutLabel), size: .md, variant: .danger, isBlock: true) {
-                showSignOutConfirmation = true
-            }
-            .padding(.top, 6)
-        }
-    }
-
-    /// Toggle row styled like a setting row. The write happens in the
-    /// binding's setter, so programmatic loads never trigger a write.
-    private var betaOptInRow: some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Sport goals (beta)")
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(SomaTokens.ink)
-                Text("Beta features appear automatically while this is on.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(SomaTokens.ink3)
-            }
-            Spacer()
-            Toggle("", isOn: Binding(
-                get: { betaOptIn },
-                set: { newValue in
-                    betaOptIn = newValue
-                    Task { await updateBetaOptIn(newValue) }
-                }
-            ))
-            .labelsHidden()
-            .tint(SomaTokens.accent)
-        }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
-    }
-
-    private func updateBetaOptIn(_ enabled: Bool) async {
-        do {
-            try await SupabaseClient.shared.setBetaOptIn(enabled)
-            errorMessage = nil
-            // Refetch the catalog in both directions: ON surfaces the beta
-            // rows this session, OFF makes every entry point vanish.
-            await loadSportGoalState()
-        } catch {
-            betaOptIn = !enabled
-            errorMessage = String(localized: "profile.betaOptIn.error", defaultValue: "Couldn't update beta access. Try again.", comment: "Error shown when toggling the sport-goals beta opt-in fails")
-        }
-    }
-
-    // MARK: - Row primitives
-
-    /// Shared fallback text for an unset profile field, reused across
-    /// every summary row so its localization stays consistent.
-    private var notSetLabel: String {
-        String(localized: "profile.notSet", defaultValue: "Not set", comment: "Fallback value shown when a profile field hasn't been set yet")
-    }
-
-    /// Lowercase variant used mid-sentence in Stepper titles.
-    private var notSetLowerLabel: String {
-        String(localized: "profile.notSetLower", defaultValue: "not set", comment: "Lowercase 'not set' fallback used mid-sentence in a Stepper title")
-    }
-
-    private var signOutLabel: String {
-        String(localized: "profile.signOut", defaultValue: "Sign out", comment: "Button to sign out of the account")
-    }
-
-    private func groupEyebrow(_ text: LocalizedStringKey) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .bold))
-            .tracking(0.5)
-            .foregroundStyle(SomaTokens.ink4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 4)
-    }
-
-    /// `label / one-line consequence / current value / ›` -- guide 05's
-    /// row shape. Tapping presents whatever detail the caller wired up
-    /// (usually `activeSheet = .someCase`).
-    private func summaryRow(title: LocalizedStringKey, consequence: LocalizedStringKey, value: String, valueColor: Color? = nil, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(SomaTokens.ink)
-                    Text(consequence)
-                        .font(.system(size: 12))
-                        .foregroundStyle(SomaTokens.ink3)
-                        .lineLimit(1)
-                }
-                Spacer()
-                if !value.isEmpty {
-                    Text(value)
-                        .font(.system(size: 13))
-                        .foregroundStyle(valueColor ?? SomaTokens.ink2)
-                        .lineLimit(1)
-                        .multilineTextAlignment(.trailing)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(SomaTokens.ink5)
-            }
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Device rows: status dot, value in success/accent, no chevron --
-    /// visually distinct from a setting row (guide 05's own distinction).
-    private func deviceRow(_ provider: Provider) -> some View {
-        let isConnected = appState.connectedProviders.contains(provider)
-        // Server-verified: the stored refresh token failed (revoked,
-        // expired) so the connection is dead even though the local cache
-        // still says "connected." Tappable in this state -- unlike a
-        // healthy connection, which is only ever disconnected by the
-        // provider's own app/website, not from here.
-        let needsReconnect = appState.providersNeedingReconnect.contains(provider)
-        return Button {
-            if !isConnected || needsReconnect { connectDevice(provider) }
-        } label: {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(needsReconnect ? SomaTokens.warn : (isConnected ? SomaTokens.successDot : SomaTokens.neutralDot))
-                    .frame(width: 8, height: 8)
-                Text(provider.displayName)
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(SomaTokens.ink)
-                Spacer()
-                if connecting.contains(provider) {
-                    ProgressView()
-                } else if needsReconnect {
-                    Text("Reconnect")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(SomaTokens.warn)
-                } else {
-                    Text(isConnected ? "Connected" : "Connect")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isConnected ? SomaTokens.success : SomaTokens.accent)
-                }
-            }
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface))
-        }
-        .buttonStyle(.plain)
-        .disabled((isConnected && !needsReconnect) || connecting.contains(provider))
-    }
-
-    // MARK: - Detail sheets
-
-    @ViewBuilder
-    private func detailSheet(for sheet: ProfileSheet) -> some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    switch sheet {
-                    case .experience: experienceEditor
-                    case .goals: goalsEditor
-                    case .equipment: equipmentEditor
-                    case .kitchenEquipment: kitchenEquipmentEditor
-                    case .weeklyTarget: weeklyTargetEditor
-                    case .injuries: injuriesEditor
-                    case .pregnancy: pregnancyEditor
-                    case .contactEmail: contactEmailEditor
-                    case .region: regionEditor
-                    case .language: languageEditor
-                    case .dateOfBirth: dateOfBirthEditor
-                    case .knownLifts: knownLiftsEditor
-                    case .anchorSession: anchorSessionEditor
-                    case .cycleTracking: cycleTrackingEditor
-                    }
-                }
-                .padding(20)
-                .dismissKeyboardOnTap()
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .somaBackground()
-            .navigationTitle(sheet.title(locale: languageManager.effectiveLocale))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        // Language is a local display preference (applied
-                        // immediately by languageEditor's picker), not a
-                        // profile field -- skip the network save() for it.
-                        if sheet != .language { save() }
-                        activeSheet = nil
-                    }
-                    .disabled(isSaving)
-                }
-            }
-        }
-    }
-
-    private var experienceEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Adjusts the AI workout plan's structure -- how many blocks, whether it uses supersets, and rest periods.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            FlowLayout {
-                ForEach(ExperienceLevel.allCases) { level in
-                    ChipToggle(title: level.displayName, isSelected: experienceLevel == level) {
-                        experienceLevel = experienceLevel == level ? nil : level
-                    }
-                }
-            }
-        }
-    }
-
-    private var goalsEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            FlowLayout {
-                ForEach(GoalTag.allCases) { tag in
-                    ChipToggle(title: tag.displayName, isSelected: goals.contains(tag)) {
-                        toggle(tag, in: &goals)
-                    }
-                }
-            }
-            if goals.contains(.other) {
-                TextField("What's your goal?", text: $otherGoalText)
-                    .textFieldStyle(.roundedBorder)
-            }
-        }
-    }
-
-    private var equipmentEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            FlowLayout {
-                ForEach(EquipmentTag.allCases) { tag in
-                    ChipToggle(title: tag.displayName, isSelected: equipment.contains(tag)) {
-                        toggle(tag, in: &equipment)
-                    }
-                }
-            }
-            if equipment.contains(.other) {
-                TextField("What else do you have access to?", text: $otherEquipmentText)
-                    .textFieldStyle(.roundedBorder)
-            }
-        }
-    }
-
-    private var kitchenEquipmentEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(String(localized: "profile.kitchenEquipment.explainer", defaultValue: "So we only ever suggest recipes you can actually cook.", comment: "Explainer text at top of the kitchen-equipment editor sheet"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            FlowLayout {
-                ForEach(KitchenEquipmentTag.allCases) { tag in
-                    ChipToggle(title: tag.displayName, isSelected: householdEquipment.contains(tag)) {
-                        toggle(tag, in: &householdEquipment)
-                    }
-                }
-            }
-            if householdEquipment.contains(.other) {
-                TextField(String(localized: "profile.kitchenEquipment.otherPlaceholder", defaultValue: "What else? (comma-separated)", comment: "Placeholder text for the free-text 'other kitchen equipment' field"), text: $otherHouseholdEquipmentText)
-                    .textFieldStyle(.roundedBorder)
-            }
-        }
-    }
-
-    private var weeklyTargetEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("A personal tracking goal -- doesn't change what Soma recommends, just what it shows you here.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Stepper(
-                "Target: \(weeklySessionTarget.map(String.init) ?? notSetLowerLabel) sessions/week",
-                value: Binding(get: { weeklySessionTarget ?? 3 }, set: { weeklySessionTarget = $0 }),
-                in: 1...14
-            )
-            .font(.caption)
-            if weeklySessionTarget != nil {
-                Text("\(sessionsDoneThisWeek) done this week so far.")
-                    .font(.caption.bold())
-                    .foregroundStyle(SomaTokens.accent)
-            }
-        }
-    }
-
-    /// Real feedback: a self-described non-powerlifter was prescribed
-    /// 125-135kg for a barbell deadlift from the population-level
-    /// bodyweight-ratio estimate alone. Entirely optional, entirely
-    /// separate from experience level -- filling in even one pattern here
-    /// makes the AI plan use that real number for that pattern specifically,
-    /// leaving the others on the estimate.
-    private var knownLiftsEditor: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(String(localized: "profile.knownLifts.explainer", defaultValue: "If you know your comfortable working weight for any of these, Soma uses it directly for the AI plan instead of estimating from your bodyweight and experience level. Leave any blank to keep using the estimate.", comment: "Explainer text at top of the known-lifts editor sheet"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ForEach(LiftPattern.allCases) { pattern in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(pattern.displayName)
-                        .font(.system(size: 14.5, weight: .semibold))
-                    HStack {
-                        TextField(pattern.placeholder, text: Binding(
-                            get: { knownLiftsText[pattern] ?? "" },
-                            set: { knownLiftsText[pattern] = $0 }
-                        ))
-                        .keyboardType(.numberPad)
-                        Text("kg")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous).fill(SomaTokens.surface3))
-                }
-            }
-        }
-    }
-
-    private var injuriesEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Any active injury caps today's intensity at Moderate and hides high-impact workouts.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            FlowLayout {
-                ForEach(InjuryTag.allCases) { tag in
-                    ChipToggle(title: tag.displayName, isSelected: injuryTags.contains(tag)) {
-                        toggle(tag, in: &injuryTags)
-                        if injuryTags.contains(tag), injurySeverity[tag] == nil {
-                            injurySeverity[tag] = .moderate
-                        }
-                    }
-                }
-            }
-            ForEach(InjuryTag.allCases.filter { injuryTags.contains($0) }) { tag in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(tag.displayName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Picker(tag.displayName, selection: Binding(
-                        get: { injurySeverity[tag] ?? .moderate },
-                        set: { injurySeverity[tag] = $0 }
-                    )) {
-                        ForEach(InjurySeverity.allCases) { severity in
-                            Text(severity.displayName).tag(severity)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    Picker("Type (optional)", selection: Binding(
-                        get: { injuryType[tag] },
-                        set: { injuryType[tag] = $0 }
-                    )) {
-                        Text("Not specified").tag(InjuryType?.none)
-                        ForEach(InjuryType.allCases) { type in
-                            Text(type.displayName).tag(InjuryType?.some(type))
-                        }
-                    }
-                    .font(.caption)
-
-                    Stepper(
-                        "Pain level: \(injuryPainLevel[tag].map(String.init) ?? notSetLowerLabel)",
-                        value: Binding(get: { injuryPainLevel[tag] ?? 1 }, set: { injuryPainLevel[tag] = $0 }),
-                        in: 1...10
-                    )
-                    .font(.caption)
-
-                    if injurySeverity[tag] == .moderate || injurySeverity[tag] == .severe {
-                        Text("Given the severity you've selected, consider seeing a physician or physiotherapist before continuing to train this area. Soma's guidance here is informational only, not a diagnosis.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                }
-                .padding(.top, 4)
-            }
-            TextField("Notes (optional)", text: $injuryNotesText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(2...5)
-        }
-    }
-
-    private var pregnancyEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Optional, and never assumed -- only set if you tell us. Soma will adjust your workouts to your pregnancy stage rather than withhold them. This is general guidance only -- please follow your doctor's or midwife's advice, especially if you have any pregnancy complications.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            FlowLayout {
-                ChipToggle(title: String(localized: "profile.pregnancy.currentlyPregnant", defaultValue: "I'm currently pregnant", comment: "Pregnancy chip toggle label"), isSelected: pregnancy == true) {
-                    pregnancy = (pregnancy == true) ? nil : true
-                    if pregnancy != true { pregnancyWeek = nil }
-                }
-            }
-            if pregnancy == true {
-                Stepper(
-                    "Week: \(pregnancyWeek.map(String.init) ?? notSetLowerLabel)",
-                    value: Binding(get: { pregnancyWeek ?? 1 }, set: { pregnancyWeek = $0 }),
-                    in: 1...42
-                )
-                .font(.caption)
-            }
-        }
-    }
-
-    /// Same field pair + "clear resets both" behavior as pregnancyEditor
-    /// just above -- Phase 5 (see docs/coaching-personalization-plan.md).
-    /// Only ever reachable when sex == .female (see cycleTrackingRowVisible),
-    /// so there's no sex picker/gate needed inside the editor itself.
-    private var cycleTrackingEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(String(localized: "profile.cycleTracking.explainer", defaultValue: "Optional, and never assumed -- only set if you tell us. Soma will factor your cycle phase into training suggestions as one general consideration among others. This is general guidance only, not medical advice, and not a fertility or ovulation tracker.", comment: "Explainer text at top of the cycle-tracking editor sheet"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            DatePicker(
-                String(localized: "profile.cycleTracking.lastPeriodLabel", defaultValue: "Last period start date", comment: "Date picker label for the start date of the user's last period"),
-                selection: Binding(
-                    get: { lastPeriodStartDate ?? Date() },
-                    set: { lastPeriodStartDate = $0 }
-                ),
-                in: ...Date(),
-                displayedComponents: .date
-            )
-            if lastPeriodStartDate != nil {
-                let lengthText = typicalCycleLengthDays.map {
-                    String(localized: "profile.cycleTracking.daysCount", defaultValue: "\($0) days", comment: "Number of days shown in the typical-cycle-length stepper, e.g. '28 days'")
-                } ?? String(localized: "profile.cycleTracking.stepperDefault", defaultValue: "not set (defaults to 28)", comment: "Shown in the typical-cycle-length stepper title when no custom length has been set yet")
-                Stepper(
-                    String(localized: "profile.cycleTracking.stepperTitle", defaultValue: "Typical cycle length: \(lengthText)", comment: "Stepper title showing the current typical cycle length setting, e.g. 'Typical cycle length: 28 days'"),
-                    value: Binding(get: { typicalCycleLengthDays ?? 28 }, set: { typicalCycleLengthDays = $0 }),
-                    in: 21...35
-                )
-                .font(.caption)
-                Button(String(localized: "profile.cycleTracking.clear", defaultValue: "Clear", comment: "Button clearing the entered cycle-tracking dates")) {
-                    lastPeriodStartDate = nil
-                    typicalCycleLengthDays = nil
-                }
-                .font(.caption)
-                .foregroundStyle(SomaTokens.danger)
-            }
-        }
-    }
-
-    private var contactEmailEditor: some View {
-        TextField("you@example.com", text: $contactEmailText)
-            .textInputAutocapitalization(.never)
-            .keyboardType(.emailAddress)
-            .autocorrectionDisabled()
-            .textFieldStyle(.roundedBorder)
-    }
-
-    /// "yyyy-MM-dd", matching UserProfile.dateOfBirth's wire format
-    /// (same as AgeGate.isAdult's parser).
-    private static let dobFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = .current
-        return formatter
-    }()
-
-    private static var defaultDateOfBirth: Date {
-        Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
-    }
-
-    /// ISO region codes sorted by their localized display name -- never a
-    /// hand-maintained country list.
-    private static let countryOptions: [(code: String, name: String)] = Locale.Region.isoRegions
-        .map(\.identifier)
-        .filter { $0.count == 2 && $0.allSatisfy(\.isLetter) }
-        .compactMap { code in Locale.current.localizedString(forRegionCode: code).map { (code, $0) } }
-        .sorted { $0.1.localizedCaseInsensitiveCompare($1.1) == .orderedAscending }
-
-    private var regionEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Used for future nearby gym and coach partner suggestions.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Picker("Country", selection: $countryCode) {
-                Text("Not set").tag(String?.none)
-                ForEach(Self.countryOptions, id: \.code) { option in
-                    Text(option.name).tag(String?.some(option.code))
-                }
-            }
-            .pickerStyle(.menu)
-            TextField("City", text: $cityText)
-                .textFieldStyle(.roundedBorder)
-        }
-    }
-
-    private var languageEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(String(localized: "profile.language.explainer", defaultValue: "Most of Soma updates immediately; the rest applies next time you open the app.", comment: "Explainer text at top of the language picker sheet"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            VStack(spacing: 0) {
-                ForEach(AppLanguage.allCases) { language in
-                    Button {
-                        let changed = languageManager.selected != language
-                        languageManager.selected = language
-                        // Only worth interrupting the user when the choice
-                        // actually changed -- re-tapping the already-active
-                        // language shouldn't nag them with a restart prompt
-                        // for a no-op.
-                        if changed {
-                            languageNeedingRestartPrompt = language
-                        }
-                    } label: {
-                        HStack {
-                            Text(language.displayName(locale: languageManager.effectiveLocale))
-                                .foregroundStyle(SomaTokens.ink)
-                            Spacer()
-                            if languageManager.selected == language {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(SomaTokens.accent)
-                            }
-                        }
-                        .padding(.vertical, 12)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    // Stable hook for XCUITest -- displayName is untranslated
-                    // (each language shows its own name) and unstable across
-                    // locales isn't the issue, but matching by raw value is
-                    // still more robust than matching translated text.
-                    .accessibilityIdentifier("language-option-\(language.rawValue)")
-                    if language != AppLanguage.allCases.last {
-                        Divider()
-                    }
-                }
-            }
-        }
-        // A passive caption is easy to skim past -- this makes the "you'll
-        // need to reopen the app" tradeoff an explicit, hard-to-miss step
-        // right when it's actually relevant, instead of leaving someone
-        // wondering why half the screen didn't change language. Apple's own
-        // guidance is that an app should never terminate itself
-        // programmatically (no exit(0) auto-relaunch) -- this just tells
-        // the user plainly and lets them close the app themselves.
-        .alert(
-            String(localized: "profile.language.restartAlert.title", defaultValue: "Restart Soma to finish switching", comment: "Alert title shown after picking a new app language"),
-            isPresented: Binding(
-                get: { languageNeedingRestartPrompt != nil },
-                set: { if !$0 { languageNeedingRestartPrompt = nil } }
-            )
-        ) {
-            Button(String(localized: "profile.language.restartAlert.confirm", defaultValue: "Got it", comment: "Dismiss button on the language-restart alert")) {
-                languageNeedingRestartPrompt = nil
-            }
-        } message: {
-            if let language = languageNeedingRestartPrompt {
-                Text(String(localized: "profile.language.restartAlert.message", defaultValue: "Most of the app already switched. Close Soma (swipe it away from the app switcher) and reopen it to see everything in \(language.displayName(locale: languageManager.effectiveLocale)).", comment: "Alert message telling the user to manually close and reopen the app to finish a language switch; placeholder is the newly-selected language's own display name"))
-            }
-        }
-    }
-
-    /// Same field pair as onboarding's AnchorSessionQuestionView, same
-    /// WeekdayMiniPicker component -- lets someone who skipped it at
-    /// onboarding set it later, or fix the wrong day.
-    private var anchorSessionEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(String(localized: "profile.anchorSession.explainer", defaultValue: "A recurring class or activity (e.g. a Tuesday hot yoga class) the rest of your week gets built around.", comment: "Explainer text at top of the weekly anchor session editor sheet"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            TextField(String(localized: "profile.anchorSession.namePlaceholder", defaultValue: "e.g. \"Hot Yoga\", \"Tennis league\"", comment: "Placeholder text for the anchor session name field"), text: $anchorSessionName)
-                .textFieldStyle(.roundedBorder)
-            VStack(alignment: .leading, spacing: 10) {
-                Text(String(localized: "profile.anchorSession.dayPrompt", defaultValue: "Which day(s) is it usually on?", comment: "Prompt above the weekday picker for the anchor session"))
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                WeekdayMiniPicker(selected: $anchorSessionDays)
-            }
-        }
-    }
-
-    /// Real feedback traced to a missing DOB: an account created before
-    /// the onboarding DOB step existed has no other way to supply one,
-    /// which silently hides the whole Goal Body photo feature -- see
-    /// UserProfile.dateOfBirth's doc comment. Same wheel DatePicker as
-    /// the onboarding step (DateOfBirthQuestionView) for a consistent feel.
-    private var dateOfBirthEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(String(localized: "profile.dateOfBirth.explainer", defaultValue: "Confirms you're 18+ to unlock Goal Body progress photos. Never shown to other users.", comment: "Explainer text at top of the date-of-birth editor sheet"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            DatePicker(
-                "Date of birth",
-                selection: Binding(
-                    get: { dateOfBirthDate ?? Self.defaultDateOfBirth },
-                    set: { dateOfBirthDate = $0 }
-                ),
-                in: ...Date(),
-                displayedComponents: .date
-            )
-            .datePickerStyle(.wheel)
-            .labelsHidden()
-        }
-    }
-
-    /// Three distinct states worth telling apart: paying, on a referral
-    /// bonus (free, but ending), or neither.
-    private var subscriptionStatusText: String {
-        if subscriptionManager.isSubscribed {
-            return String(localized: "profile.subscription.active", defaultValue: "Soma Premium is active.", comment: "Subscription row consequence text when Premium is active")
-        }
-        if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .none
-            formatter.locale = languageManager.effectiveLocale
-            let dateText = formatter.string(from: bonusUntil)
-            return String(localized: "profile.subscription.freeBonus", defaultValue: "Free until \(dateText) -- tap to subscribe now instead.", comment: "Subscription row consequence text during a temporary referral-bonus free period")
-        }
-        return String(localized: "profile.subscription.freePlan", defaultValue: "Free plan -- today's category and message only.", comment: "Subscription row consequence text on the default free plan")
-    }
-
-    private func connectDevice(_ provider: Provider) {
-        guard !connecting.contains(provider) else { return }
-        connecting.insert(provider)
-        deviceErrorMessage = nil
-
-        Task {
-            defer { connecting.remove(provider) }
-            do {
-                switch provider {
-                case .appleHealth:
-                    try await HealthKitManager.shared.requestAuthorization()
-                case .whoop:
-                    try await WhoopOAuthManager.shared.connect()
-                case .oura:
-                    try await OuraOAuthManager.shared.connect()
-                }
-                appState.markProviderConnected(provider)
-            } catch {
-                let providerName = provider.displayName
-                let reason = error.localizedDescription
-                deviceErrorMessage = String(localized: "profile.device.connectError", defaultValue: "Couldn't connect \(providerName): \(reason)", comment: "Error shown when connecting a wearable device provider fails; includes the provider name and system error text")
-            }
-        }
-    }
-
-    private func toggle<T: Hashable>(_ tag: T, in set: inout Set<T>) {
+    func toggle<T: Hashable>(_ tag: T, in set: inout Set<T>) {
         if set.contains(tag) {
             set.remove(tag)
         } else {
@@ -1545,7 +929,7 @@ struct ProfileView: View {
         }
     }
 
-    private func load() async {
+    func load(appState: AppState) async {
         guard let userId = SupabaseClient.shared.currentUserID else { return }
         guard let profile = try? await SupabaseClient.shared.fetchProfile(id: userId) else { return }
 
@@ -1600,16 +984,17 @@ struct ProfileView: View {
             .map(Self.streak(from:)) ?? 0
         todaysSteps = await HealthKitManager.shared.fetchTodaysSteps().map { Int($0) }
         sessionsDoneThisWeek = await Self.workoutsThisWeek()
+        notificationsAuthorized = await NotificationManager.shared.isAuthorized()
         await loadSportGoalState()
-        await loadConnectionStatus()
+        await loadConnectionStatus(appState: appState)
 
-        setSuperwallUserAttributes(profile: profile)
+        setSuperwallUserAttributes(profile: profile, appState: appState)
     }
 
     /// Compresses, uploads, and updates local state so the header shows
     /// the new photo immediately -- same shape as GoalBodyProgressView's
     /// upload(kind:item:).
-    private func uploadAvatar(item: PhotosPickerItem?) async {
+    func uploadAvatar(item: PhotosPickerItem?) async {
         guard let item, let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
         guard let compressed = ImageCompression.jpeg(image) else {
             avatarErrorMessage = String(localized: "photoUpload.error.processingFailed", defaultValue: "Couldn't process that photo. Try another one.", comment: "Error shown when a selected body photo fails local compression/processing before upload.")
@@ -1626,7 +1011,7 @@ struct ProfileView: View {
         }
     }
 
-    private func removeAvatar() async {
+    func removeAvatar() async {
         guard let avatarPhotoPath else { return }
         avatarErrorMessage = nil
         do {
@@ -1639,16 +1024,16 @@ struct ProfileView: View {
     }
 
     /// Server-verified connected/needs-reconnect state for the device
-    /// rows below -- delegates to AppState's shared refresh (also used on
-    /// every sign-in) rather than duplicating the fetch-and-merge logic
-    /// here. See AppState.refreshConnectedProviders's own doc comment.
-    private func loadConnectionStatus() async {
+    /// rows -- delegates to AppState's shared refresh (also used on every
+    /// sign-in) rather than duplicating the fetch-and-merge logic here.
+    /// See AppState.refreshConnectedProviders's own doc comment.
+    func loadConnectionStatus(appState: AppState) async {
         await appState.refreshConnectedProviders()
     }
 
     /// Best-effort (`try?` throughout): a failed fetch degrades to hidden
     /// entry points, indistinguishable from the server kill switch.
-    private func loadSportGoalState() async {
+    func loadSportGoalState() async {
         guard Config.enableSportGoals else { return }
         // All three in parallel -- none depends on another's result.
         async let catalogFetch: SportCatalog? = try? await SupabaseClient.shared.fetchSportCatalog()
@@ -1674,7 +1059,7 @@ struct ProfileView: View {
     /// someone with an active referral bonus from a campaign). Never
     /// fabricated, matches this app's standing "no decorative data"
     /// convention -- see AnalyticsManager's own doc comment.
-    private func setSuperwallUserAttributes(profile: UserProfile) {
+    func setSuperwallUserAttributes(profile: UserProfile, appState: AppState) {
         var attributes: [String: Any] = [
             "goals": profile.goals.map(\.rawValue).joined(separator: ","),
             "equipment_count": profile.equipment.count,
@@ -1691,55 +1076,49 @@ struct ProfileView: View {
     /// Not skipped for an active referral bonus, unlike the gating
     /// placements -- someone who explicitly taps in to see premium options
     /// should see them regardless.
-    private func presentPremiumPaywall() {
+    func presentPremiumPaywall() {
         Superwall.shared.register(placement: "view_premium")
     }
 
-    /// Consecutive days up to and including today with a logged workout --
-    /// same underlying data (fetchRecentWorkoutLogDates) as the calendar
-    /// strip's crown badges, just aggregated into a streak count here.
-    /// Not `private` so StreakMilestoneTests can exercise it directly.
-    static func streak(from dates: Set<String>) -> Int {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = .current
-        var count = 0
-        var cursor = Date()
-        while dates.contains(formatter.string(from: cursor)) {
-            count += 1
-            cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor) ?? cursor
-        }
-        return count
-    }
+    func connectDevice(_ provider: Provider, appState: AppState) {
+        guard !connecting.contains(provider) else { return }
+        connecting.insert(provider)
+        deviceErrorMessage = nil
 
-    private static func workoutsThisWeek() async -> Int {
-        let calendar = Calendar.current
-        guard let weekStart = calendar.dateInterval(of: .weekOfYear, for: Date())?.start else { return 0 }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = .current
-        let logs = (try? await SupabaseClient.shared.fetchWorkoutLogs(
-            fromDate: formatter.string(from: weekStart),
-            toDate: formatter.string(from: Date())
-        )) ?? []
-        return Set(logs.map(\.date)).count
-    }
-
-    /// Parses knownLiftsText into the wire shape -- a blank or
-    /// non-positive entry for a pattern is dropped rather than saved as
-    /// 0, so it falls back to the population estimate exactly like never
-    /// having entered anything.
-    private var knownLifts: [String: Double] {
-        var result: [String: Double] = [:]
-        for (pattern, text) in knownLiftsText {
-            if let value = Double(text.trimmingCharacters(in: .whitespaces)), value > 0 {
-                result[pattern.rawValue] = value
+        Task {
+            defer { connecting.remove(provider) }
+            do {
+                switch provider {
+                case .appleHealth:
+                    try await HealthKitManager.shared.requestAuthorization()
+                case .whoop:
+                    try await WhoopOAuthManager.shared.connect()
+                case .oura:
+                    try await OuraOAuthManager.shared.connect()
+                }
+                appState.markProviderConnected(provider)
+            } catch {
+                let providerName = provider.displayName
+                let reason = error.localizedDescription
+                deviceErrorMessage = String(localized: "profile.device.connectError", defaultValue: "Couldn't connect \(providerName): \(reason)", comment: "Error shown when connecting a wearable device provider fails; includes the provider name and system error text")
             }
         }
-        return result
     }
 
-    private func save() {
+    func updateBetaOptIn(_ enabled: Bool) async {
+        do {
+            try await SupabaseClient.shared.setBetaOptIn(enabled)
+            errorMessage = nil
+            // Refetch the catalog in both directions: ON surfaces the beta
+            // rows this session, OFF makes every entry point vanish.
+            await loadSportGoalState()
+        } catch {
+            betaOptIn = !enabled
+            errorMessage = String(localized: "profile.betaOptIn.error", defaultValue: "Couldn't update beta access. Try again.", comment: "Error shown when toggling the sport-goals beta opt-in fails")
+        }
+    }
+
+    func save() {
         guard let userId = SupabaseClient.shared.currentUserID else { return }
         isSaving = true
         errorMessage = nil
@@ -1810,21 +1189,510 @@ struct ProfileView: View {
             }
         }
     }
+
+    /// "yyyy-MM-dd", matching UserProfile.dateOfBirth's wire format
+    /// (same as AgeGate.isAdult's parser).
+    static let dobFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        return formatter
+    }()
+
+    static var defaultDateOfBirth: Date {
+        Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
+    }
+
+    /// ISO region codes sorted by their localized display name -- never a
+    /// hand-maintained country list.
+    static let countryOptions: [(code: String, name: String)] = Locale.Region.isoRegions
+        .map(\.identifier)
+        .filter { $0.count == 2 && $0.allSatisfy(\.isLetter) }
+        .compactMap { code in Locale.current.localizedString(forRegionCode: code).map { (code, $0) } }
+        .sorted { $0.1.localizedCaseInsensitiveCompare($1.1) == .orderedAscending }
+
+    /// Consecutive days up to and including today with a logged workout --
+    /// same underlying data (fetchRecentWorkoutLogDates) as the calendar
+    /// strip's crown badges, just aggregated into a streak count here.
+    /// Not `private` so StreakMilestoneTests can exercise it directly.
+    /// `nonisolated` -- a pure function over its argument, touches no
+    /// `@MainActor`-isolated state, so it shouldn't force every synchronous
+    /// caller (including the plain XCTestCase methods that unit-test it) to
+    /// hop actors just to call it.
+    nonisolated static func streak(from dates: Set<String>) -> Int {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        var count = 0
+        var cursor = Date()
+        while dates.contains(formatter.string(from: cursor)) {
+            count += 1
+            cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor) ?? cursor
+        }
+        return count
+    }
+
+    private static func workoutsThisWeek() async -> Int {
+        let calendar = Calendar.current
+        guard let weekStart = calendar.dateInterval(of: .weekOfYear, for: Date())?.start else { return 0 }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        let logs = (try? await SupabaseClient.shared.fetchWorkoutLogs(
+            fromDate: formatter.string(from: weekStart),
+            toDate: formatter.string(from: Date())
+        )) ?? []
+        return Set(logs.map(\.date)).count
+    }
 }
 
-private enum ProfileSection: String, CaseIterable, Identifiable {
-    case training, healthSafety, account
-    var id: String { rawValue }
-    // Stays String -- SomaSegmentedControl's shared closure param is
-    // String, so each case pre-localizes via String(localized:) instead.
-    var title: String {
-        switch self {
-        case .training: String(localized: "profile.section.training", defaultValue: "Training", comment: "Profile screen segmented tab label")
-        case .healthSafety: String(localized: "profile.section.healthSafety", defaultValue: "Health & Safety", comment: "Profile screen segmented tab label")
-        case .account: String(localized: "profile.section.account", defaultValue: "Account", comment: "Profile screen segmented tab label")
+// MARK: - Training page
+
+private struct TrainingSettingsView: View {
+    @ObservedObject var store: ProfileStore
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 22) {
+                groupCard(
+                    eyebrow: "TRAINING",
+                    footnote: String(localized: "profile.training.groupFootnote", defaultValue: "Experience sets block count, supersets and rest. A real lift number beats an estimate.", comment: "Footnote under the Training settings group")
+                ) {
+                    groupRow(title: "Experience", value: store.experienceLevel?.displayName ?? store.notSetLabel, isSet: store.experienceLevel != nil) { store.activeSheet = .experience }
+                    groupDivider
+                    groupRow(
+                        title: "Goals",
+                        value: store.goals.isEmpty ? store.notSetLabel : String(localized: "profile.goals.selectedCount", defaultValue: "\(store.goals.count) selected", comment: "Training goals row value: number of goals selected"),
+                        isSet: !store.goals.isEmpty
+                    ) { store.activeSheet = .goals }
+                    groupDivider
+                    groupRow(
+                        title: "Weekly target",
+                        value: store.weeklySessionTarget.map {
+                            String(localized: "profile.weeklyTarget.progress", defaultValue: "\($0)/wk · \(store.sessionsDoneThisWeek) done", comment: "Weekly target row value: target sessions per week and sessions done so far, e.g. '4/wk · 2 done'")
+                        } ?? store.notSetLabel,
+                        isSet: store.weeklySessionTarget != nil
+                    ) { store.activeSheet = .weeklyTarget }
+                    groupDivider
+                    groupRow(
+                        title: LocalizedStringKey(String(localized: "profile.anchorSession.title", defaultValue: "Weekly anchor session", comment: "Row title for the weekly anchor session editor")),
+                        value: store.anchorSessionRowValue,
+                        isSet: store.anchorSessionRowValue != store.notSetLabel
+                    ) { store.activeSheet = .anchorSession }
+                    groupDivider
+                    groupRow(
+                        title: LocalizedStringKey(String(localized: "profile.knownLifts.title", defaultValue: "Your current lifts", comment: "Row title for the known-lifts editor")),
+                        value: store.knownLifts.isEmpty ? store.notSetLabel : String(localized: "profile.knownLifts.countLabel", defaultValue: "\(store.knownLifts.count) set", comment: "Known-lifts row value: number of lift patterns with a saved value, e.g. '3 set'"),
+                        isSet: !store.knownLifts.isEmpty
+                    ) { store.activeSheet = .knownLifts }
+                    if store.showSportGoalRow {
+                        groupDivider
+                        groupRow(title: "My goal", value: store.sportGoalRowValue, isSet: store.sportGoalRowValue != store.notSetLabel, tinted: true) {
+                            AnalyticsManager.shared.featureUsed(name: "sport_goal_flow")
+                            store.showSportGoals = true
+                        }
+                    }
+                }
+
+                groupCard(
+                    eyebrow: "EQUIPMENT",
+                    footnote: String(localized: "profile.equipment.groupFootnote", defaultValue: "Suggestions only use what you actually have.", comment: "Footnote under the Equipment settings group")
+                ) {
+                    groupRow(
+                        title: "Gym & access",
+                        value: store.equipment.isEmpty ? store.notSetLabel : EquipmentTag.allCases.filter(store.equipment.contains).map(\.displayName).joined(separator: ", "),
+                        isSet: !store.equipment.isEmpty
+                    ) { store.activeSheet = .equipment }
+                    groupDivider
+                    groupRow(
+                        title: LocalizedStringKey(String(localized: "profile.kitchenEquipment.title", defaultValue: "Kitchen equipment", comment: "Row title for the kitchen-equipment editor")),
+                        value: store.householdEquipment.isEmpty ? store.notSetLabel : KitchenEquipmentTag.allCases.filter(store.householdEquipment.contains).map(\.displayName).joined(separator: ", "),
+                        isSet: !store.householdEquipment.isEmpty
+                    ) { store.activeSheet = .kitchenEquipment }
+                }
+            }
+            .padding(20)
+        }
+        .somaBackground()
+        .navigationTitle("Training")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $store.activeSheet) { sheet in
+            DetailSheetContent(sheet: sheet, store: store)
+        }
+        .sheet(isPresented: $store.showSportGoals, onDismiss: {
+            Task { await store.loadSportGoalState() }
+        }) {
+            SportGoalFlowView()
         }
     }
 }
+
+// MARK: - Health & Safety page
+
+private struct HealthSafetySettingsView: View {
+    @ObservedObject var store: ProfileStore
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 22) {
+                groupCard(
+                    eyebrow: "SAFETY",
+                    footnote: String(localized: "profile.safety.groupFootnote", defaultValue: "Injuries and pregnancy status shape today's intensity and what gets suggested.", comment: "Footnote under the Safety settings group")
+                ) {
+                    groupRow(
+                        title: "Injuries",
+                        value: store.injuryTags.isEmpty ? String(localized: "profile.injuries.noneNoted", defaultValue: "None noted", comment: "Injuries row value when no injuries are recorded") : store.injuryTags.map(\.displayName).joined(separator: ", "),
+                        isSet: !store.injuryTags.isEmpty
+                    ) { store.activeSheet = .injuries }
+                    groupDivider
+                    groupRow(
+                        title: "Pregnancy",
+                        value: store.pregnancy == true
+                            ? (store.pregnancyWeek.map { String(localized: "profile.pregnancy.week", defaultValue: "Week \($0)", comment: "Pregnancy row value showing the current week number, e.g. 'Week 12'") } ?? String(localized: "profile.pregnancy.yes", defaultValue: "Yes", comment: "Pregnancy row value when pregnant but no week number is set"))
+                            : store.notSetLabel,
+                        isSet: store.pregnancy == true
+                    ) { store.activeSheet = .pregnancy }
+
+                    if store.cycleTrackingRowVisible {
+                        groupDivider
+                        groupRow(
+                            title: LocalizedStringKey(String(localized: "profile.cycleTracking.title", defaultValue: "Cycle tracking", comment: "Row title for the cycle-tracking editor")),
+                            value: store.cycleTrackingRowValue,
+                            isSet: store.cycleTrackingRowValue != store.notSetLabel
+                        ) { store.activeSheet = .cycleTracking }
+                    }
+
+                    if Config.enableBodyPhotoUpload && store.isConfirmedAdultForBodyPhotos {
+                        groupDivider
+                        groupRow(title: "Your progress") { store.showGoalBodyProgress = true }
+                    }
+                }
+
+                groupCard(
+                    eyebrow: "INSIGHTS",
+                    footnote: String(localized: "profile.insights.groupFootnote", defaultValue: "Training history and recovery trends, at a glance.", comment: "Footnote under the Insights settings group")
+                ) {
+                    groupRow(title: "Training history") {
+                        AnalyticsManager.shared.featureUsed(name: "training_history")
+                        store.showTrainingHistory = true
+                    }
+                    groupDivider
+                    groupRow(title: "Health dashboard") {
+                        AnalyticsManager.shared.featureUsed(name: "health_dashboard")
+                        store.showHealthDashboard = true
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .somaBackground()
+        .navigationTitle("Health & Safety")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $store.activeSheet) { sheet in
+            DetailSheetContent(sheet: sheet, store: store)
+        }
+        .sheet(isPresented: $store.showTrainingHistory) {
+            TrainingHistoryView()
+        }
+        .sheet(isPresented: $store.showHealthDashboard) {
+            HealthDashboardView()
+        }
+        .sheet(isPresented: $store.showGoalBodyProgress) {
+            GoalBodyProgressView()
+        }
+    }
+}
+
+// MARK: - Devices & Data page
+
+private struct DevicesSettingsView: View {
+    @ObservedObject var store: ProfileStore
+    @EnvironmentObject private var appState: AppState
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                groupEyebrow("CONNECTED DEVICES")
+                VStack(spacing: 0) {
+                    ForEach(Array(Provider.allCases.enumerated()), id: \.element) { index, provider in
+                        if index > 0 { groupDivider }
+                        deviceRow(provider, appState: appState, store: store)
+                    }
+                }
+                .background(SomaTokens.surface3, in: RoundedRectangle(cornerRadius: SomaTokens.rRow, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: SomaTokens.rRow, style: .continuous).strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+                Text(String(localized: "profile.devices.groupFootnote", defaultValue: "Grey means not connected, green means connected.", comment: "Footnote under the Connected devices settings group"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SomaTokens.ink3)
+                    .padding(.horizontal, 6)
+                if let deviceErrorMessage = store.deviceErrorMessage {
+                    Text(deviceErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(SomaTokens.danger)
+                }
+            }
+            .padding(20)
+        }
+        .somaBackground()
+        .navigationTitle("Devices & Data")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Account page
+
+private struct AccountSettingsView: View {
+    @ObservedObject var store: ProfileStore
+    @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var languageManager: LanguageManager
+    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 22) {
+                groupCard(
+                    eyebrow: "ABOUT",
+                    footnote: String(localized: "profile.about.groupFootnote", defaultValue: "Region powers nearby gym & coach suggestions; date of birth unlocks Goal Body progress photos.", comment: "Footnote under the About settings group")
+                ) {
+                    groupRow(
+                        title: "Contact email",
+                        value: store.contactEmailText.isEmpty ? store.notSetLabel : store.contactEmailText,
+                        isSet: !store.contactEmailText.isEmpty
+                    ) { store.activeSheet = .contactEmail }
+                    groupDivider
+                    groupRow(
+                        title: "Region",
+                        value: UserProfile.regionDisplay(country: store.countryCode, city: store.cityText) ?? store.notSetLabel,
+                        isSet: UserProfile.regionDisplay(country: store.countryCode, city: store.cityText) != nil
+                    ) { store.activeSheet = .region }
+                    groupDivider
+                    groupRow(
+                        title: "Date of birth",
+                        value: store.dateOfBirthDate.map { ProfileStore.dobFormatter.string(from: $0) } ?? store.notSetLabel,
+                        isSet: store.dateOfBirthDate != nil
+                    ) { store.activeSheet = .dateOfBirth }
+                }
+
+                groupCard(
+                    eyebrow: "PREFERENCES",
+                    footnote: String(localized: "profile.preferences.groupFootnote", defaultValue: "Overrides your device's language just for Soma.", comment: "Footnote under the Preferences settings group")
+                ) {
+                    groupRow(
+                        title: "Language",
+                        value: languageManager.selected.displayName(locale: languageManager.effectiveLocale),
+                        isSet: true
+                    ) { store.activeSheet = .language }
+                        .accessibilityIdentifier("language-settings-row")
+                }
+
+                groupCard(
+                    eyebrow: "EARLY ACCESS",
+                    footnote: String(localized: "profile.earlyAccess.groupFootnote", defaultValue: "Beta features appear automatically while this is on.", comment: "Footnote under the Early access settings group")
+                ) {
+                    betaOptInRow
+                }
+
+                groupCard(
+                    eyebrow: "PLAN",
+                    footnote: String(localized: "profile.plan.groupFootnote", defaultValue: "Subscription, referral codes, feedback, and a refresher on how Soma works.", comment: "Footnote under the Plan settings group")
+                ) {
+                    groupRow(
+                        title: "Subscription",
+                        value: subscriptionStatusText(isSubscribed: subscriptionManager.isSubscribed, referralBonusUntil: appState.referralBonusUntil, locale: languageManager.effectiveLocale),
+                        isSet: subscriptionManager.isSubscribed
+                    ) {
+                        if !subscriptionManager.isSubscribed { store.presentPremiumPaywall() }
+                    }
+                    groupDivider
+                    groupRow(title: "Referral code") { store.showReferralCodeSheet = true }
+                    groupDivider
+                    groupRow(title: "Feedback") { FeedbackPresenter.present() }
+                    groupDivider
+                    groupRow(title: LocalizedStringKey(String(localized: "profile.howSomaWorks.title", defaultValue: "How Soma works", comment: "Row title opening the How Soma Works tour refresher"))) {
+                        store.showHowSomaWorks = true
+                    }
+                }
+
+                if let errorMessage = store.errorMessage {
+                    Text(errorMessage).font(.caption).foregroundStyle(SomaTokens.danger)
+                }
+                if store.savedConfirmation {
+                    Text("Saved.").font(.caption).foregroundStyle(SomaTokens.success)
+                }
+            }
+            .padding(20)
+        }
+        .somaBackground()
+        .navigationTitle("Account")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $store.activeSheet) { sheet in
+            DetailSheetContent(sheet: sheet, store: store)
+        }
+        .sheet(isPresented: $store.showHowSomaWorks) {
+            HowSomaWorksTourView(onFinish: { store.showHowSomaWorks = false })
+        }
+        .sheet(isPresented: $store.showReferralCodeSheet) {
+            ReferralCodeSheet()
+        }
+    }
+
+    /// Toggle row for a `groupCard` -- matches `groupRow`'s 46px/16pt-padding
+    /// convention but swaps the trailing chevron for a Toggle; the "why"
+    /// copy lives in the group's shared footnote instead of an inline
+    /// subtitle. The write happens in the binding's setter, so programmatic
+    /// loads never trigger a write.
+    private var betaOptInRow: some View {
+        HStack(spacing: 8) {
+            Text("Sport goals (beta)")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink)
+            Spacer(minLength: 8)
+            Toggle("", isOn: Binding(
+                get: { store.betaOptIn },
+                set: { newValue in
+                    store.betaOptIn = newValue
+                    Task { await store.updateBetaOptIn(newValue) }
+                }
+            ))
+            .labelsHidden()
+            .tint(SomaTokens.accent)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 46)
+    }
+}
+
+/// Three distinct states worth telling apart: paying, on a referral
+/// bonus (free, but ending), or neither. Shared by the Account page's own
+/// Subscription row and the hub's Account card subtitle so both always
+/// agree.
+private func subscriptionStatusText(isSubscribed: Bool, referralBonusUntil: Date?, locale: Locale) -> String {
+    if isSubscribed {
+        return String(localized: "profile.subscription.activeShort", defaultValue: "Active", comment: "Subscription row value when Premium is active")
+    }
+    if let referralBonusUntil, referralBonusUntil > Date() {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        formatter.locale = locale
+        let dateText = formatter.string(from: referralBonusUntil)
+        return String(localized: "profile.subscription.freeBonusShort", defaultValue: "Free until \(dateText)", comment: "Subscription row value during a temporary referral-bonus free period")
+    }
+    return String(localized: "profile.subscription.freePlanShort", defaultValue: "Free plan", comment: "Subscription row value on the default free plan")
+}
+
+// MARK: - Shared row/card primitives
+
+private func groupEyebrow(_ text: LocalizedStringKey) -> some View {
+    Text(text)
+        .font(.system(size: 11, weight: .bold))
+        .tracking(0.7)
+        .foregroundStyle(SomaTokens.ink4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
+}
+
+/// 9d's grouped-card container: one glass card per GROUP (vs a card per
+/// individual setting), with a group eyebrow above and one shared footnote
+/// below instead of a subtitle on every row. Callers place `groupDivider`
+/// between `groupRow`s themselves (skip it after the last row) -- explicit
+/// beats a private-API variadic trick for something this small.
+private func groupCard(eyebrow: LocalizedStringKey, footnote: String, @ViewBuilder rows: () -> some View) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+        groupEyebrow(eyebrow)
+        VStack(spacing: 0, content: rows)
+            .background(SomaTokens.surface3, in: RoundedRectangle(cornerRadius: SomaTokens.rRow, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: SomaTokens.rRow, style: .continuous).strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+        Text(footnote)
+            .font(.system(size: 11.5))
+            .foregroundStyle(SomaTokens.ink3)
+            .padding(.horizontal, 6)
+    }
+}
+
+private var groupDivider: some View {
+    Rectangle()
+        .fill(SomaTokens.ink.opacity(0.07))
+        .frame(height: 1)
+        .padding(.horizontal, 16)
+}
+
+/// 46px single-line row for a `groupCard` -- title left, value + chevron
+/// right, no inline subtitle. `isSet` drives the design's "set values
+/// show in accent, 'Not set' in gray" rule. `tinted` is the Turn 7
+/// redline for the sport-goal row -- "tinted to stand apart from the
+/// rest" -- a soft accent wash behind just that one row.
+private func groupRow(title: LocalizedStringKey, value: String = "", isSet: Bool = false, tinted: Bool = false, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tinted ? SomaTokens.accent : SomaTokens.ink)
+            Spacer(minLength: 8)
+            if !value.isEmpty {
+                Text(value)
+                    .font(.system(size: 13, weight: isSet ? .semibold : .regular))
+                    .foregroundStyle(isSet ? SomaTokens.accent : SomaTokens.ink4)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.trailing)
+            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tinted ? SomaTokens.accent : SomaTokens.inkPlaceholder)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 46)
+        .background(tinted ? SomaTokens.accentSoft10 : Color.clear)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+}
+
+/// Device rows: status dot, value in success/accent, no chevron --
+/// visually distinct from a setting row (guide 05's own distinction).
+/// Sized to `groupRow`'s 46px/16pt-padding convention -- the group's
+/// shared card background comes from the caller (DevicesSettingsView).
+@MainActor
+private func deviceRow(_ provider: Provider, appState: AppState, store: ProfileStore) -> some View {
+    let isConnected = appState.connectedProviders.contains(provider)
+    // Server-verified: the stored refresh token failed (revoked,
+    // expired) so the connection is dead even though the local cache
+    // still says "connected." Tappable in this state -- unlike a
+    // healthy connection, which is only ever disconnected by the
+    // provider's own app/website, not from here.
+    let needsReconnect = appState.providersNeedingReconnect.contains(provider)
+    return Button {
+        if !isConnected || needsReconnect { store.connectDevice(provider, appState: appState) }
+    } label: {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(needsReconnect ? SomaTokens.warn : (isConnected ? SomaTokens.successDot : SomaTokens.neutralDot))
+                .frame(width: 8, height: 8)
+            Text(provider.displayName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink)
+            Spacer()
+            if store.connecting.contains(provider) {
+                ProgressView()
+            } else if needsReconnect {
+                Text("Reconnect")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SomaTokens.warn)
+            } else {
+                Text(isConnected ? "Connected" : "Connect")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isConnected ? SomaTokens.success : SomaTokens.accent)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 46)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled((isConnected && !needsReconnect) || store.connecting.contains(provider))
+}
+
+// MARK: - Detail sheets (field editors, shared by every page)
 
 private enum ProfileSheet: String, Identifiable {
     case experience, goals, equipment, kitchenEquipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession, cycleTracking, language
@@ -1860,23 +1728,438 @@ private enum ProfileSheet: String, Identifiable {
     }
 }
 
+private struct DetailSheetContent: View {
+    let sheet: ProfileSheet
+    @ObservedObject var store: ProfileStore
+    @EnvironmentObject private var languageManager: LanguageManager
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    switch sheet {
+                    case .experience: experienceEditor
+                    case .goals: goalsEditor
+                    case .equipment: equipmentEditor
+                    case .kitchenEquipment: kitchenEquipmentEditor
+                    case .weeklyTarget: weeklyTargetEditor
+                    case .injuries: injuriesEditor
+                    case .pregnancy: pregnancyEditor
+                    case .contactEmail: contactEmailEditor
+                    case .region: regionEditor
+                    case .language: languageEditor
+                    case .dateOfBirth: dateOfBirthEditor
+                    case .knownLifts: knownLiftsEditor
+                    case .anchorSession: anchorSessionEditor
+                    case .cycleTracking: cycleTrackingEditor
+                    }
+                }
+                .padding(20)
+                .dismissKeyboardOnTap()
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .somaBackground()
+            .navigationTitle(sheet.title(locale: languageManager.effectiveLocale))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        // Language is a local display preference (applied
+                        // immediately by languageEditor's picker), not a
+                        // profile field -- skip the network save() for it.
+                        if sheet != .language { store.save() }
+                        store.activeSheet = nil
+                    }
+                    .disabled(store.isSaving)
+                }
+            }
+        }
+    }
+
+    private var experienceEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Adjusts the AI workout plan's structure -- how many blocks, whether it uses supersets, and rest periods.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FlowLayout {
+                ForEach(ExperienceLevel.allCases) { level in
+                    ChipToggle(title: level.displayName, isSelected: store.experienceLevel == level) {
+                        store.experienceLevel = store.experienceLevel == level ? nil : level
+                    }
+                }
+            }
+        }
+    }
+
+    private var goalsEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            FlowLayout {
+                ForEach(GoalTag.allCases) { tag in
+                    ChipToggle(title: tag.displayName, isSelected: store.goals.contains(tag)) {
+                        store.toggle(tag, in: &store.goals)
+                    }
+                }
+            }
+            if store.goals.contains(.other) {
+                TextField("What's your goal?", text: $store.otherGoalText)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private var equipmentEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            FlowLayout {
+                ForEach(EquipmentTag.allCases) { tag in
+                    ChipToggle(title: tag.displayName, isSelected: store.equipment.contains(tag)) {
+                        store.toggle(tag, in: &store.equipment)
+                    }
+                }
+            }
+            if store.equipment.contains(.other) {
+                TextField("What else do you have access to?", text: $store.otherEquipmentText)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private var kitchenEquipmentEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "profile.kitchenEquipment.explainer", defaultValue: "So we only ever suggest recipes you can actually cook.", comment: "Explainer text at top of the kitchen-equipment editor sheet"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FlowLayout {
+                ForEach(KitchenEquipmentTag.allCases) { tag in
+                    ChipToggle(title: tag.displayName, isSelected: store.householdEquipment.contains(tag)) {
+                        store.toggle(tag, in: &store.householdEquipment)
+                    }
+                }
+            }
+            if store.householdEquipment.contains(.other) {
+                TextField(String(localized: "profile.kitchenEquipment.otherPlaceholder", defaultValue: "What else? (comma-separated)", comment: "Placeholder text for the free-text 'other kitchen equipment' field"), text: $store.otherHouseholdEquipmentText)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    private var weeklyTargetEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("A personal tracking goal -- doesn't change what Soma recommends, just what it shows you here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Stepper(
+                "Target: \(store.weeklySessionTarget.map(String.init) ?? store.notSetLowerLabel) sessions/week",
+                value: Binding(get: { store.weeklySessionTarget ?? 3 }, set: { store.weeklySessionTarget = $0 }),
+                in: 1...14
+            )
+            .font(.caption)
+            if store.weeklySessionTarget != nil {
+                Text("\(store.sessionsDoneThisWeek) done this week so far.")
+                    .font(.caption.bold())
+                    .foregroundStyle(SomaTokens.accent)
+            }
+        }
+    }
+
+    /// Real feedback: a self-described non-powerlifter was prescribed
+    /// 125-135kg for a barbell deadlift from the population-level
+    /// bodyweight-ratio estimate alone. Entirely optional, entirely
+    /// separate from experience level -- filling in even one pattern here
+    /// makes the AI plan use that real number for that pattern specifically,
+    /// leaving the others on the estimate.
+    private var knownLiftsEditor: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(String(localized: "profile.knownLifts.explainer", defaultValue: "If you know your comfortable working weight for any of these, Soma uses it directly for the AI plan instead of estimating from your bodyweight and experience level. Leave any blank to keep using the estimate.", comment: "Explainer text at top of the known-lifts editor sheet"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(LiftPattern.allCases) { pattern in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(pattern.displayName)
+                        .font(.system(size: 14.5, weight: .semibold))
+                    HStack {
+                        TextField(pattern.placeholder, text: Binding(
+                            get: { store.knownLiftsText[pattern] ?? "" },
+                            set: { store.knownLiftsText[pattern] = $0 }
+                        ))
+                        .keyboardType(.numberPad)
+                        Text("kg")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .glassCardFlat(cornerRadius: SomaTokens.rMD)
+                }
+            }
+        }
+    }
+
+    private var injuriesEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Any active injury caps today's intensity at Moderate and hides high-impact workouts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FlowLayout {
+                ForEach(InjuryTag.allCases) { tag in
+                    ChipToggle(title: tag.displayName, isSelected: store.injuryTags.contains(tag)) {
+                        store.toggle(tag, in: &store.injuryTags)
+                        if store.injuryTags.contains(tag), store.injurySeverity[tag] == nil {
+                            store.injurySeverity[tag] = .moderate
+                        }
+                    }
+                }
+            }
+            ForEach(InjuryTag.allCases.filter { store.injuryTags.contains($0) }) { tag in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(tag.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(tag.displayName, selection: Binding(
+                        get: { store.injurySeverity[tag] ?? .moderate },
+                        set: { store.injurySeverity[tag] = $0 }
+                    )) {
+                        ForEach(InjurySeverity.allCases) { severity in
+                            Text(severity.displayName).tag(severity)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("Type (optional)", selection: Binding(
+                        get: { store.injuryType[tag] },
+                        set: { store.injuryType[tag] = $0 }
+                    )) {
+                        Text("Not specified").tag(InjuryType?.none)
+                        ForEach(InjuryType.allCases) { type in
+                            Text(type.displayName).tag(InjuryType?.some(type))
+                        }
+                    }
+                    .font(.caption)
+
+                    Stepper(
+                        "Pain level: \(store.injuryPainLevel[tag].map(String.init) ?? store.notSetLowerLabel)",
+                        value: Binding(get: { store.injuryPainLevel[tag] ?? 1 }, set: { store.injuryPainLevel[tag] = $0 }),
+                        in: 1...10
+                    )
+                    .font(.caption)
+
+                    if store.injurySeverity[tag] == .moderate || store.injurySeverity[tag] == .severe {
+                        Text("Given the severity you've selected, consider seeing a physician or physiotherapist before continuing to train this area. Soma's guidance here is informational only, not a diagnosis.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .padding(.top, 4)
+            }
+            TextField("Notes (optional)", text: $store.injuryNotesText, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...5)
+        }
+    }
+
+    private var pregnancyEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Optional, and never assumed -- only set if you tell us. Soma will adjust your workouts to your pregnancy stage rather than withhold them. This is general guidance only -- please follow your doctor's or midwife's advice, especially if you have any pregnancy complications.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            FlowLayout {
+                ChipToggle(title: String(localized: "profile.pregnancy.currentlyPregnant", defaultValue: "I'm currently pregnant", comment: "Pregnancy chip toggle label"), isSelected: store.pregnancy == true) {
+                    store.pregnancy = (store.pregnancy == true) ? nil : true
+                    if store.pregnancy != true { store.pregnancyWeek = nil }
+                }
+            }
+            if store.pregnancy == true {
+                Stepper(
+                    "Week: \(store.pregnancyWeek.map(String.init) ?? store.notSetLowerLabel)",
+                    value: Binding(get: { store.pregnancyWeek ?? 1 }, set: { store.pregnancyWeek = $0 }),
+                    in: 1...42
+                )
+                .font(.caption)
+            }
+        }
+    }
+
+    /// Same field pair + "clear resets both" behavior as pregnancyEditor
+    /// just above -- Phase 5 (see docs/coaching-personalization-plan.md).
+    /// Only ever reachable when sex == .female (see cycleTrackingRowVisible),
+    /// so there's no sex picker/gate needed inside the editor itself.
+    private var cycleTrackingEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "profile.cycleTracking.explainer", defaultValue: "Optional, and never assumed -- only set if you tell us. Soma will factor your cycle phase into training suggestions as one general consideration among others. This is general guidance only, not medical advice, and not a fertility or ovulation tracker.", comment: "Explainer text at top of the cycle-tracking editor sheet"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DatePicker(
+                String(localized: "profile.cycleTracking.lastPeriodLabel", defaultValue: "Last period start date", comment: "Date picker label for the start date of the user's last period"),
+                selection: Binding(
+                    get: { store.lastPeriodStartDate ?? Date() },
+                    set: { store.lastPeriodStartDate = $0 }
+                ),
+                in: ...Date(),
+                displayedComponents: .date
+            )
+            if store.lastPeriodStartDate != nil {
+                let lengthText = store.typicalCycleLengthDays.map {
+                    String(localized: "profile.cycleTracking.daysCount", defaultValue: "\($0) days", comment: "Number of days shown in the typical-cycle-length stepper, e.g. '28 days'")
+                } ?? String(localized: "profile.cycleTracking.stepperDefault", defaultValue: "not set (defaults to 28)", comment: "Shown in the typical-cycle-length stepper title when no custom length has been set yet")
+                Stepper(
+                    String(localized: "profile.cycleTracking.stepperTitle", defaultValue: "Typical cycle length: \(lengthText)", comment: "Stepper title showing the current typical cycle length setting, e.g. 'Typical cycle length: 28 days'"),
+                    value: Binding(get: { store.typicalCycleLengthDays ?? 28 }, set: { store.typicalCycleLengthDays = $0 }),
+                    in: 21...35
+                )
+                .font(.caption)
+                Button(String(localized: "profile.cycleTracking.clear", defaultValue: "Clear", comment: "Button clearing the entered cycle-tracking dates")) {
+                    store.lastPeriodStartDate = nil
+                    store.typicalCycleLengthDays = nil
+                }
+                .font(.caption)
+                .foregroundStyle(SomaTokens.danger)
+            }
+        }
+    }
+
+    private var contactEmailEditor: some View {
+        TextField("you@example.com", text: $store.contactEmailText)
+            .textInputAutocapitalization(.never)
+            .keyboardType(.emailAddress)
+            .autocorrectionDisabled()
+            .textFieldStyle(.roundedBorder)
+    }
+
+    private var regionEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Used for future nearby gym and coach partner suggestions.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("Country", selection: $store.countryCode) {
+                Text("Not set").tag(String?.none)
+                ForEach(ProfileStore.countryOptions, id: \.code) { option in
+                    Text(option.name).tag(String?.some(option.code))
+                }
+            }
+            .pickerStyle(.menu)
+            TextField("City", text: $store.cityText)
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    private var languageEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "profile.language.explainer", defaultValue: "Most of Soma updates immediately; the rest applies next time you open the app.", comment: "Explainer text at top of the language picker sheet"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                ForEach(AppLanguage.allCases) { language in
+                    Button {
+                        let changed = languageManager.selected != language
+                        languageManager.selected = language
+                        // Only worth interrupting the user when the choice
+                        // actually changed -- re-tapping the already-active
+                        // language shouldn't nag them with a restart prompt
+                        // for a no-op.
+                        if changed {
+                            store.languageNeedingRestartPrompt = language
+                        }
+                    } label: {
+                        HStack {
+                            Text(language.displayName(locale: languageManager.effectiveLocale))
+                                .foregroundStyle(SomaTokens.ink)
+                            Spacer()
+                            if languageManager.selected == language {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(SomaTokens.accent)
+                            }
+                        }
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    // Stable hook for XCUITest -- displayName is untranslated
+                    // (each language shows its own name) and unstable across
+                    // locales isn't the issue, but matching by raw value is
+                    // still more robust than matching translated text.
+                    .accessibilityIdentifier("language-option-\(language.rawValue)")
+                    if language != AppLanguage.allCases.last {
+                        Divider()
+                    }
+                }
+            }
+        }
+        // A passive caption is easy to skim past -- this makes the "you'll
+        // need to reopen the app" tradeoff an explicit, hard-to-miss step
+        // right when it's actually relevant, instead of leaving someone
+        // wondering why half the screen didn't change language. Apple's own
+        // guidance is that an app should never terminate itself
+        // programmatically (no exit(0) auto-relaunch) -- this just tells
+        // the user plainly and lets them close the app themselves.
+        .alert(
+            String(localized: "profile.language.restartAlert.title", defaultValue: "Restart Soma to finish switching", comment: "Alert title shown after picking a new app language"),
+            isPresented: Binding(
+                get: { store.languageNeedingRestartPrompt != nil },
+                set: { if !$0 { store.languageNeedingRestartPrompt = nil } }
+            )
+        ) {
+            Button(String(localized: "profile.language.restartAlert.confirm", defaultValue: "Got it", comment: "Dismiss button on the language-restart alert")) {
+                store.languageNeedingRestartPrompt = nil
+            }
+        } message: {
+            if let language = store.languageNeedingRestartPrompt {
+                Text(String(localized: "profile.language.restartAlert.message", defaultValue: "Most of the app already switched. Close Soma (swipe it away from the app switcher) and reopen it to see everything in \(language.displayName(locale: languageManager.effectiveLocale)).", comment: "Alert message telling the user to manually close and reopen the app to finish a language switch; placeholder is the newly-selected language's own display name"))
+            }
+        }
+    }
+
+    /// Same field pair as onboarding's AnchorSessionQuestionView, same
+    /// WeekdayMiniPicker component -- lets someone who skipped it at
+    /// onboarding set it later, or fix the wrong day.
+    private var anchorSessionEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(String(localized: "profile.anchorSession.explainer", defaultValue: "A recurring class or activity (e.g. a Tuesday hot yoga class) the rest of your week gets built around.", comment: "Explainer text at top of the weekly anchor session editor sheet"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(String(localized: "profile.anchorSession.namePlaceholder", defaultValue: "e.g. \"Hot Yoga\", \"Tennis league\"", comment: "Placeholder text for the anchor session name field"), text: $store.anchorSessionName)
+                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(String(localized: "profile.anchorSession.dayPrompt", defaultValue: "Which day(s) is it usually on?", comment: "Prompt above the weekday picker for the anchor session"))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                WeekdayMiniPicker(selected: $store.anchorSessionDays)
+            }
+        }
+    }
+
+    /// Real feedback traced to a missing DOB: an account created before
+    /// the onboarding DOB step existed has no other way to supply one,
+    /// which silently hides the whole Goal Body photo feature -- see
+    /// UserProfile.dateOfBirth's doc comment. Same wheel DatePicker as
+    /// the onboarding step (DateOfBirthQuestionView) for a consistent feel.
+    private var dateOfBirthEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "profile.dateOfBirth.explainer", defaultValue: "Confirms you're 18+ to unlock Goal Body progress photos. Never shown to other users.", comment: "Explainer text at top of the date-of-birth editor sheet"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DatePicker(
+                "Date of birth",
+                selection: Binding(
+                    get: { store.dateOfBirthDate ?? ProfileStore.defaultDateOfBirth },
+                    set: { store.dateOfBirthDate = $0 }
+                ),
+                in: ...Date(),
+                displayedComponents: .date
+            )
+            .datePickerStyle(.wheel)
+            .labelsHidden()
+        }
+    }
+}
+
+/// Thin wrapper over `SomaChip` -- keeps this file's `String`-typed call
+/// sites (editor tag lists) unchanged while picking up the shared glass
+/// chip styling (gel fill selected, lens unselected) in one place.
 private struct ChipToggle: View {
     let title: String
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Capsule().fill(isSelected ? SomaTokens.accent : Color(.systemGray6)))
-                .foregroundStyle(isSelected ? .white : .primary)
-        }
-        .buttonStyle(.plain)
+        SomaChip(title: LocalizedStringKey(title), isSelected: isSelected, action: action)
     }
 }
 

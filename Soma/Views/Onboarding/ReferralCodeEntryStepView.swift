@@ -30,7 +30,9 @@ struct ReferralCodeEntryStepView: View {
                     TextField("Referral Code", text: $code)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .glassCardFlat(cornerRadius: SomaTokens.rXL)
                     Button("Submit") { redeem() }
                         .font(.body.bold())
                         .disabled(isRedeeming || code.trimmingCharacters(in: .whitespaces).isEmpty)

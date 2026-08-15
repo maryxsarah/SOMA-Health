@@ -132,11 +132,15 @@ struct CustomGoalFormView: View {
             }
 
             TextField("What did your coach set as the goal? (optional)", text: $givenText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
                 .lineLimit(2...4)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .glassCardFlat(cornerRadius: SomaTokens.rXL)
             TextField("The workout, in your coach's words", text: $workoutText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
                 .lineLimit(3...6)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .glassCardFlat(cornerRadius: SomaTokens.rXL)
                 .accessibilityIdentifier("workoutTextField")
             if !workoutText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isParsingAssignment {
                 assistButton(title: "Auto-fill with AI") { Task { await autoFillFromText() } }
@@ -155,7 +159,9 @@ struct CustomGoalFormView: View {
                     .foregroundStyle(SomaTokens.warn)
             }
             TextField("Coach's name (optional)", text: $coachName)
-                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .glassCardFlat(cornerRadius: SomaTokens.rXL)
                 .accessibilityIdentifier("coachNameField")
             Text("The name goes on your workouts and the progress card you can send back.")
                 .font(.caption)
@@ -207,9 +213,13 @@ struct CustomGoalFormView: View {
             }
             if addMetric {
                 TextField("What are you measuring? e.g. Approach jump", text: $metricName)
-                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .glassCardFlat(cornerRadius: SomaTokens.rXL)
                 TextField("Unit, e.g. cm", text: $metricUnit)
-                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .glassCardFlat(cornerRadius: SomaTokens.rXL)
                 RulerNumberPicker(value: $metricBaseline, range: 0...200, unit: metricUnit.isEmpty ? nil : metricUnit)
                     .padding(.top, 4)
             }

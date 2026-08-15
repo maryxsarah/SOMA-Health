@@ -20,14 +20,27 @@ struct DailyChecklistCardView: View {
         var hasReviewedFirstPlan: Bool
     }
 
+    /// `.full` is every row (the checklist sheet). `.compact` is the Home
+    /// dashboard widget -- per the Soma Glass 3e handoff, Home shows only
+    /// the first couple of open items plus a link into the sheet for the
+    /// rest, not the whole list inline.
+    enum Style { case full, compact }
+
     let date: String
     let signals: SharedSignals
+    var style: Style = .full
+    /// Compact style only: opens the full checklist sheet.
+    var onSeeAll: (() -> Void)? = nil
     /// Set (by HomeView) while a tapped row's destination is still
     /// loading required data -- see HomeView.openTodaysWorkoutDetail's
     /// own doc comment. Shows a spinner on the matching row instead of
     /// its usual chevron, rather than the row appearing to do nothing.
     var loadingDeepLink: ChecklistDeepLink? = nil
     let onDeepLink: (ChecklistDeepLink) -> Void
+    /// Lets HomeView mirror checked/total into its own greeting-row progress
+    /// pill without duplicating this view's own fetch -- fired once load()
+    /// resolves, same numbers `header`'s "N/M today" pill shows.
+    var onProgressChange: (Int, Int) -> Void = { _, _ in }
 
     @State private var progress: DailyChecklistProgress?
     @State private var isLoading = true
@@ -36,6 +49,13 @@ struct DailyChecklistCardView: View {
     /// Guards against re-firing the completion flourish/day-complete write
     /// more than once per appearance of this card.
     @State private var hasWrittenDayComplete = false
+
+    /// Compact style's preview rows -- the first two still-open items, so
+    /// the widget always shows something actionable rather than whichever
+    /// two happen to sort first.
+    private func previewItems(_ progress: DailyChecklistProgress) -> [DailyChecklistItem] {
+        Array(progress.items.filter { !$0.isChecked }.prefix(2))
+    }
 
     var body: some View {
         CardView {
@@ -46,13 +66,34 @@ struct DailyChecklistCardView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             } else if let progress {
-                VStack(spacing: 10) {
-                    ForEach(progress.items) { item in
-                        row(for: item)
+                switch style {
+                case .full:
+                    VStack(spacing: 10) {
+                        ForEach(progress.items) { item in
+                            row(for: item)
+                        }
                     }
-                }
-                if progress.isComplete {
-                    completionFlourish(streak: progress.streak)
+                    if progress.isComplete {
+                        completionFlourish(streak: progress.streak)
+                    }
+                case .compact:
+                    if progress.isComplete {
+                        completionFlourish(streak: progress.streak)
+                    } else {
+                        VStack(spacing: 10) {
+                            ForEach(previewItems(progress)) { item in
+                                row(for: item)
+                            }
+                        }
+                        if let onSeeAll {
+                            Button(action: onSeeAll) {
+                                Text(String(localized: "dailyChecklist.seeAllTasks", defaultValue: "All \(progress.totalCount) tasks", comment: "Link on the compact Home checklist widget opening the full checklist sheet; placeholder is the total task count"))
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundStyle(SomaTokens.accent)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
             }
         }
@@ -273,6 +314,7 @@ struct DailyChecklistCardView: View {
         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
             animatedFraction = resolved.fraction
         }
+        onProgressChange(resolved.checkedCount, resolved.totalCount)
 
         if resolved.isComplete, !hasWrittenDayComplete {
             hasWrittenDayComplete = true

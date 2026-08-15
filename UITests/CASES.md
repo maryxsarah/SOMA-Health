@@ -30,7 +30,7 @@ Case IDs are referenced from test names, e.g. `test_SGP_D2_etaSlipLine`.
 | SGP-A2 | negative | Catalog fetch **failed** (network error ≠ dark): same card but "Couldn't load the goal catalog. Pull down to try again." | snapshot | automated |
 | SGP-A3 | journey | As an internal tester I'm inserted into `internal_testers` and the catalog appears without an app update | manual (SETUP.md §10) + deno (RLS visibility gate in `create-goal`/`generate-workout-plan`) | covered |
 | SGP-A4 | journey | Sport at `status='beta'` + Profile → Account → "Sport goals (beta)" toggle ON → catalog appears; OFF → disappears (unless a goal already exists) | uitest **J14** (stub models the RLS gate) + manual against the real backend | automated / manual |
-| SGP-A5 | state | First tap on the Home promo card shows the 4-slide beta onboarding popup; "Skip — I'll find it later" closes it; next tap goes straight to the sport list | uitest (inside J1) | automated |
+| SGP-A5 | state | ~~First tap on the Home promo card shows the 4-slide beta onboarding popup; "Skip — I'll find it later" closes it; next tap goes straight to the sport list~~ — removed: the promo card + popup gallery are gone, replaced by a permanent dock "Goals" icon (`openSportGoal()`) that opens straight to sport selection, no popup step | n/a | removed |
 | SGP-A6 | negative | Catalog ships dark: seed leaves all 4 sports `internal` | deno (`sportGoalSeed_test.ts`) | covered |
 | SGP-A7 | negative | Emergency kill: `Config.enableSportGoals = false` hides every entry point even with a visible catalog | manual (compile-time) | manual |
 
@@ -98,9 +98,17 @@ only) fakes the Supabase session and serves PostgREST/Edge-Function wire
 JSON, so decoding runs for real. Referral bonus is faked far-future so the
 Superwall paywall never gates the detail sheet.
 
+Entry point (2026-08-15): the old promo-card + 4-slide onboarding popup
+front door is gone. Every journey that starts with no active goal
+(`catalogOpen`/`customCoachFlow`/`betaGate` — J1, J7, J14, J15, J17) now
+opens the flow via the dock's "Goals" icon (`app.buttons["dock-goals-button"]`,
+`SportGoalJourneyTests.openSportGoalFlow(_:)`), landing straight on the
+sport list. Journeys seeded with an already-active goal still reach
+`SportGoalFlowView` via Home's quiet goal row (`openHub(_:)`), unchanged.
+
 | Journey | Scenario | Covers |
 |---|---|---|
-| J1 `test_SGP_B1_createJumpGoal` | `catalogOpen` | SGP-A5, SGP-B1 |
+| J1 `test_SGP_B1_createJumpGoal` | `catalogOpen` | SGP-B1 |
 | J2 `test_SGP_D1_completeWorkoutCountsSession` | `activeGoalWeek2` | SGP-C1, SGP-D1 |
 | J3 `test_SGP_D2_missedSessionsSlideEta` | `activeGoalWeek4Slipped` | SGP-D2 |
 | J4 `test_SGP_D5_retestOpenOnModerateDay` | `activeGoalDay28` | SGP-D5 (progress card) |

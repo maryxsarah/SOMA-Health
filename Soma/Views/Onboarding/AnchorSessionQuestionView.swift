@@ -35,7 +35,9 @@ struct AnchorSessionQuestionView: View {
 
             VStack(alignment: .leading, spacing: 20) {
                 TextField(String(localized: "anchorSessionQuestion.namePlaceholder", defaultValue: "e.g. \"Hot Yoga\", \"Tennis league\"", comment: "Placeholder for the anchor-session name text field"), text: $name)
-                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .glassCardFlat(cornerRadius: SomaTokens.rXL)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(String(localized: "anchorSessionQuestion.daysLabel", defaultValue: "Which day(s) is it usually on?", comment: "Label above the weekday picker for the anchor session"))

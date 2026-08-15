@@ -191,11 +191,7 @@ struct DayDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
-                .fill(SomaTokens.surface)
-                .somaCardShadow()
-        )
+        .glassCard()
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(stateColor)

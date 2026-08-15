@@ -56,7 +56,9 @@ struct KitchenEquipmentQuestionView: View {
                     }
                     if selection.contains(.other) {
                         TextField(String(localized: "kitchenEquipmentQuestion.otherPlaceholder", defaultValue: "What else? (comma-separated)", comment: "Placeholder for the free-text field shown when the 'Other' kitchen equipment option is selected"), text: $otherText)
-                            .textFieldStyle(.roundedBorder)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .glassCardFlat(cornerRadius: SomaTokens.rXL)
                     }
                 }
                 .padding(.horizontal, 24)

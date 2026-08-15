@@ -25,6 +25,14 @@ struct PostSetupFlowView: View {
     /// an 18+ date_of_birth -- an in-flight fetch or a fetch failure must
     /// never show the photo-comparison step to an unconfirmed user.
     @State private var isConfirmedAdultForBodyPhotos = false
+    /// Set only on `PaywallPresentationHandler.onError` -- a real
+    /// presentation failure (no network, webview failed to load), not a
+    /// skip. The SDK deliberately never calls `feature` in this case ("otherwise
+    /// turning internet off would give unlimited access" -- its own comment),
+    /// so without this the user was stuck on a blank `Color.clear` forever
+    /// with no way forward. `.skipped` (no audience match, holdout, etc.)
+    /// already calls `feature` on its own and needs no handling here.
+    @State private var paywallError: String?
 
     var body: some View {
         Group {
@@ -61,9 +69,15 @@ struct PostSetupFlowView: View {
                 // this placement must be configured non-dismissible (no
                 // close button) in the Superwall dashboard paywall editor
                 // -- that's what used to be `allowsDismissal: false`.
-                Color.clear
-                    .somaBackground()
-                    .task { presentOnboardingPaywall() }
+                Group {
+                    if let paywallError {
+                        paywallErrorContent(paywallError)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .somaBackground()
+                .task { presentOnboardingPaywall() }
             }
         }
         .transition(.opacity)
@@ -121,9 +135,28 @@ struct PostSetupFlowView: View {
             appState.markOnboardingComplete()
             return
         }
-        Superwall.shared.register(placement: "onboarding_paywall") {
+        paywallError = nil
+        let handler = PaywallPresentationHandler()
+        handler.onError { _ in
+            paywallError = String(localized: "postSetup.paywall.error", defaultValue: "Couldn't load the checkout screen. Check your connection and try again.", comment: "Shown when Superwall's onboarding paywall fails to present, with a retry button below it")
+        }
+        Superwall.shared.register(placement: "onboarding_paywall", handler: handler) {
             appState.markOnboardingComplete()
         }
+    }
+
+    private func paywallErrorContent(_ message: String) -> some View {
+        VStack(spacing: 16) {
+            Text(message)
+                .font(.body)
+                .foregroundStyle(SomaTokens.ink2)
+                .multilineTextAlignment(.center)
+            SomaButton(title: LocalizedStringKey(String(localized: "postSetup.paywall.retry", defaultValue: "Try again", comment: "Button that retries loading the failed onboarding paywall")), size: .lg, variant: .primary) {
+                presentOnboardingPaywall()
+            }
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func saveConsent(marketingOptIn: Bool) async {

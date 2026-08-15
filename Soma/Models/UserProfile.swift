@@ -315,21 +315,21 @@ enum LiftPattern: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .squatPattern: "Squat"
-        case .hingePattern: "Deadlift"
-        case .overheadPress: "Overhead press"
-        case .horizontalPress: "Bench press"
-        case .rowPull: "Row"
+        case .squatPattern: String(localized: "liftPattern.squatPattern.name", defaultValue: "Squat", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
+        case .hingePattern: String(localized: "liftPattern.hingePattern.name", defaultValue: "Deadlift", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
+        case .overheadPress: String(localized: "liftPattern.overheadPress.name", defaultValue: "Overhead press", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
+        case .horizontalPress: String(localized: "liftPattern.horizontalPress.name", defaultValue: "Bench press", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
+        case .rowPull: String(localized: "liftPattern.rowPull.name", defaultValue: "Row", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
         }
     }
 
     var placeholder: String {
         switch self {
-        case .squatPattern: "e.g. back squat, both legs"
-        case .hingePattern: "e.g. barbell deadlift"
-        case .overheadPress: "e.g. barbell or double-dumbbell, both arms"
-        case .horizontalPress: "e.g. barbell or dumbbell bench, both arms"
-        case .rowPull: "e.g. barbell row, both arms"
+        case .squatPattern: String(localized: "liftPattern.squatPattern.placeholder", defaultValue: "e.g. back squat, both legs", comment: "Text field placeholder for the squat lift pattern in the Known Lifts editor")
+        case .hingePattern: String(localized: "liftPattern.hingePattern.placeholder", defaultValue: "e.g. barbell deadlift", comment: "Text field placeholder for the hinge lift pattern in the Known Lifts editor")
+        case .overheadPress: String(localized: "liftPattern.overheadPress.placeholder", defaultValue: "e.g. barbell or double-dumbbell, both arms", comment: "Text field placeholder for the overhead press lift pattern in the Known Lifts editor")
+        case .horizontalPress: String(localized: "liftPattern.horizontalPress.placeholder", defaultValue: "e.g. barbell or dumbbell bench, both arms", comment: "Text field placeholder for the horizontal press lift pattern in the Known Lifts editor")
+        case .rowPull: String(localized: "liftPattern.rowPull.placeholder", defaultValue: "e.g. barbell row, both arms", comment: "Text field placeholder for the row lift pattern in the Known Lifts editor")
         }
     }
 }

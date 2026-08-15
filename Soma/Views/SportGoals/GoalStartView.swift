@@ -172,8 +172,10 @@ struct GoalStartView: View {
                 }
             case .qualitative:
                 TextField("Your target, in your own words", text: $qualitativeTarget, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
                     .lineLimit(2...4)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .glassCardFlat(cornerRadius: SomaTokens.rXL)
             default:
                 ruler
             }
@@ -189,7 +191,7 @@ struct GoalStartView: View {
     }
 
     private var ruler: some View {
-        RulerNumberPicker(value: $baselineValue, range: goal.entryRange, unit: goal.unit)
+        RulerNumberPicker(value: $baselineValue, range: goal.entryRange, unit: SportGoalFormat.localizedUnit(goal.unit))
             .onChange(of: baselineValue) { _, _ in hasEnteredValue = true }
     }
 
@@ -256,7 +258,7 @@ struct GoalStartView: View {
                     .tracking(0.8)
                     .foregroundStyle(SomaTokens.ink3)
                 Text(qualitativeTarget)
-                    .font(.system(size: 20, design: .serif).italic())
+                    .font(SomaType.metric(20))
                 Text("Progress here is sessions done plus your own check-in — no invented numbers.")
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink3)
