@@ -304,7 +304,7 @@ struct MealRecommendationView: View {
             }
             if rec.steps.count > 2 {
                 let remainingSteps = rec.steps.count - 2
-                Text(String(localized: "mealRecommendation.steps.moreCount", defaultValue: "+ \(remainingSteps) more step\(remainingSteps == 1 ? "" : "s")", comment: "Count of additional recipe steps not shown inline, e.g. '+ 3 more steps'"))
+                Text(String(localized: "mealRecommendation.steps.moreCount", defaultValue: "+ \(remainingSteps) more steps", comment: "Count of additional recipe steps not shown inline, e.g. '+ 3 more steps'; catalog entry uses plural variations, not a hand-rolled suffix"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

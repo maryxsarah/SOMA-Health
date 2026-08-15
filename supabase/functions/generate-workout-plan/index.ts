@@ -558,6 +558,7 @@ Deno.serve(async (req: Request) => {
         courtDays: goalRow.court_days ?? null,
         workoutText: goalRow.workout_text ?? null,
         coachName: goalRow.coach_name ?? null,
+        frequencyPerWeek: goalRow.frequency_per_week ?? null,
       };
       goalDecision = decideGoalWork({
         category,
@@ -1426,20 +1427,25 @@ async function fetchGoalExerciseIds(supabase: any, goalId: string): Promise<stri
     .filter((n): n is string => typeof n === "string");
 }
 
-/// Yesterday's goal-block metadata from the cached plan -- feeds the
-/// hangs-never-consecutive-days and every_other_day rules.
+/// The trailing 6 days' goal-block metadata from cached plans -- feeds the
+/// hangs-never-consecutive-days and every_other_day rules (both only ever
+/// check yesterday specifically) and isScheduledToday's frequencyPerWeek
+/// gate (counts placements across the whole window).
 // deno-lint-ignore no-explicit-any
 async function fetchRecentGoalBlocks(supabase: any, userId: string, date: string): Promise<GoalBlockHistoryEntry[]> {
+  const windowStart = addDays(date, -6);
   const yesterday = addDays(date, -1);
   const { data, error } = await supabase
     .from("ai_workout_plan")
-    .select("plan")
+    .select("date, plan")
     .eq("user_id", userId)
-    .eq("date", yesterday)
-    .maybeSingle();
+    .gte("date", windowStart)
+    .lte("date", yesterday);
   if (error || !data) return [];
-  const meta = (data.plan as { goal_block?: { text?: string } } | null)?.goal_block;
-  return meta?.text ? [{ date: yesterday, text: meta.text }] : [];
+  // deno-lint-ignore no-explicit-any
+  return (data as any[])
+    .map((row) => ({ date: row.date as string, text: (row.plan as { goal_block?: { text?: string } } | null)?.goal_block?.text }))
+    .filter((r): r is GoalBlockHistoryEntry => typeof r.text === "string");
 }
 
 /// Main-block exercise names from the last 2 days' plans for this SAME

@@ -32,6 +32,10 @@ enum ChecklistDeepLink: Equatable {
     case profileKitchenEquipment
     case connectDevices
     case enableNotifications
+    /// Opens EditWidgetsSheet -- onboarding-only (see DailyChecklistProgress.
+    /// computeOnboarding), never offered again once the standard daily set
+    /// takes over; widget preferences stay reachable from the "..." menu.
+    case chooseWidgets
 }
 
 /// One row in the daily checklist card. `isChecked` is always freshly

@@ -18,6 +18,9 @@ struct OnboardingView: View {
                         .tracking(0.7)
                         .textCase(.uppercase)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .padding(.horizontal, 16)
 
                     Text("Find your next best day")
                         .font(Theme.display)

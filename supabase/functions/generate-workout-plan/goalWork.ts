@@ -39,6 +39,10 @@ export interface GoalState {
   courtDays: number[] | null;
   workoutText: string | null;
   coachName: string | null;
+  /// The plain "N x a week" chip (scheduleRule null) -- gates placement via
+  /// isScheduledToday's default case. Null (no explicit count) keeps the
+  /// old unlimited behavior, e.g. for goals predating this field.
+  frequencyPerWeek: number | null;
 }
 
 /// Recent days that carried a goal block -- `text` is the block's
@@ -135,7 +139,17 @@ export function isScheduledToday(goal: GoalState, date: string, recentGoalBlocks
       // caller via category (see decideGoalWork); any day passes here.
       return true;
     default:
-      return true;
+      // The plain "N x a week" chip (no explicit schedule rule) -- BUG:
+      // frequencyPerWeek used to reach nowhere near placement (only
+      // maybeUpdateEtaSlip read it, for ETA math), so every count chip
+      // behaved identically and a goal block landed literally every day.
+      // Self-limiting like every_other_day, not fixed weekdays: stop
+      // placing once the trailing 7-day window (today + the 6 days
+      // before it) already has frequencyPerWeek blocks in it.
+      if (goal.frequencyPerWeek == null) return true;
+      const windowStart = addDaysStr(date, -6);
+      const countInWindow = recentGoalBlocks.filter((b) => b.date >= windowStart && b.date < date).length;
+      return countInWindow < goal.frequencyPerWeek;
   }
 }
 
@@ -174,8 +188,10 @@ export function decideGoalWork(input: GoalWorkInput): GoalWorkBlock | null {
     return { kind: "custom", workoutText: goal.workoutText!, builtWith: goal.coachName };
   }
 
-  // Preset goals: an explicit schedule rule day-shifts them too.
-  if (goal.scheduleRule !== null && goal.scheduleRule !== "readiness" && !isScheduledToday(goal, date, recentGoalBlocks)) {
+  // Preset goals: an explicit schedule rule day-shifts them too. Must run
+  // for scheduleRule === null too now (not just the explicit rules) --
+  // that's isScheduledToday's default case, which gates by frequencyPerWeek.
+  if (goal.scheduleRule !== "readiness" && !isScheduledToday(goal, date, recentGoalBlocks)) {
     return null;
   }
   if (goal.scheduleRule === "readiness" && category !== "moderate" && category !== "push_hard") {

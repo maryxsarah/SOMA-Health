@@ -32,6 +32,10 @@ struct DailyChecklistProgress {
         var hasLoggedFirstWorkout: Bool
         var hasLoggedFirstMeal: Bool
         var hasSeenHowSomaWorks: Bool
+        /// Onboarding-only, per the user's explicit note: widget choice is
+        /// a one-time init task, never a recurring daily one -- it must
+        /// not appear in computeStandard below.
+        var hasChosenWidgets: Bool
     }
 
     /// True once every onboarding item would already show checked --
@@ -114,6 +118,17 @@ struct DailyChecklistProgress {
                 // tour (HowSomaWorksTourView); completion happens only
                 // once its final card's action fires.
                 isManual: false, deepLink: .howSomaWorks, daysUntilNextAvailable: nil
+            ),
+            DailyChecklistItem(
+                key: "onboarding_choose_widgets",
+                title: String(localized: "dailyChecklist.onboarding.chooseWidgets.title", defaultValue: "Choose your widgets", comment: "Onboarding checklist item title"),
+                subtitle: String(localized: "dailyChecklist.onboarding.chooseWidgets.subtitle", defaultValue: "Pick what shows up on your Home screen.", comment: "Onboarding checklist item subtitle"),
+                isChecked: inputs.hasChosenWidgets,
+                // Same shape as onboarding_kitchen_equipment above: no real
+                // completion signal exists for "reviewed your widget
+                // choices," so tapping the row marks it done immediately
+                // AND opens the sheet (see DailyChecklistCardView.toggleManual).
+                isManual: true, deepLink: .chooseWidgets, daysUntilNextAvailable: nil
             ),
         ]
         // Onboarding mode has no daily streak of its own -- it's a

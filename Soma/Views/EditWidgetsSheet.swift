@@ -6,6 +6,7 @@ import SwiftUI
 struct EditWidgetsSheet: View {
     @Binding var waterEnabled: Bool
     @Binding var sleepEnabled: Bool
+    @Binding var streakEnabled: Bool
     @Binding var dailyTasksEnabled: Bool
     @Binding var moodEnabled: Bool
     @Binding var sportGoalEnabled: Bool
@@ -25,6 +26,7 @@ struct EditWidgetsSheet: View {
         [
             Row(id: "water", systemImage: "drop.fill", title: "Water tracker", subtitle: "Goal 8 glasses · tap to change", binding: $waterEnabled),
             Row(id: "sleep", systemImage: "moon.fill", title: "Sleep summary", subtitle: "Last night, on home", binding: $sleepEnabled),
+            Row(id: "streak", systemImage: "flame.fill", title: "Workout streak", subtitle: "Consecutive days trained", binding: $streakEnabled),
             Row(id: "tasks", systemImage: "checklist", title: "Daily tasks", subtitle: "Checklist with today's to-dos", binding: $dailyTasksEnabled),
             Row(id: "mood", systemImage: "face.smiling", title: "Mood check-in", subtitle: "How you're feeling today", binding: $moodEnabled),
             Row(id: "goal", systemImage: "target", title: "Sport goal", subtitle: "Your active goal's progress", binding: $sportGoalEnabled),

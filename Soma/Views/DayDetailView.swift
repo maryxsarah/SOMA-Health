@@ -12,6 +12,10 @@ struct DayDetailView: View {
     /// this screen's crown line can never disagree with the strip's crown
     /// glyph (both derive from CalendarStripView.bestReadinessDate).
     let recentRecommendations: [DailyRecommendation]
+    /// The user's active sport goal, if any -- Home already has this loaded,
+    /// passed through rather than re-fetched here. Only drives the small
+    /// goal-day badge/note below; every other section is unaffected by it.
+    var activeSportGoal: UserGoal?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -188,6 +192,7 @@ struct DayDetailView: View {
                     .font(.system(size: 15, weight: .bold))
                 metaLine
             }
+            goalDayIndicator
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -205,6 +210,43 @@ struct DayDetailView: View {
         case .done: SomaTokens.heart
         case .todo, .upcoming: SomaTokens.accent
         case .skipped: SomaTokens.ink3
+        }
+    }
+
+    /// The actual generated plan for whichever state this day is in --
+    /// `nil` for `.skipped` (nothing was ever generated to compare against).
+    private var currentPlan: AIWorkoutPlan? {
+        switch state {
+        case .done: log?.planSnapshot
+        case .todo, .upcoming: plannedPlan?.plan
+        case .skipped: nil
+        }
+    }
+
+    /// Answers "why does the calendar heart look the way it does" right
+    /// where the user is already looking -- a real plan exists either way,
+    /// this just names whether it happened to include the goal block.
+    /// Silent whenever there's no active goal, or no plan yet to check.
+    @ViewBuilder
+    private var goalDayIndicator: some View {
+        if let activeSportGoal, activeSportGoal.status == .active, let plan = currentPlan {
+            if plan.goalBlock != nil {
+                HStack(spacing: 4) {
+                    Image(systemName: "target")
+                        .font(.system(size: 10, weight: .bold))
+                    Text(String(localized: "day_detail.goalDay.included", defaultValue: "Goal day", comment: "Small badge on a day whose workout includes the user's active sport-goal training block"))
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.3)
+                }
+                .foregroundStyle(SomaTokens.success)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(SomaTokens.successSoft))
+            } else {
+                Text(String(localized: "day_detail.goalDay.notToday", defaultValue: "Not a goal day this week — your regular training still counts.", comment: "Reassuring note on a day whose workout has no goal-training block, shown to a user with an active goal"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SomaTokens.ink3)
+            }
         }
     }
 

@@ -28,6 +28,18 @@ struct LogManualWorkoutView: View {
     private static let intensityOptions: [RecommendationCategory] = [.pushHard, .moderate, .light]
     private static let focusOptions: [BodyPartFocus] = [.cardio, .fullBody, .upperBody, .lowerBody, .core, .recovery]
 
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSaving
     }
@@ -63,7 +75,11 @@ struct LogManualWorkoutView: View {
                         .font(.system(size: 28, weight: .bold, design: .serif).italic())
                         .foregroundStyle(SomaTokens.ink)
                 }
-                ToolbarItem(placement: .cancellationAction) {
+                // Design puts Cancel on the trailing edge (title left→center,
+                // action right) -- same convention as 11b's GoalBodyProgressView
+                // "Done", which uses .confirmationAction, not .cancellationAction
+                // (the latter renders leading and put this on the wrong side).
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Cancel") { dismiss() }
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(SomaTokens.accent)
@@ -130,41 +146,81 @@ struct LogManualWorkoutView: View {
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(SomaTokens.ink)
 
-            DatePicker(String(localized: "logWorkout.date.label", defaultValue: "Date", comment: "Log-activity form: label for the date picker"), selection: $date, in: ...Date(), displayedComponents: .date)
-                .tint(SomaTokens.accent)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .glassCardFlat()
-
-            DatePicker(String(localized: "logWorkout.startTime.label", defaultValue: "Start time", comment: "Log-activity form: label for the start-time picker"), selection: $startTime, displayedComponents: .hourAndMinute)
-                .tint(SomaTokens.accent)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .glassCardFlat()
-
-            // 11c: the gray native Stepper's -|+ rocker -> two glass lens
-            // circles, same 30pt recipe as RecommendationDetailView's
-            // sectionIcon badges.
-            HStack {
-                Text(String(localized: "logWorkout.duration.label", defaultValue: "Duration", comment: "Log-activity form: label for the duration control"))
-                Spacer()
-                Text(Self.durationLabel(durationMinutes))
-                    .foregroundStyle(SomaTokens.ink3)
-                durationStepButton(systemName: "minus", disabled: durationMinutes <= 5) {
-                    durationMinutes = max(5, durationMinutes - 5)
+            // 11c: three separate gray system capsules -> one glass card
+            // with hairline-divided rows and accent-blue pill values (native
+            // DatePicker text ignores .tint in compact style, so the visible
+            // pill is custom, with the real picker overlaid near-invisibly
+            // for interaction).
+            VStack(spacing: 0) {
+                whenRow(label: String(localized: "logWorkout.date.label", defaultValue: "Date", comment: "Log-activity form: label for the date picker"), valueText: Self.dateFormatter.string(from: date)) {
+                    DatePicker("", selection: $date, in: ...Date(), displayedComponents: .date)
+                        .tint(SomaTokens.accent)
                 }
-                durationStepButton(systemName: "plus", disabled: durationMinutes >= 300) {
-                    durationMinutes = min(300, durationMinutes + 5)
+                Divider().overlay(SomaTokens.hairline)
+                whenRow(label: String(localized: "logWorkout.startTime.label", defaultValue: "Start time", comment: "Log-activity form: label for the start-time picker"), valueText: Self.timeFormatter.string(from: startTime)) {
+                    DatePicker("", selection: $startTime, displayedComponents: .hourAndMinute)
+                        .tint(SomaTokens.accent)
                 }
+                Divider().overlay(SomaTokens.hairline)
+                durationRow
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .glassCardFlat()
 
             Text(String(localized: "logWorkout.section.whenFooter", defaultValue: "Used to pull your real heart rate for this exact window from Apple Health or a connected wearable, if one reported it.", comment: "Log-activity form: footer explaining why start time/duration is captured"))
                 .font(.system(size: 12))
                 .foregroundStyle(SomaTokens.ink3)
         }
+    }
+
+    private func whenRow<Picker: View>(label: String, valueText: String, @ViewBuilder picker: () -> Picker) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink)
+            Spacer()
+            Text(valueText)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(SomaTokens.accent)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .glassLens(cornerRadius: SomaTokens.rPill)
+        }
+        .padding(.vertical, 10)
+        .accessibilityHidden(true)
+        .compositingGroup()
+        .overlay(
+            // .destinationOver draws the real picker's own compact chip
+            // BEHIND the already-composited row above (unlike a low-opacity
+            // hack, which still leaves a faint ghost of its native chip
+            // visible) -- trailing-aligned so its chip lands directly under
+            // our pill, fully masking it.
+            picker()
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .blendMode(.destinationOver)
+                .accessibilityLabel(label)
+                .accessibilityValue(valueText)
+        )
+    }
+
+    // 11c: the gray native Stepper's -|+ rocker -> two glass lens circles,
+    // same 30pt recipe as RecommendationDetailView's sectionIcon badges.
+    private var durationRow: some View {
+        HStack {
+            Text(String(localized: "logWorkout.duration.label", defaultValue: "Duration", comment: "Log-activity form: label for the duration control"))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink)
+            Spacer()
+            Text(Self.durationLabel(durationMinutes))
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(SomaTokens.ink)
+            durationStepButton(systemName: "minus", disabled: durationMinutes <= 5) {
+                durationMinutes = max(5, durationMinutes - 5)
+            }
+            durationStepButton(systemName: "plus", disabled: durationMinutes >= 300) {
+                durationMinutes = min(300, durationMinutes + 5)
+            }
+        }
+        .padding(.vertical, 10)
     }
 
     private func durationStepButton(systemName: String, disabled: Bool, action: @escaping () -> Void) -> some View {
