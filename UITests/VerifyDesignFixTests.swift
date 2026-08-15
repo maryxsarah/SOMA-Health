@@ -18,7 +18,7 @@ final class VerifyDesignFixTests: XCTestCase {
         XCTAssertTrue(moreButton.waitForExistence(timeout: 15))
         moreButton.tap()
 
-        let editWidgets = app.buttons["Edit widgets"]
+        let editWidgets = app.buttons["Widgets"]
         XCTAssertTrue(editWidgets.waitForExistence(timeout: 5))
         editWidgets.tap()
 

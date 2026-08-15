@@ -48,15 +48,21 @@ struct GoalPaceQuestionView: View {
 
                 HStack {
                     ForEach(paceOrder) { option in
-                        VStack(spacing: 6) {
-                            Image(systemName: option.systemImageName)
-                                .font(.title2)
-                                .foregroundStyle(pace == option ? Theme.pillFill : Color.secondary)
-                            Text(option.displayName)
-                                .font(.caption.bold())
-                                .foregroundStyle(pace == option ? Theme.pillFill : Color.secondary)
+                        Button {
+                            pace = option
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(systemName: option.systemImageName)
+                                    .font(.title2)
+                                    .foregroundStyle(pace == option ? Theme.pillFill : Color.secondary)
+                                Text(option.displayName)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(pace == option ? Theme.pillFill : Color.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.plain)
                     }
                 }
 
@@ -80,6 +86,7 @@ struct GoalPaceQuestionView: View {
             }
             .padding(.horizontal, 24)
             .animation(.easeInOut(duration: 0.25), value: pace)
+            .sensoryFeedback(.selection, trigger: pace)
 
             Spacer()
 

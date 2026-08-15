@@ -99,11 +99,17 @@ struct EmailAuthView: View {
                 .padding(.horizontal, 24)
 
                 if let checkYourEmailMessage {
-                    Text(checkYourEmailMessage)
-                        .font(.caption)
-                        .foregroundStyle(SomaTokens.ink3)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "envelope.badge.fill")
+                            .foregroundStyle(SomaTokens.success)
+                        Text(checkYourEmailMessage)
+                            .font(.system(size: 13))
+                            .foregroundStyle(SomaTokens.ink2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.successSoft))
+                    .padding(.horizontal, 24)
                 }
                 if let error = sessionManager.errorMessage {
                     Text(error)
