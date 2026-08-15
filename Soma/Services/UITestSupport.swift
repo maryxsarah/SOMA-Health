@@ -12,7 +12,32 @@ import UIKit
 enum UITestSupport {
     #if DEBUG
     static var isActive: Bool {
-        ProcessInfo.processInfo.arguments.contains("--ui-test-fixtures")
+        ProcessInfo.processInfo.arguments.contains("--ui-test-fixtures") || isOnboardingDemo || isOnboardingDemoResume
+    }
+
+    /// Demo-recording mode (see `OnboardingDemoRecordingTests`): the
+    /// network is still stubbed (never hits real Supabase), but
+    /// `bootstrapIfNeeded()` below skips the signed-in shortcut so the app
+    /// boots into the real `OnboardingView` instead of Home.
+    static var isOnboardingDemo: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-onboarding-demo")
+    }
+
+    /// Fast-iteration variant of the above, for developing the recording
+    /// script itself: seeds a signed-in session but leaves onboarding
+    /// incomplete, which `AppState.init()` already resumes at Connect
+    /// Device (its own "app was killed mid-flow" path) -- skips the ~10
+    /// minute email-signup + 22-question survey prefix every retry.
+    static var isOnboardingDemoResume: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-onboarding-demo-resume")
+    }
+
+    /// Onboarding survey screen tests (OnboardingSurveyScrollUITests): boots
+    /// straight onto `OnboardingSurveyView` at a specific question, matching
+    /// a `SurveyStep` case name (e.g. "dietType"), instead of replaying the
+    /// ~17 preceding questions just to reach the one screen under test.
+    static var onboardingSurveyStartStep: String? {
+        ProcessInfo.processInfo.environment["UITEST_ONBOARDING_SURVEY_STEP"]
     }
 
     /// Session whose requests never leave the process. Nil when inactive.
@@ -29,12 +54,32 @@ enum UITestSupport {
         guard isActive else { return }
         // Animations only cost wall-clock and simulator memory here.
         UIView.setAnimationsEnabled(false)
+        // Demo mode wants the REAL onboarding screens, not the signed-in
+        // shortcut every other fixture scenario relies on -- skip the
+        // session seed entirely and let OnboardingView show for real.
+        // Keychain items survive `simctl uninstall`+reinstall (by design,
+        // same as a real device), so an earlier `-resume` run's fake
+        // session would otherwise leak into this one and skip straight
+        // to Connect Device -- clear it explicitly every launch.
+        guard !isOnboardingDemo else {
+            KeychainStore().clear()
+            return
+        }
         KeychainStore().save(StoredSession(
             userID: "00000000-0000-0000-0000-0000000000ff",
             accessToken: "fixture-access-token",
             refreshToken: "fixture-refresh-token",
             expiresAt: Date().addingTimeInterval(10 * 365 * 86400)
         ))
+        // Resume mode: signed in but deliberately NOT onboardingComplete,
+        // so AppState.init()'s own "killed mid-flow" branch lands it at
+        // Connect Device -- skips the signup+survey prefix for iterating
+        // on just that screen.
+        guard !isOnboardingDemoResume else { return }
+        // Same idea as the resume guard above: leave onboardingComplete
+        // unset so AppState.init() takes its "signed in, not complete"
+        // branch, which onboardingSurveyStartStep then steers to .survey.
+        guard onboardingSurveyStartStep == nil else { return }
         let defaults = UserDefaults.standard
         defaults.set(true, forKey: "com.soma.app.onboardingComplete")
         let scenario = FixtureScenario.current
@@ -44,9 +89,23 @@ enum UITestSupport {
         // simulator stuck on a non-English language -- reset on every launch.
         defaults.removeObject(forKey: "com.soma.app.languageOverride")
         defaults.removeObject(forKey: "AppleLanguages")
+        // Same idea: manual dev testing on a reused simulator can leave the
+        // Home widget-visibility toggles off, silently hiding whichever
+        // widget a UI test depends on -- force every toggle back to its
+        // documented default (HomeView's own @AppStorage declarations) on
+        // every fixture launch.
+        defaults.set(true, forKey: "dashboardWidget.water")
+        defaults.set(true, forKey: "dashboardWidget.sleep")
+        defaults.set(true, forKey: "dashboardWidget.dailyTasks")
+        defaults.set(false, forKey: "dashboardWidget.mood")
+        defaults.set(true, forKey: "dashboardWidget.sportGoal")
+        defaults.set(false, forKey: "dashboardWidget.photoProgress")
     }
     #else
     static let isActive = false
+    static let isOnboardingDemo = false
+    static let isOnboardingDemoResume = false
+    static let onboardingSurveyStartStep: String? = nil
     static let stubbedSession: URLSession? = nil
     static func bootstrapIfNeeded() {}
     #endif
@@ -120,6 +179,20 @@ enum FixtureScenario: String {
     /// J1 exercises the first-tap popup; the other front-door scenarios go
     /// straight to the sport list.
     var onboardingSeenAtLaunch: Bool { self != .catalogOpen }
+}
+
+/// Independent of FixtureScenario -- passed via the UITEST_SLEEP_SOURCE
+/// launch environment so the Home sleep widget's wearable-connected state
+/// (9g) is reachable without a dedicated scenario. Nil (the default)
+/// reproduces today's real "nothing synced yet" behavior: daily_snapshot
+/// empty, sleepWidgetTile falls through to the manual chip-log states.
+enum SleepSourceFixture: String {
+    case oura, whoop, healthkit
+
+    static var current: SleepSourceFixture? {
+        ProcessInfo.processInfo.environment["UITEST_SLEEP_SOURCE"]
+            .flatMap(SleepSourceFixture.init(rawValue:))
+    }
 }
 
 /// Independent of FixtureScenario -- passed via the UITEST_NUTRITION_STATE
@@ -215,10 +288,33 @@ enum FixtureData {
         }
     }
 
+    /// All 4 launch-catalog sports (matches the real seed,
+    /// `20260803130000_seed_sport_goal_catalog.sql`) -- Volleyball alone
+    /// only ever exercised the existing SGP-* journeys; the other three
+    /// were missing from the fixture entirely, so any manual/automated
+    /// `--ui-test-fixtures` run showed just one sport in the picker (6a)
+    /// instead of the real catalog's four.
     static let sports: [[String: Any]] = [
         ["id": "sp-volleyball", "name": "Volleyball", "variant": NSNull()],
+        ["id": "sp-hot-yoga", "name": "Hot Yoga", "variant": NSNull()],
+        ["id": "sp-climbing", "name": "Climbing", "variant": NSNull()],
+        ["id": "sp-padel", "name": "Padel", "variant": NSNull()],
     ]
 
+    private static func simpleTargetTable(programName: String) -> [String: Any] {
+        [
+            "bands": [
+                "novice": ["min": 10, "max": 55, "gain_low": 3, "gain_high": 6,
+                           "horizon_weeks_low": 10, "horizon_weeks_high": 12, "program_name": "Foundation \(programName)"],
+                "intermediate": ["min": 55, "max": 75, "gain_low": 2, "gain_high": 4,
+                                 "horizon_weeks_low": 10, "horizon_weeks_high": 12, "program_name": "Builder \(programName)"],
+            ],
+        ]
+    }
+
+    /// Goal names/keys/units are real, lifted from the seed migration --
+    /// only the target_table numbers are fixture-simplified placeholders
+    /// (same posture the original Volleyball entry already had).
     static let sportGoals: [[String: Any]] = [
         [
             "id": goalID,
@@ -229,14 +325,49 @@ enum FixtureData {
             "unit": "cm",
             "measurement_protocol": "Chalk your fingertips and stand side-on to a wall\nReach up flat-footed and mark your standing reach\nJump from a standstill and mark the highest touch — the difference is your jump",
             "noise_band": 2,
-            "target_table": [
-                "bands": [
-                    "novice": ["min": 10, "max": 55, "gain_low": 3, "gain_high": 6,
-                               "horizon_weeks_low": 10, "horizon_weeks_high": 12, "program_name": "Foundation Jump Block"],
-                    "intermediate": ["min": 55, "max": 75, "gain_low": 2, "gain_high": 4,
-                                     "horizon_weeks_low": 10, "horizon_weeks_high": 12, "program_name": "Builder Jump Block"],
-                ],
-            ],
+            "target_table": simpleTargetTable(programName: "Jump Block"),
+        ],
+        [
+            "id": "volleyball_wall_pass_60s", "sport_id": "sp-volleyball", "key": "wall_pass_60s",
+            "name": "Wall-pass count in 60 seconds", "kind": "metric", "unit": "count",
+            "measurement_protocol": "Mark a line on a wall at 3.4 m and pass the ball against it above the line for 60 seconds.",
+            "noise_band": 5, "target_table": simpleTargetTable(programName: "Pass Block"),
+        ],
+        [
+            "id": "hot_yoga_forward_fold", "sport_id": "sp-hot-yoga", "key": "forward_fold",
+            "name": "Forward-fold depth", "kind": "metric", "unit": "cm",
+            "measurement_protocol": "Stand with feet hip-width, fold forward, and measure fingertip distance to the floor.",
+            "noise_band": 2, "target_table": simpleTargetTable(programName: "Flexibility Block"),
+        ],
+        [
+            "id": "hot_yoga_crow_pose", "sport_id": "sp-hot-yoga", "key": "crow_pose",
+            "name": "Crow pose", "kind": "metric", "unit": "seconds",
+            "measurement_protocol": "Hold crow pose (both feet off the ground) for as long as possible.",
+            "noise_band": 2, "target_table": simpleTargetTable(programName: "Balance Block"),
+        ],
+        [
+            "id": "climbing_dead_hang", "sport_id": "sp-climbing", "key": "dead_hang",
+            "name": "Max dead hang", "kind": "metric", "unit": "seconds",
+            "measurement_protocol": "Hang from a pull-up bar with a full grip for as long as possible.",
+            "noise_band": 3, "target_table": simpleTargetTable(programName: "Grip Block"),
+        ],
+        [
+            "id": "climbing_max_pullups", "sport_id": "sp-climbing", "key": "max_pullups",
+            "name": "Max strict pull-ups", "kind": "metric", "unit": "reps",
+            "measurement_protocol": "From a dead hang, pull chin over the bar with strict form -- no kipping.",
+            "noise_band": 1, "target_table": simpleTargetTable(programName: "Pull Block"),
+        ],
+        [
+            "id": "padel_wall_rally_60s", "sport_id": "sp-padel", "key": "wall_rally_60s",
+            "name": "Wall-rally count in 60 seconds", "kind": "metric", "unit": "count",
+            "measurement_protocol": "Rally against a wall for 60 seconds; count consecutive legal hits.",
+            "noise_band": 4, "target_table": simpleTargetTable(programName: "Rally Block"),
+        ],
+        [
+            "id": "padel_lateral_shuttle", "sport_id": "sp-padel", "key": "lateral_shuttle",
+            "name": "Lateral shuttle time", "kind": "metric", "unit": "seconds",
+            "measurement_protocol": "Sprint laterally between two markers 5 m apart, 5 round trips, time the total.",
+            "noise_band": 1, "target_table": simpleTargetTable(programName: "Agility Block"),
         ],
     ]
 
@@ -478,6 +609,7 @@ final class FixtureURLProtocol: URLProtocol {
     private static var betaOptedIn = false
     private static var loggedWorkouts: [[String: Any]] = []
     private static var insertedMeasurements: [[String: Any]] = []
+    private static var loggedSleep: [String: Any]?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -543,6 +675,35 @@ final class FixtureURLProtocol: URLProtocol {
         defer { Self.stateLock.unlock() }
 
         switch true {
+        // Onboarding-demo mode only: a signup response shaped exactly like
+        // SupabaseClient's private AuthResponse (access_token/refresh_token/
+        // expires_in/user.id/user.email) so the real signUpWithEmail() path
+        // decodes it and treats the recording session as signed in, without
+        // ever touching the real Supabase project.
+        case UITestSupport.isOnboardingDemo && path.hasSuffix("/auth/v1/signup"):
+            return ([
+                "access_token": "demo-recording-access-token",
+                "refresh_token": "demo-recording-refresh-token",
+                "expires_in": 3600,
+                "user": ["id": "00000000-0000-0000-0000-0000000000fe", "email": requestBody["email"] as? String ?? "demo@example.com"],
+            ] as [String: Any], 200)
+
+        // Same idea, for the "Log In" path OnboardingDemoRecordingTests
+        // actually taps (EmailAuthView.signInWithEmail -> grant_type=
+        // password) -- this was never stubbed, so every login attempt
+        // decoded an empty body and looped forever on "Something went
+        // wrong. Please try again." Gated to demo mode only -- otherwise
+        // this would also intercept refreshSession()/signInWithApple()
+        // under plain --ui-test-fixtures and hand back a session for the
+        // wrong (demo) user id instead of the scenario's seeded one.
+        case UITestSupport.isOnboardingDemo && path.hasSuffix("/auth/v1/token"):
+            return ([
+                "access_token": "demo-recording-access-token",
+                "refresh_token": "demo-recording-refresh-token",
+                "expires_in": 3600,
+                "user": ["id": "00000000-0000-0000-0000-0000000000fe", "email": requestBody["email"] as? String ?? "demo@example.com"],
+            ] as [String: Any], 200)
+
         // Catalog. betaGate serves it dark until the beta toggle is on --
         // the same "empty fetch == off" contract the real RLS enforces.
         case path.hasSuffix("/rest/v1/sports"):
@@ -616,7 +777,28 @@ final class FixtureURLProtocol: URLProtocol {
         case path.hasSuffix("/rest/v1/daily_recommendation"):
             return ([FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory)], 200)
         case path.hasSuffix("/rest/v1/daily_snapshot"):
-            return ([], 200)
+            guard let source = SleepSourceFixture.current else { return ([], 200) }
+            return ([[
+                "source": source.rawValue, "recovery_score": NSNull(), "readiness_score": NSNull(),
+                "hrv_ms": NSNull(), "sleep_hours": 6.3, "resting_hr": NSNull(),
+                "strain_score": NSNull(), "stress_score": NSNull(),
+                "sleep_light_hours": 2.3, "sleep_deep_hours": 1.7, "sleep_rem_hours": 2.1, "sleep_awake_hours": 0.2,
+            ]], 200)
+
+        // Manual sleep check-in (9g): real POST/GET round trip, same
+        // "mutable state visible to a later read" shape as workout_log --
+        // lets a test tap a chip and assert the widget actually flips to
+        // the logged state, not just that both states can independently render.
+        case path.hasSuffix("/rest/v1/daily_sleep_log") && method == "GET":
+            return (Self.loggedSleep.map { [$0] } ?? [], 200)
+        case path.hasSuffix("/rest/v1/daily_sleep_log") && method == "POST":
+            Self.loggedSleep = [
+                "date": FixtureData.today,
+                "bucket": requestBody["bucket"] as? String ?? "seven_eight",
+                "logged_at": FixtureData.iso(daysAgo: 0),
+            ]
+            return ([:] as [String: Any], 201)
+
         case path.hasSuffix("/rest/v1/ai_workout_plan"):
             if query.contains("date=gte.") {
                 return (filterByDate(FixtureData.goalTrainingPlanRows(scenario: scenario), query: query), 200)

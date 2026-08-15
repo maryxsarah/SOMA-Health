@@ -82,6 +82,7 @@ struct LogMealView: View {
                 } footer: {
                     Text(String(localized: "logMeal.footer.description", defaultValue: "Type it, dictate it, or describe your meal in words -- Soma fills in the fields below either way. Review and adjust anything before saving.", comment: "Footer note explaining the meal entry section on the log meal screen"))
                 }
+                .listRowBackground(SomaTokens.surface2)
                 Section("Required") {
                     LabeledContent("Calories") {
                         TextField("kcal", text: $caloriesText)
@@ -94,6 +95,7 @@ struct LogMealView: View {
                             .multilineTextAlignment(.trailing)
                     }
                 }
+                .listRowBackground(SomaTokens.surface2)
                 Section("Optional") {
                     LabeledContent("Carbs") {
                         TextField("g", text: $carbsText)
@@ -106,12 +108,16 @@ struct LogMealView: View {
                             .multilineTextAlignment(.trailing)
                     }
                 }
+                .listRowBackground(SomaTokens.surface2)
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
+                        .listRowBackground(Color.clear)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .somaBackground()
             .navigationTitle("Log food")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

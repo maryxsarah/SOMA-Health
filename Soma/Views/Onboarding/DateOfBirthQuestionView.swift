@@ -41,6 +41,7 @@ struct DateOfBirthQuestionView: View {
             )
             .datePickerStyle(.wheel)
             .labelsHidden()
+            .tint(SomaTokens.accent)
 
             Spacer()
 

@@ -27,6 +27,9 @@ struct UpwardTrendChartView: View {
     /// Compact call sites (e.g. the welcome screen, which must fit without
     /// scrolling) pass a shorter height than the default.
     var chartHeight: CGFloat = 160
+    /// The welcome screen's chart is decorative trivia, not an earned
+    /// achievement -- no trophy badge there, matching the "8a" mockup.
+    var showsBadge: Bool = true
     @State private var drawProgress: CGFloat = 0
     @State private var showBadge = false
 
@@ -37,16 +40,32 @@ struct UpwardTrendChartView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ZStack(alignment: .topTrailing) {
+                TrendAreaShape(points: points)
+                    .fill(LinearGradient(colors: [SomaTokens.accentSoft14, SomaTokens.accentSoft14.opacity(0)], startPoint: .top, endPoint: .bottom))
+                    .opacity(drawProgress)
+
                 TrendLineShape(points: points)
                     .trim(from: 0, to: drawProgress)
-                    .stroke(Theme.pillFill, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .stroke(
+                        LinearGradient(colors: [SomaTokens.accentLighter, SomaTokens.accent], startPoint: .leading, endPoint: .trailing),
+                        style: StrokeStyle(lineWidth: 3.5, lineCap: .round)
+                    )
 
-                if showBadge {
-                    Image(systemName: "trophy.fill")
-                        .font(.caption)
+                GeometryReader { geometry in
+                    Circle()
+                        .fill(.white)
+                        .overlay(Circle().strokeBorder(SomaTokens.accentLighter, lineWidth: 2))
+                        .frame(width: 8, height: 8)
+                        .position(x: 0, y: (1 - points[0].y) * geometry.size.height)
+                        .opacity(drawProgress)
+                }
+
+                if showsBadge && showBadge {
+                    Image(systemName: "trophy")
+                        .font(.system(size: 17))
                         .foregroundStyle(.white)
-                        .padding(6)
-                        .background(Circle().fill(.orange))
+                        .frame(width: 38, height: 38)
+                        .glassGel(.blue, cornerRadius: 19)
                         .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -60,7 +79,7 @@ struct UpwardTrendChartView: View {
             }
         }
         .padding(chartHeight < 160 ? 14 : 20)
-        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(.systemGray6)))
+        .glassCard(cornerRadius: 20)
         .onAppear {
             withAnimation(.easeOut(duration: 1.4)) { drawProgress = 1 }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
@@ -146,7 +165,7 @@ struct GoalTrajectoryChartView: View {
                 // single reading rather than fabricating a goal line.
                 VStack(spacing: 6) {
                     Text(String(localized: "onboardingCharts.trajectory.currentWeightToday", defaultValue: "\(Self.formattedWeight(start)) kg today", comment: "Shown when only a current weight is known yet (no goal weight set); placeholder is a formatted kg amount like '72.5'"))
-                        .font(.system(.title3, design: .serif).italic())
+                        .font(.system(.title3, design: .serif, weight: .semibold).italic())
                     Text(String(localized: "onboardingCharts.trajectory.setGoalWeightPrompt", defaultValue: "Set a goal weight to see your projected timeline.", comment: "Shown under the current weight reading when no goal weight has been set yet"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -173,7 +192,7 @@ struct GoalTrajectoryChartView: View {
                 .tracking(0.5)
                 .foregroundStyle(Theme.pillFill)
             Text(String(localized: "onboardingCharts.trajectory.markerWeight", defaultValue: "\(Self.formattedWeight(weightKg)) kg", comment: "Weight value shown under a TODAY/GOAL marker on the trajectory chart; placeholder is a formatted kg amount"))
-                .font(.system(.subheadline, design: .serif).italic().bold())
+                .font(.system(.subheadline, design: .serif, weight: .semibold).italic())
             Text(Self.monthFormatter.string(from: date))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)

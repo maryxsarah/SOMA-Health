@@ -60,13 +60,41 @@ final class AppState: ObservableObject {
             // Signed in but never finished onboarding (e.g. app was
             // killed mid-flow) -- simplest correct resumption for V1 is
             // to restart at Connect Device rather than track finer-
-            // grained progress.
-            screen = .connectDevice
+            // grained progress. UI tests can override this to land
+            // straight on the survey at a specific question instead (see
+            // UITestSupport.onboardingSurveyStartStep) -- nil in Release,
+            // so this is always .connectDevice outside of DEBUG test runs.
+            screen = UITestSupport.onboardingSurveyStartStep != nil ? .survey : .connectDevice
+        }
+
+        // A dead refresh token has no local recovery -- bounce to sign-in
+        // once, globally, instead of leaving every screen to fail its own
+        // request and show its own "check your connection" independently.
+        SupabaseClient.shared.onSessionExpired = { [weak self] in
+            self?.signOut()
         }
     }
 
-    func markSignedIn() {
-        screen = .survey
+    /// Called after every successful sign-in (email log in, email sign up,
+    /// email-confirmation deep link, Apple, Google) -- none of those know
+    /// on their own whether this is a brand-new account or one returning
+    /// after signOut() (which wipes the local `onboardingComplete` cache
+    /// the same way it wipes `connectedProviders`, see its own doc
+    /// comment), so re-derive it from the server here rather than always
+    /// assuming "new" and restarting the ~22-question survey on every
+    /// relogin. `weight_kg` is written by saveOnboardingSurvey's first
+    /// (non-skippable) step, so its presence on the profile is a reliable
+    /// "has been through onboarding before" signal.
+    func markSignedIn() async {
+        if let userId = SupabaseClient.shared.currentUserID,
+           let profile = try? await SupabaseClient.shared.fetchProfile(id: userId),
+           profile.weightKg != nil {
+            onboardingComplete = true
+            UserDefaults.standard.set(true, forKey: Self.onboardingCompleteKey)
+            screen = .home
+        } else {
+            screen = .survey
+        }
         // Fire-and-forget: Whoop/Oura tokens are a persistent per-user
         // server table and HealthKit's grant is an OS-level install
         // permission -- neither is affected by a prior sign-out (see

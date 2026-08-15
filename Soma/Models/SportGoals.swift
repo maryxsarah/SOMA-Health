@@ -194,7 +194,7 @@ struct SportGoal: Codable, Identifiable, Hashable {
             return String(localized: "sportGoal.promiseLine.qualitative", defaultValue: "A target in your own words", comment: "Fallback promise-line for qualitative-kind sport goals")
         default: break
         }
-        if let unit, !unit.isEmpty {
+        if let unit = SportGoalFormat.localizedUnit(unit), !unit.isEmpty {
             return String(localized: "sportGoal.promiseLine.measurableInUnit", defaultValue: "Measurable in \(unit)", comment: "Fallback promise-line template; unit is server-provided data (e.g. 'cm', 'reps') -- keep the interpolation, translate only 'Measurable in'")
         }
         return String(localized: "sportGoal.promiseLine.measuredHonestly", defaultValue: "Measured, honestly", comment: "Final fallback promise-line when no unit/promise text is available")
@@ -670,8 +670,23 @@ enum SportGoalFormat {
         v.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", v) : String(format: "%.1f", v)
     }
 
+    /// The catalog's `unit` column is a small closed vocabulary (cm, reps,
+    /// seconds, count) -- translated here rather than server-side so a
+    /// coach's free-typed custom unit (e.g. "jumps") still passes through
+    /// unchanged when it doesn't match a known token.
+    static func localizedUnit(_ unit: String?) -> String? {
+        guard let unit, !unit.isEmpty else { return unit }
+        switch unit {
+        case "seconds": return String(localized: "sportGoalUnit.seconds", defaultValue: "seconds", comment: "Sport goal measurement unit: seconds")
+        case "reps": return String(localized: "sportGoalUnit.reps", defaultValue: "reps", comment: "Sport goal measurement unit: repetitions")
+        case "cm": return String(localized: "sportGoalUnit.cm", defaultValue: "cm", comment: "Sport goal measurement unit: centimeters")
+        case "count": return String(localized: "sportGoalUnit.count", defaultValue: "count", comment: "Sport goal measurement unit: a plain count")
+        default: return unit
+        }
+    }
+
     static func value(_ v: Double, unit: String?) -> String {
-        guard let unit, !unit.isEmpty else { return value(v) }
+        guard let unit = localizedUnit(unit), !unit.isEmpty else { return value(v) }
         return "\(value(v)) \(unit)"
     }
 
@@ -679,7 +694,7 @@ enum SportGoalFormat {
     static func gainRange(low: Double, high: Double, unit: String?) -> String {
         let sign = low >= 0 ? "+" : ""
         let core = "\(sign)\(value(low))–\(value(high))"
-        guard let unit, !unit.isEmpty else { return core }
+        guard let unit = localizedUnit(unit), !unit.isEmpty else { return core }
         return "\(core) \(unit)"
     }
 

@@ -24,11 +24,12 @@ struct SingleSelectQuestionView<Option: SurveyOption>: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(headline)
                     .font(Theme.display)
+                    .foregroundStyle(SomaTokens.ink)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtext {
                     Text(subtext)
                         .font(.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(SomaTokens.ink3)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

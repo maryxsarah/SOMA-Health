@@ -234,10 +234,7 @@ struct CompletedWorkoutView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous)
-                .fill(SomaTokens.surface3)
-        )
+        .glassCardFlat(cornerRadius: SomaTokens.rXL)
     }
 
     /// `MM:SS`, matching guide 04's own example ("Duration 42:10"). Real
@@ -291,7 +288,7 @@ struct CompletedWorkoutView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+        .glassCard(cornerRadius: SomaTokens.rXL)
     }
 
     // MARK: - Adherence (ai_plan only -- this app has no per-block partial
@@ -493,7 +490,7 @@ struct CompletedWorkoutView: View {
         .padding(.bottom, 22)
         .background(
             LinearGradient(
-                colors: [SomaTokens.surface2.opacity(0), Color(red: 0.914, green: 0.941, blue: 0.980)],
+                colors: [SomaTokens.surface2.opacity(0), SomaTokens.bgScreenBottom],
                 startPoint: .top, endPoint: .bottom
             )
         )
@@ -745,33 +742,46 @@ private struct EditWorkoutLogSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("How it felt") {
-                    HStack(spacing: 8) {
-                        ForEach(WorkoutFeelRating.allCases) { rating in
-                            SomaChip(title: LocalizedStringKey(rating.displayName), isSelected: feelRating == rating) {
-                                feelRating = feelRating == rating ? nil : rating
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    CardView {
+                        Text("How it felt")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(SomaTokens.ink)
+                        HStack(spacing: 8) {
+                            ForEach(WorkoutFeelRating.allCases) { rating in
+                                SomaChip(title: LocalizedStringKey(rating.displayName), isSelected: feelRating == rating) {
+                                    feelRating = feelRating == rating ? nil : rating
+                                }
                             }
                         }
                     }
+
+                    CardView {
+                        Text("Feedback for next time")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(SomaTokens.ink)
+                        TextField("Optional", text: $feedbackText, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...4)
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage).font(.caption).foregroundStyle(SomaTokens.danger)
+                    }
+
+                    SomaButton(title: "Save", size: .lg, variant: .primary, isEnabled: !isSaving) {
+                        Task { await save() }
+                    }
                 }
-                Section("Feedback for next time") {
-                    TextField("Optional", text: $feedbackText, axis: .vertical)
-                        .lineLimit(2...4)
-                }
-                if let errorMessage {
-                    Text(errorMessage).font(.caption).foregroundStyle(.red)
-                }
+                .padding(20)
             }
+            .somaSheetBackground()
             .navigationTitle("Edit this log")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
-                        .disabled(isSaving)
                 }
             }
         }

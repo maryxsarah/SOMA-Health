@@ -10,15 +10,17 @@ struct TrialReminderStepView: View {
             Spacer()
 
             ZStack(alignment: .topTrailing) {
-                Image(systemName: "bell.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(Color(.systemGray3))
+                Image(systemName: "bell")
+                    .font(.system(size: 36))
+                    .foregroundStyle(SomaTokens.accent)
+                    .frame(width: 86, height: 86)
+                    .glassLens(cornerRadius: 43)
                 Text("1")
-                    .font(.caption2.bold())
+                    .font(.system(size: 12.5, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 18, height: 18)
-                    .background(Circle().fill(.red))
-                    .offset(x: 6, y: -4)
+                    .frame(width: 26, height: 26)
+                    .glassGel(.blue, cornerRadius: 13)
+                    .offset(x: 8, y: -6)
             }
 
             VStack(spacing: 10) {
@@ -29,17 +31,27 @@ struct TrialReminderStepView: View {
                     .font(.body)
                     .foregroundStyle(.secondary)
 
-                Label("No Payment Due Today", systemImage: "checkmark.circle.fill")
-                    .font(.body.bold())
-                    .foregroundStyle(Theme.pillFill)
-                    .padding(.top, 8)
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .glassGel(.blue, cornerRadius: 10)
+                    Text("No payment due today")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(Theme.pillFill)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .glassCard(cornerRadius: SomaTokens.rPill)
+                .padding(.top, 8)
             }
             .multilineTextAlignment(.center)
             .padding(.horizontal, 28)
 
             Spacer()
 
-            PillButton(title: "Continue for FREE", action: onContinue)
+            PillButton(title: "Continue for free", action: onContinue)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }

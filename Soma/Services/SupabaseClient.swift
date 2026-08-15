@@ -13,6 +13,15 @@ final class SupabaseClient {
     // for a fixture-serving stub (nil outside `--ui-test-fixtures` runs).
     private let urlSession = UITestSupport.stubbedSession ?? URLSession.shared
 
+    /// Fires when `refreshSession()` gets a definitive rejection (the
+    /// refresh token itself is dead -- expired, revoked, or the account
+    /// was deleted) rather than a transient network failure. `AppState`
+    /// wires this to `signOut()` so a dead session bounces the user to
+    /// sign-in once, globally, instead of every screen independently
+    /// showing its own "check your connection" for what's actually an
+    /// unrecoverable auth state.
+    var onSessionExpired: (() -> Void)?
+
     private init() {}
 
     // MARK: - Session state
@@ -233,7 +242,35 @@ final class SupabaseClient {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
+    private let refreshLock = NSLock()
+    private var inFlightRefresh: Task<Void, Error>?
+
+    /// Single-flights concurrent refreshes -- Supabase rotates the refresh
+    /// token on every use, so if two callers both read the same (still
+    /// valid) token and race their own POSTs, only the first succeeds; the
+    /// second gets a definitive 400/401 on an already-consumed token and
+    /// would otherwise fire `onSessionExpired` and sign out a user whose
+    /// session is actually fine. Concurrent callers instead await the one
+    /// in-flight request's result.
     private func refreshSession() async throws {
+        refreshLock.lock()
+        if let inFlight = inFlightRefresh {
+            refreshLock.unlock()
+            return try await inFlight.value
+        }
+        let task = Task { try await self.performRefreshSession() }
+        inFlightRefresh = task
+        refreshLock.unlock()
+
+        defer {
+            refreshLock.lock()
+            inFlightRefresh = nil
+            refreshLock.unlock()
+        }
+        try await task.value
+    }
+
+    private func performRefreshSession() async throws {
         guard let current = keychain.load() else {
             throw SupabaseError.notSignedIn
         }
@@ -249,7 +286,20 @@ final class SupabaseClient {
         ])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        do {
+            try Self.assertSuccess(response, data: data)
+        } catch SupabaseError.requestFailed(let status, let message) where status == 400 || status == 401 {
+            // Supabase's own rejection of the refresh token, not a dropped
+            // connection -- a URLError (timeout, offline) skips this catch
+            // entirely and surfaces to the caller as-is, retryable next
+            // time. This is the dead end: no request from this refresh
+            // token will ever succeed again. Hopped onto the main actor
+            // explicitly -- this method itself isn't @MainActor, but
+            // `onSessionExpired` (AppState.signOut) is.
+            let expired = onSessionExpired
+            Task { @MainActor in expired?() }
+            throw SupabaseError.requestFailed(status: status, message: message)
+        }
 
         let auth = try JSONDecoder().decode(AuthResponse.self, from: data)
         keychain.save(StoredSession(
@@ -931,6 +981,39 @@ final class SupabaseClient {
         try Self.assertSuccess(response, data: data)
     }
 
+    // MARK: - daily_sleep_log
+
+    /// Plain read via RLS -- nil when the user hasn't manually logged a
+    /// sleep bucket today (also nil, and irrelevant, once a wearable
+    /// reports real hours for the day -- callers prefer that over this).
+    func fetchTodaysSleepLog(date: String) async throws -> DailySleepLogEntry? {
+        let path = "rest/v1/daily_sleep_log?date=eq.\(date)&select=date,bucket,logged_at&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([DailySleepLogEntry].self, from: data)
+        return rows.first
+    }
+
+    /// Upsert -- same "one row per day, re-tap to correct yourself" posture
+    /// as `logMood`.
+    func logSleep(date: String, bucket: SleepDurationBucket) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/daily_sleep_log", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        // logged_at must be explicit, not left to the column default --
+        // PostgREST's ON CONFLICT DO UPDATE only touches columns present in
+        // the payload, so re-logging a different bucket the same day would
+        // otherwise leave the original logged_at (and thus the "tap to
+        // change" caption's timestamp) stale.
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId, "date": date, "bucket": bucket.rawValue,
+            "logged_at": ISO8601DateFormatter().string(from: Date()),
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
     // MARK: - daily_recommendation
 
     /// Plain read via RLS -- used by HomeView on appear so opening the app
@@ -1454,7 +1537,7 @@ final class SupabaseClient {
     /// `notes` is optional freeform text the user typed right after
     /// checking a workout (e.g. "sore shoulder today") -- folded into the
     /// generation prompt for this call only, not persisted.
-    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, notes: String? = nil, targetDurationMinutes: ClosedRange<Int>? = nil) async throws -> AIWorkoutPlan {
+    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, notes: String? = nil, targetDurationMinutes: ClosedRange<Int>? = nil, forceRegenerate: Bool = false) async throws -> AIWorkoutPlan {
         var request = try await authorizedRequest(path: "functions/v1/generate-workout-plan", method: "POST", timeout: 180)
         var body: [String: Any] = [
             "date": date,
@@ -1465,6 +1548,11 @@ final class SupabaseClient {
         if let targetDurationMinutes {
             body["targetDurationRange"] = ["min": targetDurationMinutes.lowerBound, "max": targetDurationMinutes.upperBound]
         }
+        // 11d "Regenerate" -- bypasses the server's per-(date, selection)
+        // cache for a fresh take on the SAME workout. The already-logged
+        // guard on the server still wins regardless, so this can't swap a
+        // plan out from under a completed workout.
+        if forceRegenerate { body["forceRegenerate"] = true }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)

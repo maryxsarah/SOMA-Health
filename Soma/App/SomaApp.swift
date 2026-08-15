@@ -108,7 +108,7 @@ struct SomaApp: App {
             do {
                 try await SupabaseClient.shared.completeEmailConfirmation(fragment: fragment)
                 AnalyticsManager.shared.signupCompleted()
-                appState.markSignedIn()
+                await appState.markSignedIn()
             } catch {
                 sessionManager.errorMessage = "That confirmation link didn't work. Try signing up again."
             }

@@ -18,21 +18,21 @@ struct SurveyOptionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
+            HStack(spacing: 13) {
                 Image(systemName: systemImageName)
-                    .font(.body)
-                    .foregroundStyle(Theme.pillFill)
+                    .font(.system(size: 16))
+                    .foregroundStyle(SomaTokens.accent)
                     .frame(width: 34, height: 34)
-                    .background(Circle().fill(Color(.systemGray6)))
+                    .glassLens(cornerRadius: 17)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.body.bold())
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(isSelected ? SomaTokens.accent : SomaTokens.ink)
                     if let subtitle {
                         Text(subtitle)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(SomaTokens.ink3)
                     }
                 }
 
@@ -40,16 +40,13 @@ struct SurveyOptionRow: View {
 
                 indicator
             }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(isSelected ? Theme.pillFill : Color.clear, lineWidth: 2)
-                    )
-                    .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 3)
+            .padding(15)
+            .glassCardFlat()
+            .overlay(
+                RoundedRectangle(cornerRadius: SomaTokens.rRow, style: .continuous)
+                    .strokeBorder(SomaTokens.accent.opacity(isSelected ? 0.35 : 0), lineWidth: 1.5)
             )
+            .shadow(color: SomaTokens.accent.opacity(isSelected ? 0.12 : 0), radius: 8, x: 0, y: 6)
         }
         .buttonStyle(.plain)
     }
@@ -58,14 +55,11 @@ struct SurveyOptionRow: View {
     private var indicator: some View {
         switch style {
         case .radio:
-            Circle()
-                .strokeBorder(isSelected ? Theme.pillFill : Color(.systemGray4), lineWidth: 2)
-                .background(Circle().fill(isSelected ? Theme.pillFill : .clear))
-                .frame(width: 22, height: 22)
+            radioIndicator
         case .checkbox:
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(isSelected ? Theme.pillFill : Color(.systemGray4), lineWidth: 2)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(isSelected ? Theme.pillFill : .clear))
+            RoundedRectangle(cornerRadius: SomaTokens.rCheck, style: .continuous)
+                .strokeBorder(isSelected ? SomaTokens.accent : SomaTokens.inkPlaceholder, lineWidth: 2)
+                .background(RoundedRectangle(cornerRadius: SomaTokens.rCheck, style: .continuous).fill(isSelected ? SomaTokens.accent : .clear))
                 .frame(width: 22, height: 22)
                 .overlay(
                     Image(systemName: "checkmark")
@@ -73,6 +67,24 @@ struct SurveyOptionRow: View {
                         .foregroundStyle(.white)
                         .opacity(isSelected ? 1 : 0)
                 )
+        }
+    }
+
+    /// Unselected: a thin empty accent ring, no fill. Selected: the same
+    /// filled-gel-disc-plus-check treatment as `WeekdayMiniPicker`'s
+    /// selected day, for one consistent "this is chosen" language app-wide.
+    @ViewBuilder
+    private var radioIndicator: some View {
+        if isSelected {
+            Image(systemName: "checkmark")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .glassGel(.blue, cornerRadius: 11)
+        } else {
+            Circle()
+                .strokeBorder(SomaTokens.accent.opacity(0.35), lineWidth: 1.5)
+                .frame(width: 22, height: 22)
         }
     }
 }

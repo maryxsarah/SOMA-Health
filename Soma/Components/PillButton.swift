@@ -7,41 +7,37 @@ enum PillButtonStyle {
     case connected
 }
 
-/// Dark blue filled pill/capsule with bold white text, per spec. Covers
-/// both the flow buttons ("Get Started", "Continue", "Finish Setup") and
-/// the provider "Connect" -> "Connected" transition in one component.
+/// The app-wide primary CTA. `.primary` renders as the signature spinning
+/// glass pill (`CTAPillButton`, per `soma-glass-tokens.css` -- the only
+/// animated button in the system). `.connected` is a static done-state
+/// pill and is never animated.
 struct PillButton: View {
     let title: LocalizedStringKey
+    var icon: Image? = nil
     var style: PillButtonStyle = .primary
     var isEnabled: Bool = true
     var action: () -> Void = {}
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if style == .connected {
+        switch style {
+        case .primary:
+            CTAPillButton(title: title, icon: icon, isEnabled: isEnabled, action: action)
+        case .connected:
+            Button(action: action) {
+                HStack(spacing: 8) {
                     Image(systemName: "checkmark")
+                    Text("Connected")
+                        .font(.body.bold())
                 }
-                Text(style == .connected ? "Connected" : title)
-                    .font(.body.bold())
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .glassGel(.blue)
+                .opacity(0.55)
             }
-            // A pill's label is a single word or short phrase; wrapping
-            // mid-word ("Connect-ed" in the 130pt provider-row pill) reads
-            // as broken. Shrink a little instead of breaking the line.
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(
-                Capsule().fill(Theme.pillFill.opacity(effectivelyEnabled ? 1.0 : 0.4))
-            )
+            .disabled(true)
         }
-        .disabled(!effectivelyEnabled)
-    }
-
-    private var effectivelyEnabled: Bool {
-        style != .connected && isEnabled
     }
 }
 
@@ -52,4 +48,5 @@ struct PillButton: View {
         PillButton(title: "Connect", style: .connected) {}
     }
     .padding()
+    .somaBackground()
 }

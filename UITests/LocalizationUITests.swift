@@ -26,8 +26,15 @@ final class LocalizationUITests: XCTestCase {
     }
 
     private func openLanguageSheet(_ app: XCUIApplication) {
+        // Profile is no longer a persistent top-row gear icon -- it's
+        // reachable through the dock's "More" sheet now (Soma Glass 3a
+        // has no nav-pill row above the week strip).
+        let moreButton = app.buttons["dock-more-button"]
+        XCTAssertTrue(moreButton.waitForExistence(timeout: 20), "Home should show the dock's More button")
+        moreButton.tap()
+
         let profileButton = app.buttons["profile-button"]
-        XCTAssertTrue(profileButton.waitForExistence(timeout: 20), "Home should show the profile/settings button")
+        XCTAssertTrue(profileButton.waitForExistence(timeout: 10), "More sheet should show the Profile tile")
         profileButton.tap()
 
         // Matched by label predicate, not subscript-by-identifier -- the

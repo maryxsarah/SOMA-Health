@@ -37,11 +37,7 @@ struct SportGoalOnboardingView: View {
             .padding(.top, 22)
             .padding(.horizontal, 22)
             .padding(.bottom, 20)
-            .background(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(SomaTokens.surface)
-                    .shadow(color: SomaTokens.ink.opacity(0.18), radius: 32, y: 24)
-            )
+            .glassCard(cornerRadius: 26)
             .padding(.horizontal, 24)
         }
     }
@@ -249,7 +245,7 @@ struct SportGoalOnboardingView: View {
         VStack(spacing: 6) {
             VStack(spacing: 2) {
                 Text("+3–6 cm")
-                    .font(.system(size: 26, design: .serif).italic().bold())
+                    .font(SomaType.sheetTitle)
                 Text("in 10–12 weeks — an honest range")
                     .font(.system(size: 10.5))
                     .foregroundStyle(SomaTokens.ink4)

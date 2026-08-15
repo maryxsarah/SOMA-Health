@@ -30,7 +30,7 @@ final class StreakMilestoneTests: XCTestCase {
     }
 }
 
-final class ProfileViewStreakTests: XCTestCase {
+final class ProfileStoreStreakTests: XCTestCase {
     /// Same "yyyy-MM-dd" + .current formatting streak(from:) uses internally.
     private func dateString(daysAgo: Int, hour: Int = 12, minute: Int = 0) -> String {
         let calendar = Calendar.current
@@ -43,35 +43,35 @@ final class ProfileViewStreakTests: XCTestCase {
     }
 
     func testNoLogsIsZeroStreak() {
-        XCTAssertEqual(ProfileView.streak(from: []), 0)
+        XCTAssertEqual(ProfileStore.streak(from: []), 0)
     }
 
     func testSingleTodayEntryIsOneDayStreak() {
-        XCTAssertEqual(ProfileView.streak(from: [dateString(daysAgo: 0)]), 1)
+        XCTAssertEqual(ProfileStore.streak(from: [dateString(daysAgo: 0)]), 1)
     }
 
     func testConsecutiveDaysContinueTheStreak() {
         let dates: Set<String> = [dateString(daysAgo: 0), dateString(daysAgo: 1), dateString(daysAgo: 2)]
-        XCTAssertEqual(ProfileView.streak(from: dates), 3)
+        XCTAssertEqual(ProfileStore.streak(from: dates), 3)
     }
 
     func testMissedDayBreaksTheStreak() {
         // Today and 2 days ago present, yesterday missing -- the walk-back
         // stops the moment it hits the gap.
         let dates: Set<String> = [dateString(daysAgo: 0), dateString(daysAgo: 2)]
-        XCTAssertEqual(ProfileView.streak(from: dates), 1)
+        XCTAssertEqual(ProfileStore.streak(from: dates), 1)
     }
 
     func testNoEntryTodayShowsZeroEvenWithAPriorStreak() {
         // A real run through yesterday earns no credit until today is
         // actually logged -- matches the calendar strip's own crown badges.
         let dates: Set<String> = [dateString(daysAgo: 1), dateString(daysAgo: 2), dateString(daysAgo: 3)]
-        XCTAssertEqual(ProfileView.streak(from: dates), 0)
+        XCTAssertEqual(ProfileStore.streak(from: dates), 0)
     }
 
     func testLongUnbrokenStreakCountsEveryDay() {
         let dates = Set((0..<10).map { dateString(daysAgo: $0) })
-        XCTAssertEqual(ProfileView.streak(from: dates), 10)
+        XCTAssertEqual(ProfileStore.streak(from: dates), 10)
     }
 
     func testEntryJustBeforeMidnightAndJustAfterAreDistinctDays() {
@@ -80,13 +80,13 @@ final class ProfileViewStreakTests: XCTestCase {
             dateString(daysAgo: 1, hour: 23, minute: 59),
             dateString(daysAgo: 0, hour: 0, minute: 1),
         ]
-        XCTAssertEqual(ProfileView.streak(from: dates), 2)
+        XCTAssertEqual(ProfileStore.streak(from: dates), 2)
     }
 
     func testFutureDatesInTheSetDontInflateTheStreak() {
         // Defensive: streak(from:) walks backward from today, so a stray
         // future-dated entry (clock skew, bad data) is simply never visited.
         let dates: Set<String> = [dateString(daysAgo: 0), dateString(daysAgo: -5)]
-        XCTAssertEqual(ProfileView.streak(from: dates), 1)
+        XCTAssertEqual(ProfileStore.streak(from: dates), 1)
     }
 }

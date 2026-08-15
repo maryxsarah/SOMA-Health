@@ -69,7 +69,7 @@ struct GoalHubView: View {
     }
 
     private var unit: String? {
-        goal.kind == .custom ? goal.customMetricUnit : presetGoal?.unit
+        SportGoalFormat.localizedUnit(goal.kind == .custom ? goal.customMetricUnit : presetGoal?.unit)
     }
 
     private var noiseBand: Double {
@@ -305,7 +305,7 @@ struct GoalHubView: View {
             // A goal "in words" shows the words themselves as its target.
             if presetGoal?.kind == .qualitative, let words = goal.targetText, !words.isEmpty {
                 Text("“\(words)”")
-                    .font(.system(size: 20, design: .serif).italic())
+                    .font(SomaType.metric(20))
                 Text("Progress is sessions done plus your own check-in — no invented numbers.")
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink3)
@@ -336,7 +336,7 @@ struct GoalHubView: View {
                 .foregroundStyle(SomaTokens.ink2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+                .glassCardFlat(cornerRadius: SomaTokens.rXL)
         }
     }
 
@@ -360,7 +360,7 @@ struct GoalHubView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+        .glassCardFlat(cornerRadius: SomaTokens.rXL)
     }
 
     /// Two calm variants: user pause and safety pause. Never alarm-red.
@@ -394,7 +394,7 @@ struct GoalHubView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+        .glassCardFlat(cornerRadius: SomaTokens.rXL)
     }
 
     private func inlineNotice(_ text: LocalizedStringKey) -> some View {
@@ -459,7 +459,7 @@ struct GoalHubView: View {
                 .font(.body.bold())
             if let index = currentStageIndex, ladder.indices.contains(index) {
                 Text(SportGoal.stageDisplayName(ladder[index]))
-                    .font(.system(size: 24, design: .serif).italic())
+                    .font(SomaType.metric(24))
                 Text("Stage \(index + 1) of \(ladder.count) — stage-based, no numbers needed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -480,7 +480,7 @@ struct GoalHubView: View {
                 AxisLabeledTrendChart(values: values)
             } else if values.count == 1 {
                 Text(SportGoalFormat.value(values[0].value, unit: unit))
-                    .font(.system(size: 24, design: .serif).italic())
+                    .font(SomaType.metric(24))
                 Text("Only one data point so far.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -598,7 +598,7 @@ struct GoalHubView: View {
             Spacer()
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+        .glassCardFlat(cornerRadius: SomaTokens.rXL)
     }
 
     private var deferredRow: some View {
@@ -611,7 +611,7 @@ struct GoalHubView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+        .glassCardFlat(cornerRadius: SomaTokens.rXL)
     }
 
     /// A4 entry: one protocol reminder line, then a ruler + attempts for

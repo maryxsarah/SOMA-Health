@@ -28,19 +28,26 @@ struct NutritionView: View {
                         SomaLoadingBar(barWidth: 200)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 80)
-                    } else if let target {
-                        let progress = NutritionDayProgress.compute(entries: entries, target: target)
-                        progressSection(progress)
-                        mealIdeaCard(progress)
-                        logSection
                     } else {
-                        emptyStateSection
+                        // logSection used to live inside the `target != nil`
+                        // branch, so a meal logged before targets exist was
+                        // invisible forever -- "Log a meal instead" led
+                        // nowhere. It's unconditional now so anything
+                        // logged always shows, target or not.
+                        if let target {
+                            let progress = NutritionDayProgress.compute(entries: entries, target: target)
+                            progressSection(progress)
+                            mealIdeaCard(progress)
+                        } else {
+                            emptyStateSection
+                        }
+                        logSection
                     }
 
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(SomaTokens.danger)
                     }
                 }
                 .padding(20)
@@ -52,13 +59,16 @@ struct NutritionView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
-                if target != nil {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            showLogSheet = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
+                // Not gated on `target != nil` -- logging a meal never
+                // depended on targets being computed yet (LogMealView only
+                // needs a date), and gating it here was a dead end for
+                // anyone who skipped goal-photo setup: no target, no "+",
+                // no way to log at all.
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showLogSheet = true
+                    } label: {
+                        Image(systemName: "plus")
                     }
                 }
             }
@@ -103,12 +113,14 @@ struct NutritionView: View {
             Text(String(localized: "nutrition.emptyState.body", defaultValue: "Soma computes this from your weight, height, and goal weight -- normally already on file from onboarding. Add goal photos for an even more tailored target, or make sure those numbers are filled in.", comment: "Explains how nutrition targets are computed, shown when no target exists yet"))
                 .font(.body)
                 .foregroundStyle(.secondary)
-            Button {
+            SomaButton(title: "Set up your goal photos", size: .lg, variant: .primary) {
                 showGoalBodyProgress = true
-            } label: {
-                Label("Set up your goal photos", systemImage: "camera.fill")
-                    .font(.subheadline.bold())
             }
+            Button("Log a meal instead") {
+                showLogSheet = true
+            }
+            .font(.subheadline.bold())
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -128,19 +140,19 @@ struct NutritionView: View {
                     }
                     macroBar(
                         label: "Calories", consumed: progress.consumedCalories, target: progress.targetCalories,
-                        unit: "kcal", fraction: progress.calorieFraction, color: SomaTokens.accent, isPrimary: true
+                        unit: String(localized: "kcal", comment: "Unit abbreviation for kilocalories, shown next to a macro progress value"), fraction: progress.calorieFraction, color: SomaTokens.accent, isPrimary: true
                     )
                     macroBar(
                         label: "Protein", consumed: progress.consumedProteinG, target: progress.targetProteinG,
-                        unit: "g", fraction: progress.proteinFraction, color: Self.proteinColor
+                        unit: String(localized: "g", comment: "Unit abbreviation for grams, shown next to a macro progress value"), fraction: progress.proteinFraction, color: Self.proteinColor
                     )
                     macroBar(
                         label: "Carbs", consumed: progress.consumedCarbsG, target: progress.targetCarbsG,
-                        unit: "g", fraction: progress.carbsFraction, color: Self.carbsColor
+                        unit: String(localized: "g", comment: "Unit abbreviation for grams, shown next to a macro progress value"), fraction: progress.carbsFraction, color: Self.carbsColor
                     )
                     macroBar(
                         label: "Fat", consumed: progress.consumedFatG, target: progress.targetFatG,
-                        unit: "g", fraction: progress.fatFraction, color: Self.fatColor
+                        unit: String(localized: "g", comment: "Unit abbreviation for grams, shown next to a macro progress value"), fraction: progress.fatFraction, color: Self.fatColor
                     )
                 }
             }
@@ -230,44 +242,47 @@ struct NutritionView: View {
     /// Tapping the row (its own tap target, separate from the trash
     /// button) opens MealDetailView -- full macros, logged time, source,
     /// and the goal-fit rating. The score badge here is the same stored
-    /// number MealDetailView shows, just a quick-glance version.
+    /// number MealDetailView shows, just a quick-glance version. Each row
+    /// is its own flat glass surface rather than a full glassCard -- same
+    /// row-vs-card distinction ProfileView's summaryRow/deviceRow use, so
+    /// a long log doesn't stack heavy blurred cards on top of each other.
     private func logRow(_ entry: MealLogEntry) -> some View {
-        CardView {
-            HStack(alignment: .top, spacing: 10) {
-                Button {
-                    selectedEntry = entry
-                } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        if let score = entry.score, let verdict = entry.verdict {
-                            scoreBadge(score: score, color: verdict.color)
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.label?.isEmpty == false ? entry.label! : String(localized: "nutrition.loggedFoodFallback", defaultValue: "Logged food", comment: "Fallback title shown for a meal log entry that has no name"))
-                                .font(.system(size: 14.5, weight: .semibold))
-                                .foregroundStyle(SomaTokens.ink)
-                            Text(macroSummary(entry))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(SomaTokens.ink4)
-                            .padding(.top, 2)
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                selectedEntry = entry
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    if let score = entry.score, let verdict = entry.verdict {
+                        scoreBadge(score: score, color: verdict.color)
                     }
-                    .contentShape(Rectangle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.label?.isEmpty == false ? entry.label! : String(localized: "nutrition.loggedFoodFallback", defaultValue: "Logged food", comment: "Fallback title shown for a meal log entry that has no name"))
+                            .font(.system(size: 14.5, weight: .semibold))
+                            .foregroundStyle(SomaTokens.ink)
+                        Text(macroSummary(entry))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(SomaTokens.ink4)
+                        .padding(.top, 2)
                 }
-                .buttonStyle(.plain)
-
-                Button {
-                    Task { await delete(entry) }
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+
+            Button {
+                Task { await delete(entry) }
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
         }
+        .padding(14)
+        .glassCardFlat(cornerRadius: SomaTokens.rXL)
     }
 
     private func scoreBadge(score: Int, color: Color) -> some View {
@@ -306,9 +321,10 @@ struct NutritionView: View {
             try? await SupabaseClient.shared.analyzeBodyPhotos()
             target = try? await SupabaseClient.shared.fetchNutritionTargets()
         }
-        if target != nil {
-            await loadEntries()
-        }
+        // Always loaded, target or not -- logSection now renders
+        // unconditionally, so an already-logged meal must actually be
+        // fetched even for a user who never got a target computed.
+        await loadEntries()
         isLoading = false
     }
 

@@ -29,11 +29,11 @@ struct AchievementCardView: View {
             }
 
             Text(goalName)
-                .font(.system(size: 22, design: .serif).italic())
+                .font(SomaType.metric(22))
                 .foregroundStyle(SomaTokens.ink)
 
             Text(bigLine)
-                .font(.system(size: 40, design: .serif).italic())
+                .font(SomaType.metric(40))
                 .foregroundStyle(accentColor)
 
             if case .coachExport(_, _, _, let chartValues, _) = variant, chartValues.count >= 2 {
@@ -55,15 +55,11 @@ struct AchievementCardView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
+        .glassCard()
+        .overlay(
             RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
-                .fill(SomaTokens.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
-                        .stroke(borderColor, lineWidth: 1)
-                )
+                .strokeBorder(borderColor, lineWidth: 1)
         )
-        .somaCardShadow()
     }
 
     private var accentColor: Color {

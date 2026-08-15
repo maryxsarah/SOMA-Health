@@ -14,8 +14,20 @@ private enum SurveyStep: Int, CaseIterable {
 struct OnboardingSurveyView: View {
     @EnvironmentObject private var appState: AppState
 
-    @State private var step: SurveyStep = .sex
+    @State private var step: SurveyStep
     @State private var answers = OnboardingSurveyAnswers()
+
+    init() {
+        _step = State(initialValue: Self.initialStep)
+    }
+
+    /// Lets OnboardingSurveyScrollUITests land directly on one question
+    /// (e.g. "dietType") instead of replaying every preceding one -- nil in
+    /// Release, so this is always `.sex` outside of DEBUG test runs.
+    private static var initialStep: SurveyStep {
+        guard let raw = UITestSupport.onboardingSurveyStartStep else { return .sex }
+        return SurveyStep.allCases.first { "\($0)" == raw } ?? .sex
+    }
 
     var body: some View {
         Group {

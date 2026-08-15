@@ -34,64 +34,161 @@ struct LogManualWorkoutView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField(String(localized: "logWorkout.title.placeholder", defaultValue: "e.g. Soccer training, Hot yoga, Volleyball", comment: "Log-activity form: placeholder for the activity title text field"), text: $title)
-                    Picker(String(localized: "logWorkout.focus.label", defaultValue: "Focus", comment: "Log-activity form: label for the body-part-focus picker"), selection: $bodyPart) {
-                        ForEach(Self.focusOptions, id: \.self) { part in
-                            Text(part.displayName).tag(part)
-                        }
-                    }
-                    Picker("Effort", selection: $category) {
-                        ForEach(Self.intensityOptions, id: \.self) { intensity in
-                            Text(intensity.displayTitle).tag(intensity)
-                        }
-                    }
-                } header: {
-                    Text(String(localized: "logWorkout.section.whatDidYouDo", defaultValue: "What did you do?", comment: "Log-activity form: header for the activity/focus/effort section"))
-                } footer: {
-                    Text(String(localized: "logWorkout.section.effortFooter", defaultValue: "Effort helps Soma calibrate tomorrow's plan around today's real training load.", comment: "Log-activity form: footer explaining why effort is captured"))
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    whatDidYouDoCard
+                    whenCard
+                    notesCard
 
-                Section {
-                    DatePicker(String(localized: "logWorkout.date.label", defaultValue: "Date", comment: "Log-activity form: label for the date picker"), selection: $date, in: ...Date(), displayedComponents: .date)
-                    DatePicker(String(localized: "logWorkout.startTime.label", defaultValue: "Start time", comment: "Log-activity form: label for the start-time picker"), selection: $startTime, displayedComponents: .hourAndMinute)
-                    Stepper(value: $durationMinutes, in: 5...300, step: 5) {
-                        HStack {
-                            Text("Duration")
-                            Spacer()
-                            Text(Self.durationLabel(durationMinutes))
-                                .foregroundStyle(.secondary)
-                        }
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(SomaTokens.danger)
                     }
-                } header: {
-                    Text(String(localized: "logWorkout.section.when", defaultValue: "When", comment: "Log-activity form: header for the date/time/duration section"))
-                } footer: {
-                    Text(String(localized: "logWorkout.section.whenFooter", defaultValue: "Used to pull your real heart rate for this exact window from Apple Health or a connected wearable, if one reported it.", comment: "Log-activity form: footer explaining why start time/duration is captured"))
-                }
 
-                Section("Notes (optional)") {
-                    TextField(String(localized: "logWorkout.notes.placeholder", defaultValue: "Anything worth remembering", comment: "Log-activity form: placeholder for the optional free-text notes field"), text: $notes, axis: .vertical)
-                        .lineLimit(1...3)
+                    SomaButton(title: LocalizedStringKey(String(localized: "logWorkout.cta.logActivity", defaultValue: "Log activity", comment: "Log-activity form: primary CTA button")), size: .lg, variant: .primary, isEnabled: canSave) {
+                        Task { await save() }
+                    }
                 }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(SomaTokens.danger)
-                }
+                .padding(20)
             }
-            .navigationTitle(String(localized: "logWorkout.navigationTitle", defaultValue: "Log an activity", comment: "Log-activity form: navigation title"))
+            .somaSheetBackground()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // 11c: white Cancel pill + centered bold title -> serif
+                // italic title + glass Cancel pill, same recipe as 11b's
+                // header (GoalBodyProgressView).
+                ToolbarItem(placement: .principal) {
+                    Text(String(localized: "logWorkout.navigationTitle", defaultValue: "Log an activity", comment: "Log-activity form: navigation title"))
+                        .font(.system(size: 28, weight: .bold, design: .serif).italic())
+                        .foregroundStyle(SomaTokens.ink)
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
-                        .disabled(!canSave)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(SomaTokens.accent)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .glassLens(cornerRadius: SomaTokens.rPill)
                 }
             }
+        }
+    }
+
+    // MARK: - What did you do?
+
+    private var whatDidYouDoCard: some View {
+        CardView {
+            Text(String(localized: "logWorkout.section.whatDidYouDo", defaultValue: "What did you do?", comment: "Log-activity form: header for the activity/focus/effort section"))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(SomaTokens.ink)
+
+            TextField(String(localized: "logWorkout.title.placeholder", defaultValue: "e.g. Soccer training, Hot yoga, Volleyball", comment: "Log-activity form: placeholder for the activity title text field"), text: $title)
+                .textFieldStyle(.roundedBorder)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(String(localized: "logWorkout.focus.label", defaultValue: "Focus", comment: "Log-activity form: label for the body-part-focus picker"))
+                    .font(SomaType.eyebrow)
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                    .foregroundStyle(SomaTokens.ink3)
+                FlowLayout {
+                    ForEach(Self.focusOptions, id: \.self) { part in
+                        SomaChip(title: LocalizedStringKey(part.displayName), isSelected: bodyPart == part) {
+                            bodyPart = part
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Effort")
+                    .font(SomaType.eyebrow)
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                    .foregroundStyle(SomaTokens.ink3)
+                FlowLayout {
+                    ForEach(Self.intensityOptions, id: \.self) { intensity in
+                        SomaChip(title: LocalizedStringKey(intensity.displayTitle), isSelected: category == intensity) {
+                            category = intensity
+                        }
+                    }
+                }
+            }
+
+            Text(String(localized: "logWorkout.section.effortFooter", defaultValue: "Effort helps Soma calibrate tomorrow's plan around today's real training load.", comment: "Log-activity form: footer explaining why effort is captured"))
+                .font(.system(size: 12))
+                .foregroundStyle(SomaTokens.ink3)
+        }
+    }
+
+    // MARK: - When
+
+    private var whenCard: some View {
+        CardView {
+            Text(String(localized: "logWorkout.section.when", defaultValue: "When", comment: "Log-activity form: header for the date/time/duration section"))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(SomaTokens.ink)
+
+            DatePicker(String(localized: "logWorkout.date.label", defaultValue: "Date", comment: "Log-activity form: label for the date picker"), selection: $date, in: ...Date(), displayedComponents: .date)
+                .tint(SomaTokens.accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .glassCardFlat()
+
+            DatePicker(String(localized: "logWorkout.startTime.label", defaultValue: "Start time", comment: "Log-activity form: label for the start-time picker"), selection: $startTime, displayedComponents: .hourAndMinute)
+                .tint(SomaTokens.accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .glassCardFlat()
+
+            // 11c: the gray native Stepper's -|+ rocker -> two glass lens
+            // circles, same 30pt recipe as RecommendationDetailView's
+            // sectionIcon badges.
+            HStack {
+                Text(String(localized: "logWorkout.duration.label", defaultValue: "Duration", comment: "Log-activity form: label for the duration control"))
+                Spacer()
+                Text(Self.durationLabel(durationMinutes))
+                    .foregroundStyle(SomaTokens.ink3)
+                durationStepButton(systemName: "minus", disabled: durationMinutes <= 5) {
+                    durationMinutes = max(5, durationMinutes - 5)
+                }
+                durationStepButton(systemName: "plus", disabled: durationMinutes >= 300) {
+                    durationMinutes = min(300, durationMinutes + 5)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .glassCardFlat()
+
+            Text(String(localized: "logWorkout.section.whenFooter", defaultValue: "Used to pull your real heart rate for this exact window from Apple Health or a connected wearable, if one reported it.", comment: "Log-activity form: footer explaining why start time/duration is captured"))
+                .font(.system(size: 12))
+                .foregroundStyle(SomaTokens.ink3)
+        }
+    }
+
+    private func durationStepButton(systemName: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(disabled ? SomaTokens.ink4 : SomaTokens.accent)
+                .frame(width: 30, height: 30)
+                .glassLens(cornerRadius: SomaTokens.rPill)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+
+    // MARK: - Notes
+
+    private var notesCard: some View {
+        CardView {
+            Text("Notes (optional)")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(SomaTokens.ink)
+            TextField(String(localized: "logWorkout.notes.placeholder", defaultValue: "Anything worth remembering", comment: "Log-activity form: placeholder for the optional free-text notes field"), text: $notes, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1...3)
         }
     }
 

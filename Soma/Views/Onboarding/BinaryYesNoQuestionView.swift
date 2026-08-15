@@ -29,11 +29,19 @@ struct BinaryYesNoQuestionView: View {
 
             Spacer()
 
-            VStack(spacing: 14) {
+            VStack(spacing: 10) {
                 PillButton(title: "Yes") { onAnswer(true) }
-                Button("No") { onAnswer(false) }
-                    .font(.body.bold())
-                    .foregroundStyle(.secondary)
+                Button {
+                    onAnswer(false)
+                } label: {
+                    Text("No")
+                        .font(.body.bold())
+                        .foregroundStyle(SomaTokens.inkParagraph)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .glassCardFlat(cornerRadius: SomaTokens.rPill)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 32)

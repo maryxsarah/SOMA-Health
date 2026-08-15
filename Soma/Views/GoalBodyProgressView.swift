@@ -36,6 +36,7 @@ struct GoalBodyProgressView: View {
     @State private var goalPhotoItem: PhotosPickerItem?
     @State private var currentPhotoItem: PhotosPickerItem?
     @State private var showComparison = false
+    @State private var showAddPhotoPicker = false
 
     var body: some View {
         NavigationStack {
@@ -57,12 +58,8 @@ struct GoalBodyProgressView: View {
                         if trainingEmphasis != nil || !emphasisTags.isEmpty {
                             insightsSection
                         }
-                        if goalImage != nil || currentImage != nil {
-                            addProgressPhotoRow
-                        }
-                        if !goalHistory.isEmpty || !currentHistory.isEmpty {
+                        if !goalHistory.isEmpty {
                             historySection(title: "Goal photo history", entries: goalHistory, kind: .goal)
-                            historySection(title: "Your progress photos", entries: currentHistory, kind: .current)
                         }
                     }
 
@@ -78,8 +75,21 @@ struct GoalBodyProgressView: View {
             .navigationTitle("Your Progress")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                // 11b's serif-italic "Your progress" + glass "Done" chip,
+                // via the standard toolbar (not a hand-drawn sheet header)
+                // so Dynamic Type/VoiceOver/multitasking keep working.
+                ToolbarItem(placement: .principal) {
+                    Text("Your progress")
+                        .font(.system(size: 28, weight: .bold, design: .serif).italic())
+                        .foregroundStyle(SomaTokens.ink)
+                }
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(SomaTokens.accent)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .glassLens(cornerRadius: SomaTokens.rPill)
                 }
             }
         }
@@ -126,8 +136,9 @@ struct GoalBodyProgressView: View {
             PhotosPicker(selection: selection, matching: .images) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color(.systemGray6))
+                        .fill(Color.clear)
                         .frame(height: 160)
+                        .glassCard(cornerRadius: 16)
                     if isUploading {
                         ProgressView()
                     } else {
@@ -144,13 +155,16 @@ struct GoalBodyProgressView: View {
         }
     }
 
-    // MARK: - Photos (both set)
+    // MARK: - Photos (11b two-up compare)
 
     private var photosSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 16) {
-                photoSlot(title: "Goal body", image: goalImage, isUploading: isUploadingGoal, selection: $goalPhotoItem)
-                photoSlot(title: "Current body", image: currentImage, isUploading: isUploadingCurrent, selection: $currentPhotoItem)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                compareSlot(kind: .current, title: "Current body", image: currentImage, isUploading: isUploadingCurrent, selection: $currentPhotoItem)
+                compareSlot(kind: .goal, title: "Goal body", image: goalImage, isUploading: isUploadingGoal, selection: $goalPhotoItem)
+            }
+            if !currentHistory.isEmpty {
+                historyStrip
             }
             if goalImage != nil && currentImage != nil {
                 Button {
@@ -161,36 +175,132 @@ struct GoalBodyProgressView: View {
                         .font(.caption.bold())
                 }
             }
+            CTAPillButton(title: "Add a new progress photo", icon: Image(systemName: "camera.fill")) {
+                showAddPhotoPicker = true
+            }
         }
+        .photosPicker(isPresented: $showAddPhotoPicker, selection: $currentPhotoItem, matching: .images)
     }
 
-    private func photoSlot(title: LocalizedStringKey, image: UIImage?, isUploading: Bool, selection: Binding<PhotosPickerItem?>) -> some View {
-        VStack(spacing: 8) {
+    /// One grid cell -- tinted-glass placeholder or the real photo, an
+    /// on-photo "Current"/"Goal" chip (light glass vs. the accent gel), and
+    /// (Current only) a dark date chip against the pinned photo's history
+    /// entry. Tapping opens this slot's own picker directly, same as
+    /// before -- re-uploading here already both replaces the pinned photo
+    /// AND keeps the old one in history (see SupabaseClient.uploadBodyPhoto).
+    private func compareSlot(kind: SupabaseClient.BodyPhotoKind, title: LocalizedStringKey, image: UIImage?, isUploading: Bool, selection: Binding<PhotosPickerItem?>) -> some View {
+        let isGoal = kind == .goal
+        return VStack(spacing: 8) {
             PhotosPicker(selection: selection, matching: .images) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color(.systemGray6))
-                        .frame(height: 220)
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: isGoal
+                                    ? [Color(red: 0.906, green: 0.886, blue: 0.965), Color(red: 0.784, green: 0.737, blue: 0.918)]
+                                    : [Color(red: 0.863, green: 0.906, blue: 0.973), Color(red: 0.718, green: 0.800, blue: 0.925)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
                     if let image {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
-                            .frame(height: 220)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     } else if isUploading {
                         ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        Image(systemName: "plus")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
+                        Image(systemName: isGoal ? "target" : "camera.fill")
+                            .font(.system(size: 26))
+                            .foregroundStyle(SomaTokens.accent.opacity(0.35))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+
+                    Group {
+                        if isGoal {
+                            Text("Goal")
+                                .font(.system(size: 11, weight: .bold))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 5)
+                                .glassGel(.blue, cornerRadius: SomaTokens.rPill)
+                        } else {
+                            Text("Current")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(SomaTokens.ink)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 5)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+                        }
+                    }
+                    .padding(10)
+
+                    if !isGoal, let dateText = pinnedDate(kind: .current) {
+                        Text(dateText)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color.black.opacity(0.45)))
+                            .padding(10)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     }
                 }
+                .aspectRatio(3 / 4, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.8), lineWidth: 1))
             }
+            .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Newest `currentHistory` entry pinned to the profile -- gives the
+    /// on-photo date chip a real "when was this taken" rather than "today".
+    private func pinnedDate(kind: SupabaseClient.BodyPhotoKind) -> String? {
+        let path = kind == .goal ? goalPhotoPath : currentPhotoPath
+        let entries = kind == .goal ? goalHistory : currentHistory
+        return entries.first(where: { $0.storagePath == path })?.shortDate
+    }
+
+    // MARK: - History strip (current-body log, embedded in the compare card)
+
+    private var historyStrip: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("HISTORY")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.7)
+                .foregroundStyle(SomaTokens.inkPlaceholder)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(currentHistory) { entry in
+                        historyThumbnail(entry, kind: .current)
+                    }
+                    addHistoryTile
+                }
+            }
+            Text("Tap a photo to make it your current one.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(SomaTokens.ink3)
+        }
+    }
+
+    private var addHistoryTile: some View {
+        Button { showAddPhotoPicker = true } label: {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(SomaTokens.accent.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [4]))
+                .background(Color.white.opacity(0.5).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)))
+                .frame(width: 64, height: 80)
+                .overlay(
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Progress bar / tenure
@@ -260,19 +370,6 @@ struct GoalBodyProgressView: View {
         }
     }
 
-    // MARK: - Add progress photo
-
-    private var addProgressPhotoRow: some View {
-        // Reuses the same slot binding as the "Current body" photo above --
-        // tapping it replaces the pinned current photo AND keeps the old
-        // one in history (see SupabaseClient.uploadBodyPhoto), which is
-        // exactly "add a new progress photo" without a separate upload path.
-        PhotosPicker(selection: $currentPhotoItem, matching: .images) {
-            Label("Add a new progress photo", systemImage: "camera.fill")
-                .font(.caption.bold())
-        }
-    }
-
     // MARK: - History
 
     private func historySection(title: LocalizedStringKey, entries: [BodyPhotoEntry], kind: SupabaseClient.BodyPhotoKind) -> some View {
@@ -295,30 +392,31 @@ struct GoalBodyProgressView: View {
             guard !isPinned else { return }
             Task { await pin(entry, kind: kind) }
         } label: {
-            ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: .bottom) {
                 Group {
                     if let image = historyThumbnails[entry.storagePath] {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
                     } else {
-                        Color(.systemGray6)
+                        Color.clear.glassCardFlat(cornerRadius: 16)
                     }
                 }
-                .frame(width: 88, height: 88)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(isPinned ? SomaTokens.accent : .clear, lineWidth: 2)
-                )
-                if isPinned {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(SomaTokens.accent)
-                        .background(Circle().fill(.white))
-                        .padding(4)
+                .frame(width: 64, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                if let shortDate = entry.shortDate {
+                    Text(shortDate)
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(isPinned ? SomaTokens.accent : SomaTokens.ink3)
+                        .padding(.bottom, 5)
                 }
             }
+            .frame(width: 64, height: 80)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(isPinned ? SomaTokens.accent.opacity(0.45) : .clear, lineWidth: 1.5)
+            )
+            .opacity(isPinned ? 1 : 0.85)
         }
         .buttonStyle(.plain)
         .task { await loadThumbnailIfNeeded(entry) }

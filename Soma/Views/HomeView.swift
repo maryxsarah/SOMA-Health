@@ -11,6 +11,7 @@ struct HomeView: View {
     @State private var showDetail = false
     @State private var showProfile = false
     @State private var showHealthDashboard = false
+    @State private var healthDashboardInitialSection: HealthDashboardView.DashboardSection = .overview
     @State private var recentRecommendations: [DailyRecommendation] = []
     @State private var selectedDay: String?
     @State private var todaysWorkoutLog: WorkoutLogEntry?
@@ -38,6 +39,18 @@ struct HomeView: View {
     /// that visibly did nothing). Surfacing this turns a mystery bug report
     /// into something the user can see and retry.
     @State private var moodError: String?
+
+    /// Daily "how long did you sleep?" check-in -- shown only when no
+    /// wearable reported real hours for today (see `sleepWidgetTile`).
+    /// Same upsert/error-surfacing posture as mood, just for a different
+    /// metric.
+    @State private var todaysSleepLog: DailySleepLogEntry?
+    /// "Tap to change" reveals the duration chips without discarding
+    /// `todaysSleepLog` -- see `loadTodaysSleep`'s doc comment for why it
+    /// used to be cleared to nil instead.
+    @State private var isEditingSleep = false
+    @State private var isSavingSleep = false
+    @State private var sleepError: String?
     @State private var timelineEntries: [WorkoutTimelineEntry] = []
 
     @State private var showGymPhotoFlow = false
@@ -81,16 +94,6 @@ struct HomeView: View {
     @State private var activeSportGoal: UserGoal?
     @State private var sportGoalCatalog: SportCatalog?
     @State private var showSportGoalScreen = false
-    /// Launch-period promo entry: dismiss is forever (guide 05's rule),
-    /// so it persists across sessions rather than living in view state.
-    @AppStorage("sportGoalPromoDismissed") private var sportGoalPromoDismissed = false
-    /// The onboarding gallery shows on the FIRST card tap only (guide 08);
-    /// after that the card goes straight to the sport list.
-    @AppStorage("sportGoalOnboardingSeen") private var sportGoalOnboardingSeen = false
-    @State private var showSportGoalOnboarding = false
-    /// Set when onboarding's "Pick a goal" fires -- the goal flow sheet
-    /// opens from the cover's onDismiss, never over a live cover.
-    @State private var openGoalFlowAfterOnboarding = false
     /// "Not feeling it today?" confirmation dialog, and the in-flight state
     /// for setting/clearing that request. See restDayRequestControl.
     @State private var showRestDayOptions = false
@@ -115,29 +118,84 @@ struct HomeView: View {
     /// tour's completion write, the same way changing a List row's id
     /// forces SwiftUI to recreate (and thus re-.task) that row.
     @State private var checklistRefreshToken = 0
+    /// Mirrored from DailyChecklistCardView's own load() via onProgressChange
+    /// -- nil until that view has actually loaded once (inline widget or the
+    /// greeting-row pill's sheet), never a fabricated placeholder count.
+    @State private var checklistDone: Int?
+    @State private var checklistTotal: Int?
+    @State private var showChecklistSheet = false
+
+    // MARK: - Dashboard widgets + dock (Soma Glass 3a/3c/3e handoff)
+
+    /// Which optional cards show on the dashboard -- set from
+    /// `EditWidgetsSheet` (3c). Log workout isn't here: it's the dock's
+    /// pinned-first action, not a toggleable widget. Defaults match the
+    /// handoff mockup's toggle states.
+    @AppStorage("dashboardWidget.water") private var waterWidgetEnabled = true
+    @AppStorage("dashboardWidget.sleep") private var sleepWidgetEnabled = true
+    @AppStorage("dashboardWidget.dailyTasks") private var dailyTasksWidgetEnabled = true
+    @AppStorage("dashboardWidget.mood") private var moodWidgetEnabled = false
+    @AppStorage("dashboardWidget.sportGoal") private var sportGoalWidgetEnabled = true
+    @AppStorage("dashboardWidget.photoProgress") private var photoProgressWidgetEnabled = false
+    @State private var showEditWidgets = false
+    @State private var showMoreActions = false
+    /// Set by `MoreActionsSheet` right before it dismisses itself, fired
+    /// from that sheet's own `.onDismiss` -- the same chain-sheets pattern
+    /// `showGymPhotoFlow`'s seeded-detail flow uses, so this sheet and the
+    /// action's own sheet never try to present at the same time.
+    @State private var pendingMoreAction: (() -> Void)?
+
+    /// Water tracker widget -- UI-only per the design handoff ("no backend
+    /// anywhere... kept as a placeholder by the user's explicit choice").
+    /// Keyed by day so it doesn't carry yesterday's count into today.
+    @State private var waterGlassesToday = 0
+    private static func waterStorageKey() -> String { "water.\(Self.todayDateString())" }
+
+    /// Glass size chip (9b) -- a standing preference, not day-scoped, that
+    /// the "+"/"-" and droplet-tap actions all read but don't themselves
+    /// change; only the chip's own tap cycles it.
+    @AppStorage("water.glassSizeML") private var waterGlassSizeML = 250
+    private static let waterGlassSizes = [150, 200, 250, 330, 500]
+
+    private func cycleWaterGlassSize() {
+        let sizes = Self.waterGlassSizes
+        let currentIndex = sizes.firstIndex(of: waterGlassSizeML) ?? 2
+        waterGlassSizeML = sizes[(currentIndex + 1) % sizes.count]
+    }
+
+    private enum TrainingSource { case somasPick, custom }
+    /// Custom-training source toggle (5a/5b) -- UI + local selection only.
+    /// No matching recommendation-engine code exists for this yet, so
+    /// `.custom` shows an honest "coming soon" state rather than a
+    /// fabricated workout (see `customTrainingCard`).
+    @State private var trainingSource: TrainingSource = .somasPick
+    @AppStorage("customTrainingSportId") private var customTrainingSportId = ""
+    @State private var showCustomTrainingPicker = false
 
     var body: some View {
         ScrollView {
-            // Guide 03 order: nav pill → greeting → week card → readiness
-            // card → scan row. The orb is gone (22% of the screen carrying
-            // no information); raw metric tiles live in the dashboard.
-            // 16 (was 12): the orb-era screen breathed more; with it gone
-            // the cards read cramped at 12 on a standard-height device.
+            // Soma Glass 3a order: a bare "•••" settings glyph top-right
+            // (the mockup's own status-bar row -- "21:36 •••" -- the dots
+            // are a real settings entry point, not decoration) → bare week
+            // strip (no card, sits directly on the gradient) → greeting
+            // row (with the checklist ring-pill) → hero card. No weekly-
+            // progress card on Home -- the week reads from the hearts
+            // themselves. Health dashboard is reachable from the dock.
             VStack(spacing: 16) {
-                topRow
+                settingsRow
 
-                greetingBlock
+                bareWeekStrip
 
-                weekCard
+                greetingRow
 
-                dailyChecklistCard
-
-                if showSportGoalPromo {
-                    sportGoalPromoCard
+                if showTrainingSourceToggle {
+                    trainingSourceToggle
                 }
 
                 Group {
-                    if let recommendation = appState.currentRecommendation {
+                    if trainingSource == .custom {
+                        customTrainingCard
+                    } else if let recommendation = appState.currentRecommendation {
                         readinessCard(recommendation)
                     } else {
                         needsDataCard
@@ -150,13 +208,15 @@ struct HomeView: View {
                     aiGeneratedWorkoutCard(todaysAIPlan)
                 }
 
-                moodCheckInRow
+                widgetGrid
 
-                scanRow
+                if dailyTasksWidgetEnabled {
+                    dailyChecklistWidget
+                }
 
-                goalProgressRow
-
-                nutritionRow
+                if photoProgressWidgetEnabled {
+                    goalProgressRow
+                }
 
                 if !timelineEntries.isEmpty {
                     timelineCard
@@ -164,10 +224,30 @@ struct HomeView: View {
             }
             .padding(.horizontal, 20)
             .frame(maxWidth: .infinity)
-            .padding(.bottom, 40)
+            .padding(.bottom, 100)
+            // Keeps checklistDone/checklistTotal populated even when the
+            // "Daily tasks" widget is off, so the greeting row's ring-pill
+            // -- the only other entry point into the checklist sheet --
+            // doesn't become permanently unreachable (onProgressChange only
+            // ever fires from a mounted DailyChecklistCardView).
+            .background(
+                Group {
+                    if !dailyTasksWidgetEnabled {
+                        dailyChecklistWidget
+                            .frame(width: 0, height: 0)
+                            .clipped()
+                            .hidden()
+                            .accessibilityHidden(true)
+                    }
+                }
+            )
         }
         .somaBackground()
+        .safeAreaInset(edge: .bottom) {
+            dashboardDock
+        }
         .task {
+            waterGlassesToday = UserDefaults.standard.integer(forKey: Self.waterStorageKey())
             await loadTodaysRecommendation()
             await appState.refreshReferralBonus()
             await loadRecentRecommendations()
@@ -184,7 +264,8 @@ struct HomeView: View {
             await loadWeeklyProgressAndStreak()
             await loadGoalBodyPhotoState()
             await loadNutritionState()
-            await loadTodaysMood()
+            try? await loadTodaysMood()
+            try? await loadTodaysSleep()
         }
         .refreshable {
             await checkNow()
@@ -201,7 +282,8 @@ struct HomeView: View {
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
             await loadNutritionState()
-            await loadTodaysMood()
+            try? await loadTodaysMood()
+            try? await loadTodaysSleep()
         }
         .sheet(isPresented: $showDetail, onDismiss: {
             Task {
@@ -252,7 +334,7 @@ struct HomeView: View {
             }
         }
         .sheet(isPresented: $showHealthDashboard) {
-            HealthDashboardView()
+            HealthDashboardView(initialSection: healthDashboardInitialSection)
         }
         .sheet(isPresented: $showHowSomaWorks) {
             HowSomaWorksTourView(onFinish: {
@@ -264,21 +346,6 @@ struct HomeView: View {
             Task { await loadSportGoal() }
         }) {
             SportGoalFlowView()
-        }
-        .fullScreenCover(isPresented: $showSportGoalOnboarding, onDismiss: {
-            if openGoalFlowAfterOnboarding {
-                openGoalFlowAfterOnboarding = false
-                showSportGoalScreen = true
-            }
-        }) {
-            SportGoalOnboardingView(
-                onPickGoal: {
-                    openGoalFlowAfterOnboarding = true
-                    showSportGoalOnboarding = false
-                },
-                onClose: { showSportGoalOnboarding = false }
-            )
-            .presentationBackground(.clear)
         }
         .sheet(isPresented: $showGymPhotoFlow, onDismiss: {
             Task {
@@ -339,6 +406,37 @@ struct HomeView: View {
         )) {
             if let selectedDay {
                 DayDetailView(date: selectedDay, recentRecommendations: recentRecommendations)
+            }
+        }
+        .sheet(isPresented: $showChecklistSheet) {
+            checklistSheet
+        }
+        .sheet(isPresented: $showEditWidgets) {
+            EditWidgetsSheet(
+                waterEnabled: $waterWidgetEnabled,
+                sleepEnabled: $sleepWidgetEnabled,
+                dailyTasksEnabled: $dailyTasksWidgetEnabled,
+                moodEnabled: $moodWidgetEnabled,
+                sportGoalEnabled: $sportGoalWidgetEnabled,
+                photoProgressEnabled: $photoProgressWidgetEnabled
+            )
+        }
+        .sheet(isPresented: $showMoreActions, onDismiss: {
+            pendingMoreAction?()
+            pendingMoreAction = nil
+        }) {
+            MoreActionsSheet(actions: configurableDockActions + overflowDockActions) { selected in
+                pendingMoreAction = selected.action
+                showMoreActions = false
+            }
+        }
+        .sheet(isPresented: $showCustomTrainingPicker) {
+            CustomTrainingPickerSheet(
+                sports: sportGoalCatalog?.sports ?? [],
+                selectedSportId: customTrainingSportId.isEmpty ? nil : customTrainingSportId
+            ) { sport in
+                customTrainingSportId = sport.id
+                trainingSource = .custom
             }
         }
         .onChange(of: checklistRouter.pending) { _, newValue in
@@ -434,95 +532,82 @@ struct HomeView: View {
         CalendarStripView.bestReadinessDate(among: recentRecommendations) == Self.todayDateString()
     }
 
-    /// guide 02: pill top-left (opposite the gear), badge top-right --
-    /// nothing else in that row. Previously the Dashboard was reachable
-    /// only from deep inside Profile, easy to miss entirely.
-    private var topRow: some View {
-        HStack {
-            Button {
-                AnalyticsManager.shared.featureUsed(name: "health_dashboard")
-                showHealthDashboard = true
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Dashboard")
-                        .font(.system(size: 13.5, weight: .semibold))
-                    // The badge counts filled hearts in the strip below,
-                    // computed from the exact same 7-day window/dataset --
-                    // if they ever disagreed, guide 02 says the strip wins,
-                    // so this reuses `completedDates` rather than a
-                    // separately-fetched calendar-week count.
-                    if doneThisWeekCount > 0 {
-                        Text("\(doneThisWeekCount) done")
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(SomaTokens.heart)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(SomaTokens.heartSoft))
-                    }
-                }
-                .foregroundStyle(SomaTokens.accentDeep)
-                .padding(.leading, 10)
-                .padding(.trailing, 12)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule()
-                        .fill(SomaTokens.surface)
-                        .overlay(Capsule().stroke(SomaTokens.hairline, lineWidth: 1))
-                        .somaCardShadow()
-                )
-            }
-            .buttonStyle(SomaNavPillButtonStyle())
-
-            Spacer()
-
-            Button {
-                showProfile = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.title3)
-                    .foregroundStyle(Theme.pillFill)
-            }
-            // Stable hook for XCUITest (see UITests/CASES.md).
-            .accessibilityIdentifier("profile-button")
-        }
-        .padding(.top, 2)
-    }
-
-    private var doneThisWeekCount: Int {
-        Set(CalendarStripView.lastDayStrings()).intersection(completedDates).count
-    }
 
     // MARK: - Greeting (guide 03: "where am I")
 
-    private var greetingBlock: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(Self.longDateString())
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(SomaTokens.ink3)
-            Text(Self.timeOfDayGreeting())
-                .font(Theme.display)
+    /// Date eyebrow + serif greeting, with the checklist's live progress as
+    /// a compact ring-pill on the trailing edge (3a: "greeting row = date
+    /// eyebrow + serif greeting left, checklist N/M ring-pill right, opens
+    /// the checklist -- the checklist card itself isn't on 3a's first
+    /// viewport"). The pill shows "—" rather than a fabricated count until
+    /// DailyChecklistCardView has actually loaded once (inline widget or
+    /// this row's own sheet).
+    private var greetingRow: some View {
+        HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Self.longDateString())
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink3)
+                Text(Self.timeOfDayGreeting())
+                    .font(SomaType.greeting)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // No placeholder state -- until DailyChecklistCardView has
+            // actually loaded once (inline widget or this pill's own
+            // sheet), there's nothing real to show, so show nothing.
+            if let checklistDone, let checklistTotal, checklistTotal > 0 {
+                Button {
+                    showChecklistSheet = true
+                } label: {
+                    HStack(spacing: 6) {
+                        ProgressRing(fraction: Double(checklistDone) / Double(checklistTotal))
+                            .frame(width: 14, height: 14)
+                        Text("\(checklistDone)/\(checklistTotal)")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundStyle(SomaTokens.accent)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 7)
+                    .glassLens()
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - Week card (guide 03: strip + weekly progress + streak pill)
-
-    private var weekCard: some View {
-        CardView {
-            CalendarStripView(
-                recommendations: recentRecommendations,
-                completedDates: completedDates,
-                goalTrainingDates: goalTrainingDates,
-                selectedDate: selectedDay,
-                onSelectDay: { selectedDay = $0 }
-            )
-
-            Divider().overlay(SomaTokens.hairline)
-
-            weeklyProgress
+    /// The mockup's own top row (`21:36 •••`) -- the dots are a real
+    /// settings entry point (opens Profile directly), not a decorative
+    /// status-bar stand-in. No time label: the real device status bar
+    /// already shows one.
+    private var settingsRow: some View {
+        HStack {
+            Spacer()
+            Button {
+                showProfile = true
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(SomaTokens.ink4)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(SomaNavPillButtonStyle())
+            .accessibilityLabel(String(localized: "home.settingsRow.accessibilityLabel", defaultValue: "Settings", comment: "Home: top-right ellipsis button that opens Profile/settings"))
         }
+    }
+
+    // MARK: - Week strip (Soma Glass 3a: bare hearts directly on the
+    // gradient, no card chrome) + weekly progress pill
+
+    private var bareWeekStrip: some View {
+        CalendarStripView(
+            recommendations: recentRecommendations,
+            completedDates: completedDates,
+            goalTrainingDates: goalTrainingDates,
+            selectedDate: selectedDay,
+            onSelectDay: { selectedDay = $0 }
+        )
     }
 
     /// Reuses signals HomeView already loads for its own cards (mood,
@@ -539,9 +624,59 @@ struct HomeView: View {
                 hasReviewedFirstPlan: appState.currentRecommendation != nil
             ),
             loadingDeepLink: checklistLoadingDeepLink,
-            onDeepLink: handleChecklistDeepLink
+            onDeepLink: handleChecklistDeepLink,
+            onProgressChange: { done, total in
+                checklistDone = done
+                checklistTotal = total
+            }
         )
         .id(checklistRefreshToken)
+    }
+
+    /// Home's own "Your widgets" entry -- per the Soma Glass 3e handoff
+    /// this is a compact preview (title/counter/progress bar + the first
+    /// couple of open items + a link into the full list), not the whole
+    /// checklist inline; the sheet still shows every item via
+    /// `dailyChecklistCard`'s `.full` default.
+    private var dailyChecklistWidget: some View {
+        DailyChecklistCardView(
+            date: Self.todayDateString(),
+            signals: DailyChecklistCardView.SharedSignals(
+                moodLoggedToday: todaysMood != nil,
+                workoutLoggedToday: todaysWorkoutLog != nil,
+                healthKitConnected: !appState.connectedProviders.isEmpty,
+                hasReviewedFirstPlan: appState.currentRecommendation != nil
+            ),
+            style: .compact,
+            onSeeAll: { showChecklistSheet = true },
+            loadingDeepLink: checklistLoadingDeepLink,
+            onDeepLink: handleChecklistDeepLink,
+            onProgressChange: { done, total in
+                checklistDone = done
+                checklistTotal = total
+            }
+        )
+        .id(checklistRefreshToken)
+    }
+
+    /// Sheet the greeting row's ring-pill opens -- same `dailyChecklistCard`
+    /// content whether or not the inline widget is also toggled on.
+    private var checklistSheet: some View {
+        NavigationStack {
+            ScrollView {
+                dailyChecklistCard
+                    .padding(20)
+            }
+            .somaSheetBackground()
+            .navigationTitle("Today's checklist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showChecklistSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     /// Persists the "How Soma Works" tour's completion the exact same way
@@ -589,38 +724,17 @@ struct HomeView: View {
         }
     }
 
-    /// "4 of 5 sessions this week" + a target-count segment bar + "1 to go"
-    /// pill. Filled segments must equal filled hearts, and both must equal
-    /// Profile's weekly target -- so both derive from the same
-    /// completedDates set the strip renders (SELF-CHECK, guide 03).
-    private var weeklyProgress: some View {
-        let target = max(weeklyTarget ?? 5, 1)
-        let done = min(doneThisWeekCount, target)
-        let toGo = target - done
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("\(doneThisWeekCount) of \(target) sessions this week")
-                    .font(.system(size: 13.5, weight: .semibold))
-                Spacer()
-                if toGo > 0 {
-                    HStack(spacing: 4) {
-                        Image(systemName: "heart")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("\(toGo) to go")
-                            .font(.system(size: 11.5, weight: .semibold))
-                    }
-                    .foregroundStyle(SomaTokens.heart)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(SomaTokens.heartSoft))
-                }
-            }
-            HStack(spacing: 5) {
-                ForEach(0..<target, id: \.self) { index in
-                    Capsule()
-                        .fill(index < done ? SomaTokens.heart : SomaTokens.surface4)
-                        .frame(height: 6)
-                }
+    /// The checklist ring-pill's 14pt indicator (also reused by the ring
+    /// pill itself) -- a static trim-drawn ring, no animation.
+    private struct ProgressRing: View {
+        var fraction: Double
+        var body: some View {
+            ZStack {
+                Circle().stroke(SomaTokens.accent.opacity(0.18), lineWidth: 3)
+                Circle()
+                    .trim(from: 0, to: max(0.02, min(fraction, 1)))
+                    .stroke(SomaTokens.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
             }
         }
     }
@@ -628,11 +742,11 @@ struct HomeView: View {
     // MARK: - Readiness card (guide 03: category + one line + disclosure + CTA)
 
     private func readinessCard(_ recommendation: DailyRecommendation) -> some View {
-        CardView {
+        VStack(alignment: .leading, spacing: 13) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(recommendation.category.displayTitle)
-                        .font(.system(size: 32, design: .serif).italic())
+                        .font(SomaType.heroTitle)
                     // The only screen a day-1 user is guaranteed to see --
                     // without this, a zero-signal "moderate" reads exactly
                     // like a real one until they tap through to Detail.
@@ -661,17 +775,23 @@ struct HomeView: View {
                 }
             }
 
-            SomaDisclosure {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(recommendation.reason.explanation(snapshots: todaysSnapshots))
-                    if !readinessInputs.isEmpty {
-                        Text(readinessInputs.joined(separator: " · "))
-                            .font(.system(size: 12.5, weight: .semibold))
-                    }
+            // 3a: always-visible flat-tinted metric chips (they carry data,
+            // not affordance -- never `.glassLens()`/`.glassGel()`), not
+            // hidden inside the disclosure. Duration always exists (the
+            // category's own fixed suggestion pool, not fabricated); health
+            // inputs only when a source actually reported them.
+            let chips = heroChips(for: recommendation)
+            if !chips.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(chips, id: \.self) { HomeMetricChip(text: $0) }
                 }
             }
 
-            if let activeSportGoal {
+            SomaDisclosure {
+                Text(recommendation.reason.explanation(snapshots: todaysSnapshots))
+            }
+
+            if sportGoalWidgetEnabled, let activeSportGoal {
                 goalRow(activeSportGoal)
             }
 
@@ -707,6 +827,15 @@ struct HomeView: View {
             .buttonStyle(.plain)
 
             restDayRequestControl(recommendation)
+        }
+        .padding(.init(top: 24, leading: 24, bottom: 20, trailing: 24))
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 32, style: .continuous)
+            shape
+                .fill(.ultraThinMaterial)
+                .overlay(shape.fill(Color.white.opacity(0.4)))
+                .overlay(shape.strokeBorder(Color.white.opacity(0.75), lineWidth: 1))
+                .shadow(color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.12), radius: 20, x: 0, y: 16)
         }
     }
 
@@ -800,80 +929,6 @@ struct HomeView: View {
         }
     }
 
-    /// The card shows only while the feature's front door makes sense:
-    /// beta catalog open, no goal yet, never after a dismiss.
-    private var showSportGoalPromo: Bool {
-        Config.enableSportGoals
-            && !sportGoalPromoDismissed
-            && activeSportGoal == nil
-            && sportGoalCatalog?.isEmpty == false
-    }
-
-    /// Temporary NEW promo card (guide 05) -- the beta feature's front
-    /// door. Once a goal exists the readiness card's goal row replaces it.
-    private var sportGoalPromoCard: some View {
-        // Two sibling buttons, no gesture layered over the whole card --
-        // the open area and the dismiss X can never steal each other's tap.
-        HStack(spacing: 0) {
-            Button {
-                if sportGoalOnboardingSeen {
-                    showSportGoalScreen = true
-                } else {
-                    sportGoalOnboardingSeen = true
-                    showSportGoalOnboarding = true
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(SomaTokens.accentSoft)
-                        .frame(width: 36, height: 36)
-                        .overlay(
-                            Image(systemName: "target")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(SomaTokens.accent)
-                        )
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text("Train for your sport")
-                                .font(.system(size: 14.5, weight: .semibold))
-                                .foregroundStyle(SomaTokens.ink)
-                            Text("NEW")
-                                .font(.system(size: 10, weight: .bold))
-                                .tracking(0.6)
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(SomaTokens.accent))
-                        }
-                        Text("Pick one measurable goal — we build it into your plan")
-                            .font(.system(size: 12))
-                            .foregroundStyle(SomaTokens.ink4)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            Button {
-                sportGoalPromoDismissed = true
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(SomaTokens.ink5)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.leading, 14)
-        .padding(.vertical, 7)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(SomaTokens.surface)
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(SomaTokens.accentSoft, lineWidth: 1))
-        )
-    }
-
     /// A quiet one-line goal status + chevron -- deliberately not a button
     /// style that could compete with the card's single CTA.
     private func goalRow(_ goal: UserGoal) -> some View {
@@ -925,6 +980,25 @@ struct HomeView: View {
         return parts
     }
 
+    /// Duration first (always exists -- the category's own fixed
+    /// suggestion pool, same "real but not personalized" rule as
+    /// `stepTarget`, not the AI-generated plan), then real readinessInputs.
+    private func heroChips(for recommendation: DailyRecommendation) -> [String] {
+        var chips: [String] = []
+        if let duration = recommendation.category.workoutSuggestions.first?.targetDurationMinutes {
+            chips.append(Self.durationChipText(duration))
+        }
+        chips.append(contentsOf: readinessInputs)
+        return chips
+    }
+
+    private static func durationChipText(_ range: ClosedRange<Int>) -> String {
+        if range.lowerBound == range.upperBound {
+            return String(localized: "home.chip.duration", defaultValue: "\(range.lowerBound) min", comment: "Home: hero chip showing today's suggested workout duration, e.g. '40 min'")
+        }
+        return String(localized: "home.chip.durationRange", defaultValue: "\(range.lowerBound)–\(range.upperBound) min", comment: "Home: hero chip showing today's suggested workout duration as a range, e.g. '20–30 min'")
+    }
+
     // MARK: - Scan row (guide 03: three states, never greyed-out-and-inert)
 
     private enum ScanState { case available, locked, hidden }
@@ -949,106 +1023,760 @@ struct HomeView: View {
     /// collapses to a compact confirmation rather than staying an
     /// always-visible 5-button row -- it's a one-tap daily habit, not a
     /// permanent fixture competing with the actual workout content.
+    /// Same tile shell/eyebrow language as `waterWidgetTile`/`sleepWidgetTile`
+    /// (9a's own "chips match the water/sleep family" note) -- was a bare
+    /// `CardView` row before, the one widget that didn't match the others.
     private var moodCheckInRow: some View {
-        CardView {
+        VStack(alignment: .leading, spacing: 3) {
             if let todaysMood, let rating = MoodRating(rawValue: todaysMood.rating) {
-                HStack(spacing: 10) {
-                    Text(rating.emoji)
-                        .font(.system(size: 22))
-                    Text(String(localized: "home.moodCheckIn.feelingToday", defaultValue: "You're feeling \(rating.displayName.lowercased()) today", comment: "Home: shown after the user logs today's mood; the placeholder is the lowercased mood name (e.g. 'good')"))
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(SomaTokens.ink2)
-                    Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "face.smiling")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                    Text("Mood")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(SomaTokens.ink4)
+                    Spacer(minLength: 0)
+                    MoodFaceIcon(rating: rating, color: .white, lineWidth: 1.4)
+                        .frame(width: 15, height: 15)
+                        .frame(width: 27, height: 27)
+                        .glassGel(.blue, cornerRadius: 13.5)
                 }
+                Text(rating.displayName)
+                    .font(Theme.display)
+                    .fontWidth(.condensed)
+                    .padding(.top, 3)
+                Text(String(localized: "home.moodCheckIn.loggedAt", defaultValue: "\(Self.moodLoggedTimeText(todaysMood.loggedAt)) · tap to change", comment: "Home: mood widget caption once logged today, e.g. '9:02 AM · tap to change'"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SomaTokens.ink5)
+                    .onTapGesture { self.todaysMood = nil }
             } else {
-                VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "face.smiling")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                    Text("Mood")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+                .padding(.bottom, 6)
+                VStack(alignment: .leading, spacing: 8) {
                     Text(String(localized: "home.moodCheckIn.prompt", defaultValue: "How are you feeling today?", comment: "Home: mood check-in prompt shown before the user has logged today's mood"))
-                        .font(.system(size: 14.5, weight: .semibold))
-                    HStack(spacing: 8) {
+                        .font(.system(size: 12.5, weight: .semibold))
+                    HStack(spacing: 4) {
                         ForEach(MoodRating.allCases) { rating in
                             Button {
                                 Task { await logMood(rating) }
                             } label: {
-                                VStack(spacing: 3) {
-                                    Text(rating.emoji)
-                                        .font(.system(size: 22))
-                                    Text(rating.displayName)
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .frame(maxWidth: .infinity)
+                                MoodFaceIcon(rating: rating)
+                                    .frame(width: 20, height: 20)
+                                    .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(Text(rating.displayName))
                         }
                     }
                     if let moodError {
                         Text(moodError)
-                            .font(.system(size: 11.5))
+                            .font(.system(size: 10.5))
                             .foregroundStyle(.red)
                     }
                 }
                 .disabled(isSavingMood)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
+        .background(HomeWidgetTileBackground())
     }
 
-    @ViewBuilder
-    private var scanRow: some View {
-        switch scanState {
-        case .hidden:
-            EmptyView()
-        case .available:
-            Button {
-                requestDetailAccess {
-                    AnalyticsManager.shared.featureUsed(name: "gym_photo_workout")
-                    showGymPhotoFlow = true
-                }
-            } label: {
-                scanRowBody(
-                    plate: SomaTokens.accentSoft, icon: "camera.fill", iconColor: SomaTokens.accent,
-                    title: "Somewhere else today?",
-                    subtitle: scanStreak > 1
-                        ? "Scan the gym — we rebuild the plan · \(scanStreak)-day streak"
-                        : "Scan the gym — we rebuild the plan"
-                ) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(SomaTokens.ink4)
+    /// Ported from the Turn 9 handoff's mood SVGs -- stroke circle + two eye
+    /// dots + a mouth curve that varies by rating -- replacing the emoji
+    /// glyphs the build shipped with (design note: "Faces are stroke icons,
+    /// no emoji").
+    private struct MoodFaceIcon: View {
+        let rating: MoodRating
+        var color: Color = SomaTokens.accent
+        var lineWidth: CGFloat = 1.6
+
+        var body: some View {
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                let eyeSize = lineWidth * 1.6
+                ZStack {
+                    Circle().stroke(color, lineWidth: lineWidth)
+                    Circle().fill(color).frame(width: eyeSize, height: eyeSize)
+                        .position(x: 9.0 / 24 * w, y: 9.5 / 24 * h)
+                    Circle().fill(color).frame(width: eyeSize, height: eyeSize)
+                        .position(x: 15.0 / 24 * w, y: 9.5 / 24 * h)
+                    MoodMouthShape(rating: rating)
+                        .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 }
             }
-            .buttonStyle(.plain)
+            .aspectRatio(1, contentMode: .fit)
+        }
+    }
+
+    /// Mouth path coordinates lifted 1:1 from the handoff's 24x24 viewBox
+    /// SVGs (one cubic curve per rating, `okay` is a straight line).
+    private struct MoodMouthShape: Shape {
+        let rating: MoodRating
+
+        func path(in rect: CGRect) -> Path {
+            func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                CGPoint(x: rect.minX + x / 24 * rect.width, y: rect.minY + y / 24 * rect.height)
+            }
+            var path = Path()
+            switch rating {
+            case .rough:
+                path.move(to: point(9, 16))
+                path.addCurve(to: point(15, 16), control1: point(10.2, 14.4), control2: point(13.8, 14.4))
+            case .notGreat:
+                path.move(to: point(9, 15.3))
+                path.addCurve(to: point(15, 15.3), control1: point(10.5, 14.4), control2: point(13.5, 14.4))
+            case .okay:
+                path.move(to: point(9.5, 15))
+                path.addLine(to: point(14.5, 15))
+            case .good:
+                path.move(to: point(9, 14.5))
+                path.addCurve(to: point(15, 14.5), control1: point(10.5, 15.9), control2: point(13.5, 15.9))
+            case .great:
+                path.move(to: point(8.8, 13.8))
+                path.addCurve(to: point(15.2, 13.8), control1: point(10.4, 15.9), control2: point(13.6, 15.9))
+            }
+            return path
+        }
+    }
+
+    /// The dock's "Scan gym" action (3a) -- same three-state decision
+    /// `scanRow` used to render inline, now a tap consequence instead of a
+    /// row: the dock icon itself is always present (it's a stable nav
+    /// anchor like Log workout), quota-locked taps route to the same
+    /// paywall/quota messaging as before instead of disappearing.
+    private func performScanGymAction() {
+        switch scanState {
+        case .available:
+            requestDetailAccess {
+                AnalyticsManager.shared.featureUsed(name: "gym_photo_workout")
+                showGymPhotoFlow = true
+            }
+        case .hidden:
+            // A committed or completed workout already removed this row's
+            // affordance -- the dock icon staying tappable must not still
+            // open a second scan for a day that's already spoken for.
+            break
         case .locked:
-            if SubscriptionManager.shared.tier == "annual" {
-                // Already on the top tier -- pitching an upgrade they own
-                // would be wrong, so just say when the quota resets.
-                scanRowBody(
-                    plate: SomaTokens.warnSoft, icon: "lock.fill", iconColor: SomaTokens.warn,
-                    title: "Today's generations are used",
-                    subtitle: "Up to \(dailyGenerationLimit) AI workouts a day — more tomorrow"
-                ) {
-                    EmptyView()
+            if SubscriptionManager.shared.tier != "annual" {
+                Superwall.shared.register(placement: "view_premium")
+            }
+            // Annual tier, quota spent for today: no destination to open
+            // (matches the old inline row, which showed a static "more
+            // tomorrow" message with no action rather than a dead tap).
+        }
+    }
+
+    /// Opens the sport goal flow directly -- the feature is opt-in now, so
+    /// the dock's "Goals" icon goes straight to sport selection instead of
+    /// forcing the first-time onboarding gallery in front of it.
+    private func openSportGoal() {
+        showSportGoalScreen = true
+    }
+
+    // MARK: - Widget grid (3a) -- Water + Sleep, the two small metric tiles
+
+    /// 2 flexible columns, not a raw HStack -- an HStack only splits evenly
+    /// when every child's ideal content width happens to be comparable
+    /// (true for water+sleep, not once mood's longer prompt text joined
+    /// them: it silently claimed most of the row). Grid columns reserve
+    /// equal width per cell regardless of content, and a trailing lone
+    /// tile (only one of the three enabled) still occupies just its own
+    /// column instead of stretching to the full row.
+    private static let widgetGridColumns = [GridItem(.flexible(), spacing: 14), GridItem(.flexible())]
+
+    @ViewBuilder
+    private var widgetGrid: some View {
+        if waterWidgetEnabled || sleepWidgetEnabled || moodWidgetEnabled {
+            LazyVGrid(columns: Self.widgetGridColumns, alignment: .leading, spacing: 14) {
+                if waterWidgetEnabled {
+                    waterWidgetTile
                 }
-            } else {
-                // The locked copy says what happened before it asks for money.
+                if sleepWidgetEnabled {
+                    sleepWidgetTile
+                }
+                if moodWidgetEnabled {
+                    moodCheckInRow
+                }
+            }
+        }
+    }
+
+    private var waterGoalReached: Bool { waterGlassesToday >= 8 }
+
+    private var waterWidgetTile: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "drop.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(waterGoalReached ? SomaTokens.success : SomaTokens.accent)
+                Text("Water")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(SomaTokens.ink4)
+                Spacer(minLength: 0)
+                if waterGoalReached {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(SomaTokens.success)
+                }
+            }
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                Text("\(waterGlassesToday)")
+                    .font(Theme.display)
+                    .fontWidth(.condensed)
+                Text("/ 8")
+                    .font(.system(size: 13))
+                    .foregroundStyle(SomaTokens.ink4)
+            }
+            waterDropletRow
+            waterControlRow
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
+        .background(HomeWidgetTileBackground())
+    }
+
+    /// 8 droplets as a progress indicator -- "tap a drop to set the exact
+    /// count" (9b), so each one is also a direct-set control, not just a
+    /// readout of the "+"/"-" buttons below.
+    private var waterDropletRow: some View {
+        HStack(spacing: 4) {
+            ForEach(1...8, id: \.self) { index in
                 Button {
-                    Superwall.shared.register(placement: "view_premium")
+                    waterGlassesToday = index
+                    UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey())
                 } label: {
-                    scanRowBody(
-                        plate: SomaTokens.warnSoft, icon: "lock.fill", iconColor: SomaTokens.warn,
-                        title: "Today's scan is used",
-                        subtitle: "Upgrade for up to 3 scans and workouts a day"
-                    ) {
-                        Text("PRO")
-                            .font(.system(size: 10.5, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(SomaTokens.accentDeep))
-                    }
+                    Image(systemName: index <= waterGlassesToday ? "drop.fill" : "drop")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(
+                            waterGoalReached
+                                ? SomaTokens.success
+                                : SomaTokens.accent.opacity(index <= waterGlassesToday ? 1 : 0.3)
+                        )
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("\(waterGlassesToday) of 8 glasses"))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: waterGlassesToday = min(waterGlassesToday + 1, 8)
+            case .decrement: waterGlassesToday = max(waterGlassesToday - 1, 0)
+            @unknown default: break
+            }
+            UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey())
+        }
+    }
+
+    /// "-" / glass-size chip / "+" -- the chip swaps for a "Goal hit" label
+    /// once today's 8 glasses are logged (9b).
+    private var waterControlRow: some View {
+        HStack(spacing: 8) {
+            Button {
+                waterGlassesToday = max(waterGlassesToday - 1, 0)
+                UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey())
+            } label: {
+                Image(systemName: "minus")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(SomaTokens.accent)
+                    .frame(width: 27, height: 27)
+                    .glassLens()
+            }
+            .buttonStyle(.plain)
+            .disabled(waterGlassesToday == 0)
+            .opacity(waterGlassesToday == 0 ? 0.35 : 1)
+            .accessibilityLabel(Text("Remove a glass of water"))
+
+            Spacer(minLength: 0)
+
+            if waterGoalReached {
+                Text(String(localized: "home.widget.water.goalHit", defaultValue: "Goal hit", comment: "Home: water widget label once today's 8-glass goal is reached"))
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(SomaTokens.success)
+            } else {
+                Button {
+                    cycleWaterGlassSize()
+                } label: {
+                    Text("\(waterGlassSizeML) ml")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(SomaTokens.accent)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(SomaTokens.accentSoft10))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("Glass size, \(waterGlassSizeML) milliliters. Double tap to change."))
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                waterGlassesToday = min(waterGlassesToday + 1, 99)
+                UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey())
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(SomaTokens.accent)
+                    .frame(width: 27, height: 27)
+                    .glassLens()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Add a glass of water"))
+        }
+    }
+
+    @ViewBuilder
+    private func sleepEyebrow<Trailing: View>(@ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "moon.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SomaTokens.accent)
+            Text("Sleep")
+                .font(.system(size: 10.5, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(SomaTokens.ink4)
+            Spacer(minLength: 0)
+            trailing()
+        }
+    }
+
+    private var sleepEyebrowPlain: some View {
+        sleepEyebrow { EmptyView() }
+    }
+
+    /// Three states (9g): a wearable-sourced `todaysSnapshots` row always
+    /// wins over a manual log for the same day ("wearable connected ->
+    /// chips never show"); a manual log wins over the empty prompt; no data
+    /// at all shows the four one-tap duration chips, same pattern as
+    /// `moodCheckInRow`'s face row -- no sheet.
+    private var sleepWidgetTile: some View {
+        let snapshot = todaysSnapshots.first(where: { $0.sleepHours != nil })
+        return VStack(alignment: .leading, spacing: 3) {
+            if let snapshot, let hours = snapshot.sleepHours {
+                sleepEyebrow { sleepSourceBadge(snapshot.source) }
+                Text(String(format: "%.1f \(HealthMetricFamily.sleep.unit)", hours))
+                    .font(SomaType.widgetValue)
+                if let bar = SleepPhaseSegments(snapshot: snapshot) {
+                    bar.padding(.top, 3)
+                    Text(bar.captionText)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(SomaTokens.ink5)
+                        .padding(.top, 2)
+                }
+            } else if !isEditingSleep, let todaysSleepLog, let bucket = SleepDurationBucket(rawValue: todaysSleepLog.bucket) {
+                sleepEyebrow {
+                    Text(bucket.chipLabel)
+                        .font(.system(size: 10.5, weight: .bold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .glassGel(.blue, cornerRadius: 999)
+                }
+                Text(bucket.verdict)
+                    .font(SomaType.widgetValue)
+                    .padding(.top, 3)
+                    .accessibilityIdentifier("sleep-widget-logged-verdict")
+                Text(String(localized: "home.sleepCheckIn.loggedAt", defaultValue: "\(Self.sleepLoggedTimeText(todaysSleepLog.loggedAt)) · tap to change", comment: "Home: sleep widget caption once logged today, e.g. '8:12 AM · tap to change'"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SomaTokens.ink5)
+                    .onTapGesture { self.isEditingSleep = true }
+            } else {
+                sleepEyebrowPlain
+                    .padding(.bottom, 6)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(String(localized: "home.sleepCheckIn.prompt", defaultValue: "How long last night?", comment: "Home: sleep check-in prompt shown before the user has logged today's sleep"))
+                        .font(.system(size: 12.5, weight: .semibold))
+                    // 2x2, not a single 4-wide row -- the tile only gets
+                    // half the widget grid's ~390pt width (shared with
+                    // water), leaving ~140pt of content width. Four chips
+                    // in one row truncated to "<...", "..." at that width;
+                    // two per row gives each chip roughly its full label's
+                    // worth of room.
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 4), GridItem(.flexible())], spacing: 4) {
+                        ForEach(SleepDurationBucket.allCases) { bucket in
+                            Button {
+                                Task { await logSleep(bucket) }
+                            } label: {
+                                Text(bucket.chipLabel)
+                                    .font(.system(size: 11.5, weight: .bold))
+                                    .foregroundStyle(SomaTokens.accent)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity)
+                                    .glassLens(cornerRadius: 999)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier(Self.sleepChipAccessibilityID(bucket))
+                        }
+                    }
+                    if let sleepError {
+                        Text(sleepError)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.red)
+                    }
+                }
+                .disabled(isSavingSleep)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
+        .background(HomeWidgetTileBackground())
+    }
+
+    private static func sleepChipAccessibilityID(_ bucket: SleepDurationBucket) -> String {
+        switch bucket {
+        case .underSix: "sleep-chip-under6"
+        case .sixSeven: "sleep-chip-6-7"
+        case .sevenEight: "sleep-chip-7-8"
+        case .eightPlus: "sleep-chip-8plus"
+        }
+    }
+
+    @ViewBuilder
+    private func sleepSourceBadge(_ source: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(SomaTokens.success).frame(width: 6, height: 6)
+            Text(Self.sleepSourceDisplayName(source))
+                .font(.system(size: 10, weight: .bold))
+        }
+        .foregroundStyle(SomaTokens.success)
+    }
+
+    private static func sleepSourceDisplayName(_ source: String) -> String {
+        switch source {
+        case "whoop": String(localized: "provider.whoop", defaultValue: "Whoop", comment: "Connected-device provider display name; brand name, not translated")
+        case "oura": String(localized: "provider.oura", defaultValue: "Oura", comment: "Connected-device provider display name; brand name, not translated")
+        case "healthkit": String(localized: "provider.appleHealth", defaultValue: "Apple Health", comment: "Connected-device provider display name; brand name, not translated")
+        default: source.capitalized
+        }
+    }
+
+    /// Single-night phase bar for the wearable state -- a thin horizontal
+    /// strip, distinct from `SleepStageBarChart`'s multi-day column chart
+    /// (Health Dashboard trend view). Reuses that component's own color
+    /// tokens for visual consistency. `nil` when the source reported hours
+    /// but no stage breakdown at all -- an honest gap, not a zero-height bar
+    /// pretending to be real data (same posture as `SleepStageBarChart`).
+    private struct SleepPhaseSegments: View {
+        let deep: Double?
+        let rem: Double?
+        let light: Double?
+        let awake: Double?
+
+        init?(snapshot: DailySnapshotRow) {
+            guard snapshot.sleepDeepHours != nil || snapshot.sleepRemHours != nil
+                || snapshot.sleepLightHours != nil || snapshot.sleepAwakeHours != nil
+            else { return nil }
+            deep = snapshot.sleepDeepHours
+            rem = snapshot.sleepRemHours
+            light = snapshot.sleepLightHours
+            awake = snapshot.sleepAwakeHours
+        }
+
+        private var total: Double { (deep ?? 0) + (rem ?? 0) + (light ?? 0) + (awake ?? 0) }
+
+        var body: some View {
+            GeometryReader { geometry in
+                HStack(spacing: 3) {
+                    segment(deep, color: Theme.pillFill, width: geometry.size.width)
+                    segment(rem, color: Theme.orbPrimary, width: geometry.size.width)
+                    segment(light, color: Theme.orbSecondary, width: geometry.size.width)
+                    segment(awake, color: Theme.pillFill.opacity(0.25), width: geometry.size.width)
+                }
+            }
+            .frame(height: 6)
+        }
+
+        @ViewBuilder
+        private func segment(_ hours: Double?, color: Color, width: CGFloat) -> some View {
+            if let hours, hours > 0, total > 0 {
+                Capsule().fill(color).frame(width: max(2, width * CGFloat(hours / total)))
+            }
+        }
+
+        /// Matches the 9g mock's caption -- Deep/REM/Awake only (Light is
+        /// still drawn in the bar above, just not spelled out here).
+        var captionText: String {
+            func hoursText(_ value: Double?) -> String? {
+                guard let value else { return nil }
+                return String(format: "%.1f", value)
+            }
+            var parts: [String] = []
+            if let deepText = hoursText(deep) {
+                parts.append(String(localized: "home.widget.sleep.deep", defaultValue: "Deep \(deepText)", comment: "Home: sleep widget phase caption, deep sleep hours"))
+            }
+            if let remText = hoursText(rem) {
+                parts.append(String(localized: "home.widget.sleep.rem", defaultValue: "REM \(remText)", comment: "Home: sleep widget phase caption, REM sleep hours"))
+            }
+            if let awake, awake > 0 {
+                let minutes = Int((awake * 60).rounded())
+                parts.append(String(localized: "home.widget.sleep.awake", defaultValue: "Awake \(minutes) m", comment: "Home: sleep widget phase caption, minutes spent awake"))
+            }
+            return parts.joined(separator: " · ")
+        }
+    }
+
+    /// Exact 3a widget-tile recipe -- lighter/more transparent than the
+    /// standard `.glassCard()` (0.32 white vs 0.42, radius 26 vs 24, no
+    /// outer shadow) so the two-up grid doesn't read as heavy as the hero.
+    private struct HomeWidgetTileBackground: View {
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+            shape
+                .fill(.ultraThinMaterial)
+                .overlay(shape.fill(Color.white.opacity(0.32)))
+                .overlay(shape.strokeBorder(Color.white.opacity(0.65), lineWidth: 1))
+        }
+    }
+
+    /// Flat tinted metric chip -- deliberately NOT `.glassLens()`/`SomaChip`:
+    /// per 3a these carry data (today's sleep/HRV/resting-HR reading), not
+    /// affordance, so they never get the raised-control treatment.
+    private struct HomeMetricChip: View {
+        let text: String
+        var body: some View {
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(SomaTokens.accent)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background {
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 160 / 255, green: 190 / 255, blue: 250 / 255).opacity(0.22),
+                                    SomaTokens.accentSoft10
+                                ],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.4), lineWidth: 1))
+                }
+        }
+    }
+
+    // MARK: - Custom training source (5a/5b)
+
+    /// Only offered once there's an actual catalog of sport types to pick
+    /// from -- same kill-switch rule `showSportGoalPromo` already follows.
+    private var showTrainingSourceToggle: Bool {
+        Config.enableSportGoals && sportGoalCatalog?.isEmpty == false
+    }
+
+    private var trainingSourceToggle: some View {
+        HStack(spacing: 4) {
+            Button {
+                trainingSource = .somasPick
+            } label: {
+                Text("Soma's pick")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(trainingSource == .somasPick ? SomaTokens.accent : SomaTokens.ink4)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background {
+                        if trainingSource == .somasPick { Color.clear.glassLens(cornerRadius: SomaTokens.rPill) }
+                    }
+            }
+            .buttonStyle(.plain)
+            Button {
+                trainingSource = .custom
+            } label: {
+                Text("Custom training")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(trainingSource == .custom ? SomaTokens.accent : SomaTokens.ink4)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background {
+                        if trainingSource == .custom { Color.clear.glassLens(cornerRadius: SomaTokens.rPill) }
+                    }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(4)
+        .glassCardFlat(cornerRadius: SomaTokens.rPill)
+    }
+
+    private var selectedCustomSport: Sport? {
+        sportGoalCatalog?.sports.first { $0.id == customTrainingSportId } ?? sportGoalCatalog?.sports.first
+    }
+
+    /// Honest placeholder, not a fabricated workout: no recommendation-
+    /// engine hook exists yet for "build today's session for sport X"
+    /// (see the handoff doc's explicit "no matching code checked" note on
+    /// 5a/5b) -- this lets the user pick and see their sport type without
+    /// pretending Soma already generates sport-specific sessions here.
+    private var customTrainingCard: some View {
+        CardView {
+            HStack {
+                if let selectedCustomSport {
+                    HStack(spacing: 8) {
+                        Image(systemName: selectedCustomSport.iconSystemName)
+                            .foregroundStyle(SomaTokens.accent)
+                        Text(selectedCustomSport.name.uppercased())
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(0.7)
+                            .foregroundStyle(SomaTokens.accent)
+                    }
+                } else {
+                    Text("CUSTOM TRAINING")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.7)
+                        .foregroundStyle(SomaTokens.accent)
+                }
+                Spacer()
+                Button {
+                    showCustomTrainingPicker = true
+                } label: {
+                    Text("Change type")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+                .buttonStyle(.plain)
+            }
+            Text(selectedCustomSport?.name ?? "Pick a sport type")
+                .font(Theme.display)
+            Text("Custom training by sport type is coming soon — Soma will build sport-specific sessions here. For now, Soma's pick still adapts to today's readiness.")
+                .font(.system(size: 13.5))
+                .foregroundStyle(SomaTokens.ink3)
+            SomaButton(title: "Back to Soma's pick", size: .md, variant: .secondary, isBlock: false) {
+                trainingSource = .somasPick
+            }
+        }
+    }
+
+    // MARK: - Floating quick-action dock (3a) + More sheet (4h)
+
+    /// Slot 1 -- always "Dashboard" (health overview), gel-styled since it's
+    /// the dock's primary entry point per the mockup.
+    private var dashboardDockAction: DashboardDockAction {
+        DashboardDockAction(
+            id: "dashboard", assetImage: "soma.dock.dashboard", style: .gel,
+            label: "Dashboard",
+            accessibilityLabel: String(localized: "home.dock.dashboard", defaultValue: "Health dashboard", comment: "Home: floating dock icon that opens the health dashboard's overview section"),
+            action: {
+                AnalyticsManager.shared.featureUsed(name: "health_dashboard")
+                healthDashboardInitialSection = .overview
+                showHealthDashboard = true
+            }
+        )
+    }
+
+    /// Slot 2 -- always "Log workout", per the handoff doc.
+    private var logWorkoutDockAction: DashboardDockAction {
+        DashboardDockAction(
+            id: "logWorkout", assetImage: "soma.dock.log",
+            label: "Log workout",
+            accessibilityLabel: String(localized: "home.dock.logWorkout", defaultValue: "Log workout", comment: "Home: floating dock icon that opens the manual workout log form"),
+            action: { showLogManualWorkout = true }
+        )
+    }
+
+    /// Slots 3-5 -- fixed defaults rather than the mockup's drag-to-reorder
+    /// (persisted custom ordering is a bigger feature than this visual
+    /// pass covers; logged as a follow-up, see docs/bug-log.md).
+    private var configurableDockActions: [DashboardDockAction] {
+        [
+            DashboardDockAction(
+                id: "scanGym", assetImage: "soma.dock.scan", label: "Scan gym",
+                accessibilityLabel: String(localized: "home.dock.scanGym", defaultValue: "Scan the gym", comment: "Home: floating dock icon that opens the gym-photo workout flow"),
+                action: performScanGymAction
+            ),
+            DashboardDockAction(
+                id: "activity", assetImage: "soma.dock.activity", label: "Activity",
+                accessibilityLabel: String(localized: "home.dock.activity", defaultValue: "Activity", comment: "Home: floating dock icon that opens the health dashboard's activity section"),
+                action: {
+                    AnalyticsManager.shared.featureUsed(name: "health_dashboard")
+                    healthDashboardInitialSection = .activity
+                    showHealthDashboard = true
+                }
+            ),
+            DashboardDockAction(
+                id: "goals", assetImage: "soma.dock.goal", label: "Goals",
+                accessibilityLabel: String(localized: "home.dock.goals", defaultValue: "Sport goal", comment: "Home: floating dock icon that opens the sport goal flow"),
+                // Stable hook for XCUITest (see UITests/CASES.md) -- same
+                // reasoning as "dock-more-button"/"profile-button": the old
+                // promo-card + onboarding-popup front door is gone, this
+                // dock icon is the only way in now.
+                accessibilityIdentifier: "dock-goals-button",
+                action: openSportGoal
+            )
+        ]
+    }
+
+    /// Everything else -- reachable from the "More" sheet (4h) even though
+    /// it isn't in a dock slot: nutrition, photo progress, editing widgets,
+    /// profile. Nutrition moved here from the fixed dock row per the
+    /// mockup -- 6 fixed slots don't have room for it alongside Dashboard/
+    /// Activity now covering health in two places.
+    private var overflowDockActions: [DashboardDockAction] {
+        [
+            DashboardDockAction(
+                id: "nutrition", assetImage: "soma.dock.nutrition", label: "Nutrition",
+                accessibilityLabel: String(localized: "home.dock.nutrition", defaultValue: "Nutrition", comment: "Home: More-sheet icon that opens today's nutrition"),
+                action: {
+                    AnalyticsManager.shared.featureUsed(name: "nutrition_home_card")
+                    showNutrition = true
+                }
+            ),
+            DashboardDockAction(
+                id: "photos", systemImage: "photo.on.rectangle.angled", label: "Photos",
+                accessibilityLabel: String(localized: "home.dock.photos", defaultValue: "Goal photo progress", comment: "Home: More-sheet icon that opens goal photo progress"),
+                action: {
+                    AnalyticsManager.shared.featureUsed(name: "goal_progress_home_card")
+                    showGoalBodyProgress = true
+                }
+            ),
+            DashboardDockAction(
+                id: "widgets", systemImage: "square.grid.2x2.fill", label: "Widgets",
+                accessibilityLabel: String(localized: "home.dock.widgets", defaultValue: "Edit widgets", comment: "Home: More-sheet icon that opens the edit-widgets sheet"),
+                action: { showEditWidgets = true }
+            ),
+            DashboardDockAction(
+                id: "profile", systemImage: "person.crop.circle.fill", label: "Profile",
+                accessibilityLabel: String(localized: "home.dock.profile", defaultValue: "Profile", comment: "Home: More-sheet icon that opens the profile screen"),
+                // Stable hook for XCUITest (see UITests/CASES.md) -- Profile
+                // used to be a persistent top-row gear icon; it's now only
+                // reachable from here, but the existing tests still look
+                // this identifier up directly.
+                accessibilityIdentifier: "profile-button",
+                action: { showProfile = true }
+            )
+        ]
+    }
+
+    /// Slot 6 -- always "More", per the handoff doc.
+    private var moreDockAction: DashboardDockAction {
+        DashboardDockAction(
+            id: "more", assetImage: "soma.dock.more",
+            label: "More",
+            accessibilityLabel: String(localized: "home.dock.more", defaultValue: "More actions", comment: "Home: floating dock icon that opens the all-actions sheet"),
+            accessibilityIdentifier: "dock-more-button",
+            action: { showMoreActions = true }
+        )
+    }
+
+    private var dashboardDock: some View {
+        DashboardDockView(actions: [dashboardDockAction, logWorkoutDockAction] + configurableDockActions + [moreDockAction])
+            .padding(.horizontal, 18)
+            .padding(.bottom, 14)
     }
 
     /// Previously the only way to find the goal/current body photo feature
@@ -1113,41 +1841,6 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
         }
-    }
-
-    /// nil target (never computed -- no goal/current photo pair analyzed
-    /// yet) shows a CTA rather than hiding entirely, same as
-    /// goalProgressRow's own two-state pattern -- nutrition targets are a
-    /// direct downstream product of that same photo comparison, so
-    /// pointing here back at it is the honest "how do I get one" answer.
-    private var nutritionRow: some View {
-        Button {
-            AnalyticsManager.shared.featureUsed(name: "nutrition_home_card")
-            showNutrition = true
-        } label: {
-            if let nutritionTarget, let nutritionProgress {
-                scanRowBody(
-                    plate: SomaTokens.accentSoft, icon: "fork.knife", iconColor: SomaTokens.accent,
-                    title: "Nutrition",
-                    subtitle: "\(nutritionProgress.consumedCalories) / \(nutritionTarget.dailyCalories) kcal today"
-                ) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(SomaTokens.ink4)
-                }
-            } else {
-                scanRowBody(
-                    plate: SomaTokens.accentSoft, icon: "fork.knife", iconColor: SomaTokens.accent,
-                    title: "Get your nutrition targets",
-                    subtitle: "A daily calorie and macro target built around your goal"
-                ) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(SomaTokens.ink4)
-                }
-            }
-        }
-        .buttonStyle(.plain)
     }
 
     private func scanRowBody(plate: Color, icon: String, iconColor: Color, title: LocalizedStringKey, subtitle: LocalizedStringKey, @ViewBuilder trailing: () -> some View) -> some View {
@@ -1340,10 +2033,7 @@ struct HomeView: View {
         todaysAIPlan = (try? await SupabaseClient.shared.fetchTodaysAIPlan(date: Self.todayDateString())) ?? todaysAIPlan
     }
 
-    /// Feeds the scan card's streak -- the Dashboard pill's "N done" badge
-    /// no longer needs its own fetch here, since it's derived directly from
-    /// `completedDates` (see `doneThisWeekCount`), the same data the
-    /// calendar strip itself renders.
+    /// Feeds the scan card's streak.
     private func loadWeeklyProgressAndStreak() async {
         async let scanDatesFetch: Set<String> = (try? await SupabaseClient.shared.fetchGymPhotoScanDates()) ?? []
         async let profileFetch: UserProfile? = {
@@ -1388,8 +2078,13 @@ struct HomeView: View {
         nutritionProgress = NutritionDayProgress.compute(entries: entries, target: target)
     }
 
-    private func loadTodaysMood() async {
-        todaysMood = try? await SupabaseClient.shared.fetchTodaysMood(date: Self.todayDateString())
+    /// `throws` (not `try?`) on purpose -- called right after a write in
+    /// `logMood`, where a swallowed read failure looked exactly like the
+    /// write itself silently doing nothing (real feedback: "nothing
+    /// happens"). The plain `.task`/`.refreshable` call sites below still
+    /// want a best-effort read, so they keep their own `try?`.
+    private func loadTodaysMood() async throws {
+        todaysMood = try await SupabaseClient.shared.fetchTodaysMood(date: Self.todayDateString())
     }
 
     private func logMood(_ rating: MoodRating) async {
@@ -1398,13 +2093,38 @@ struct HomeView: View {
         defer { isSavingMood = false }
         do {
             try await SupabaseClient.shared.logMood(date: Self.todayDateString(), rating: rating.rawValue)
-            await loadTodaysMood()
+            try await loadTodaysMood()
         } catch {
             // Visible now instead of silent -- real feedback: "when the
             // user taps on one of the emojis ... nothing happens." The
             // row of options stays tappable either way so the user can
             // retry without leaving the screen.
             moodError = String(localized: "home.moodCheckIn.error", defaultValue: "Couldn't save that -- check your connection and try again.", comment: "Home: shown when saving the daily mood check-in fails")
+        }
+    }
+
+    /// Same "throws on purpose" posture as `loadTodaysMood` -- called right
+    /// after a write in `logSleep` so a swallowed read failure can't look
+    /// like the tap did nothing. Also the one place that clears
+    /// `isEditingSleep`, so every reload path (.task, .refreshable, a
+    /// completed logSleep) re-syncs the "tap to change" chips back to
+    /// whatever the server actually has, instead of leaving the widget
+    /// stuck on the picker if the user tapped "change" and then navigated
+    /// away without picking a new value.
+    private func loadTodaysSleep() async throws {
+        todaysSleepLog = try await SupabaseClient.shared.fetchTodaysSleepLog(date: Self.todayDateString())
+        isEditingSleep = false
+    }
+
+    private func logSleep(_ bucket: SleepDurationBucket) async {
+        isSavingSleep = true
+        sleepError = nil
+        defer { isSavingSleep = false }
+        do {
+            try await SupabaseClient.shared.logSleep(date: Self.todayDateString(), bucket: bucket)
+            try await loadTodaysSleep()
+        } catch {
+            sleepError = String(localized: "home.sleepCheckIn.error", defaultValue: "Couldn't save that -- check your connection and try again.", comment: "Home: shown when saving the daily sleep check-in fails")
         }
     }
 
@@ -1580,6 +2300,31 @@ struct HomeView: View {
         formatter.dateStyle = .none
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    /// "9:02 AM"-style caption under the compact mood chip -- falls back to
+    /// "Logged" if `loggedAt` doesn't parse (never blocks the collapsed
+    /// state on a formatting edge case).
+    private static func moodLoggedTimeText(_ loggedAt: String) -> String {
+        let isoWithFraction = ISO8601DateFormatter()
+        isoWithFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let iso = ISO8601DateFormatter()
+        guard let date = isoWithFraction.date(from: loggedAt) ?? iso.date(from: loggedAt) else {
+            return String(localized: "home.moodCheckIn.loggedFallback", defaultValue: "Logged", comment: "Home: mood widget caption when today's logged-at timestamp can't be parsed")
+        }
+        return timeString(date)
+    }
+
+    /// Same parse-with-fallback shape as `moodLoggedTimeText`, for the sleep
+    /// widget's "logged HH:MM · tap to change" caption.
+    private static func sleepLoggedTimeText(_ loggedAt: String) -> String {
+        let isoWithFraction = ISO8601DateFormatter()
+        isoWithFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let iso = ISO8601DateFormatter()
+        guard let date = isoWithFraction.date(from: loggedAt) ?? iso.date(from: loggedAt) else {
+            return String(localized: "home.sleepCheckIn.loggedFallback", defaultValue: "Logged", comment: "Home: sleep widget caption when today's logged-at timestamp can't be parsed")
+        }
+        return timeString(date)
     }
 
     private static func todayDateString() -> String {

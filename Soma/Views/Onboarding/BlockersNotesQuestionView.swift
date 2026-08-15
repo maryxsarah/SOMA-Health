@@ -26,8 +26,10 @@ struct BlockersNotesQuestionView: View {
             .padding(.top, 24)
 
             TextField("e.g. \"I travel a lot for work\"", text: $notes, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
                 .lineLimit(4...8)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .glassCardFlat(cornerRadius: SomaTokens.rXL)
                 .padding(.horizontal, 24)
                 .padding(.top, 24)
 

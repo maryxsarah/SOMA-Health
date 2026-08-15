@@ -50,6 +50,15 @@ final class HealthKitManager {
     /// `false` here after a prior `true` is never treated as "must have
     /// been revoked, ignore it" -- it just means never authorized yet.
     func isAuthorized() async -> Bool {
+        #if DEBUG
+        // The demo-recording harness needs Connect Device's gate to clear
+        // without a real HealthKit consent sheet -- the simulator's own
+        // authorization-status API is unreliable for read-only types
+        // regardless of whether the sheet was ever answered. Never
+        // compiled into Release; every other DEBUG build still hits the
+        // real check below.
+        if UITestSupport.isOnboardingDemo || UITestSupport.isOnboardingDemoResume { return true }
+        #endif
         guard Self.isAvailable else { return false }
         guard let status = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes) else {
             return false

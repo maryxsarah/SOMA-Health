@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// "Time to generate your first custom plan!" -- percentage counter +
-/// progress bar + rotating status line + a checklist that fills in as
-/// progress advances. This is a fixed-duration perceived-personalization
-/// animation; the real generate-recommendation call happens once, in
-/// parallel, via `onAppear`.
+/// "Setting everything up for you" (10g) -- a glass-lens circular progress
+/// ring with the percent inside, ONE status line that swaps in place, and
+/// a checklist that gel-checks off as progress advances. This is a
+/// fixed-duration perceived-personalization animation; the real
+/// generate-recommendation call happens once, in parallel, via `onAppear`.
 struct GeneratingPlanStepView: View {
     @EnvironmentObject private var appState: AppState
     let onFinished: () -> Void
@@ -31,53 +31,51 @@ struct GeneratingPlanStepView: View {
         VStack(spacing: 28) {
             Spacer()
 
-            VStack(spacing: 4) {
-                Text("All done!")
-                    .font(.caption.bold())
-                    .foregroundStyle(.orange)
-                Text("Time to generate your first custom plan!")
-                    .font(Theme.display)
+            progressRing
+
+            VStack(spacing: 9) {
+                Text("Creating your plan")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1)
+                    .textCase(.uppercase)
+                    .foregroundStyle(SomaTokens.accent)
+                Text("Setting everything up for you")
+                    .font(.system(size: 30, weight: .bold, design: .serif).italic())
                     .multilineTextAlignment(.center)
+                // The single status line that swaps in place -- no second,
+                // separately-worded headline competing with it (that was
+                // the build's actual bug: two status strings at once).
+                Text(statusMessages[min(statusIndex, statusMessages.count - 1)])
+                    .font(.system(size: 13))
+                    .foregroundStyle(SomaTokens.ink3)
+                    .animation(.easeInOut, value: statusIndex)
             }
             .padding(.horizontal, 24)
 
-            Text("\(percent)%")
-                .font(.system(size: 44, weight: .bold, design: .rounded))
-                .contentTransition(.numericText())
-
-            Text("We're setting everything up for you")
-                .font(.body)
-                .foregroundStyle(.secondary)
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color(.systemGray5))
-                    Capsule()
-                        .fill(
-                            LinearGradient(colors: [.orange, Theme.pillFill], startPoint: .leading, endPoint: .trailing)
-                        )
-                        .frame(width: geo.size.width * CGFloat(percent) / 100)
-                }
-            }
-            .frame(height: 8)
-            .padding(.horizontal, 40)
-
-            Text(statusMessages[min(statusIndex, statusMessages.count - 1)])
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .animation(.easeInOut, value: statusIndex)
-
             CardView {
-                Text("Daily recommendation for")
+                Text("Daily recommendations for")
                     .font(.body.bold())
                 ForEach(Array(checklist.enumerated()), id: \.offset) { index, item in
+                    let isChecked = index < checkedCount
                     HStack {
                         Text(item)
-                            .font(.subheadline)
+                            .font(.subheadline.weight(isChecked ? .semibold : .regular))
+                            .foregroundStyle(isChecked ? SomaTokens.ink : SomaTokens.ink4)
                         Spacer()
-                        Image(systemName: index < checkedCount ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(index < checkedCount ? Theme.pillFill : Color(.systemGray4))
+                        if isChecked {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 20, height: 20)
+                                .glassGel(.blue, cornerRadius: SomaTokens.rPill)
+                        } else {
+                            Circle()
+                                .strokeBorder(SomaTokens.accent.opacity(0.3), lineWidth: 1.5)
+                                .frame(width: 20, height: 20)
+                        }
                     }
+                    .padding(.vertical, 2)
+                    .animation(.easeInOut, value: checkedCount)
                 }
             }
             .padding(.horizontal, 24)
@@ -93,6 +91,28 @@ struct GeneratingPlanStepView: View {
         .task {
             await generateFirstRecommendation()
         }
+    }
+
+    // MARK: - Progress ring (10g: the ring IS the progress, no separate bar)
+
+    private var progressRing: some View {
+        ZStack {
+            Circle()
+                .stroke(SomaTokens.accent.opacity(0.13), lineWidth: 6)
+                .frame(width: 86, height: 86)
+            Circle()
+                .trim(from: 0, to: CGFloat(percent) / 100)
+                .stroke(SomaTokens.accent, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .frame(width: 86, height: 86)
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut, value: percent)
+            Text("\(percent)%")
+                .font(.system(size: 27, weight: .bold, design: .serif).italic())
+                .foregroundStyle(SomaTokens.ink)
+                .contentTransition(.numericText())
+        }
+        .frame(width: 118, height: 118)
+        .glassLens(cornerRadius: SomaTokens.rPill)
     }
 
     /// Runs in parallel with the fixed-duration loading animation above --

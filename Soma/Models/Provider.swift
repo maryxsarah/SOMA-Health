@@ -24,5 +24,15 @@ enum Provider: String, CaseIterable, Identifiable {
         }
     }
 
+    /// What connecting this source actually buys the user -- shown in
+    /// place of a bare "Not connected" on Screen 2 (Connect Device).
+    var benefitDescription: String {
+        switch self {
+        case .appleHealth: String(localized: "provider.appleHealth.benefit", defaultValue: "steps, workouts & weight", comment: "Connect Device screen: what Soma reads from Apple Health once connected")
+        case .whoop: String(localized: "provider.whoop.benefit", defaultValue: "recovery & strain", comment: "Connect Device screen: what Soma reads from Whoop once connected")
+        case .oura: String(localized: "provider.oura.benefit", defaultValue: "sleep & readiness", comment: "Connect Device screen: what Soma reads from Oura once connected")
+        }
+    }
+
     var isAvailable: Bool { true }
 }
