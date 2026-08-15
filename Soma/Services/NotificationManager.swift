@@ -227,25 +227,35 @@ final class NotificationManager {
         if !mealLoggedToday {
             await scheduleChecklistNudge(
                 hour: Self.checklistBreakfastHour, minute: 0, identifier: "checklist-breakfast-\(date)",
-                title: "Log breakfast?", body: "A quick log now keeps today's nutrition bars on track.",
+                title: String(localized: "notification.checklistBreakfast.title", defaultValue: "Log breakfast?", comment: "Push notification: evening nudge title when today's meal hasn't been logged"),
+                body: String(localized: "notification.checklistBreakfast.body", defaultValue: "A quick log now keeps today's nutrition bars on track.", comment: "Push notification: evening nudge body when today's meal hasn't been logged"),
                 deepLink: .logMeal
             )
         }
         if !stepsOnTrack {
             await scheduleChecklistNudge(
                 hour: Self.checklistStepsHour, minute: 0, identifier: "checklist-steps-\(date)",
-                title: "Behind on steps today", body: "A short walk this afternoon closes most of the gap.",
+                title: String(localized: "notification.checklistSteps.title", defaultValue: "Behind on steps today", comment: "Push notification: evening nudge title when today's step goal is behind pace"),
+                body: String(localized: "notification.checklistSteps.body", defaultValue: "A short walk this afternoon closes most of the gap.", comment: "Push notification: evening nudge body when today's step goal is behind pace"),
                 deepLink: .healthDashboard
             )
         }
         if !openItemTitles.isEmpty {
-            let recap = openItemTitles.count == 1
-                ? "Still open: \(openItemTitles[0])."
-                : "Still open: \(openItemTitles.prefix(2).joined(separator: ", "))\(openItemTitles.count > 2 ? ", and more" : "")."
+            let recap: String
+            if openItemTitles.count == 1 {
+                recap = String(localized: "notification.checklistRecap.singleItem", defaultValue: "Still open: \(openItemTitles[0]).", comment: "Push notification body: exactly one checklist item still open tonight")
+            } else {
+                let joined = openItemTitles.prefix(2).joined(separator: ", ")
+                let suffix = openItemTitles.count > 2
+                    ? String(localized: "notification.checklistRecap.andMore", defaultValue: ", and more", comment: "Appended when more than 2 checklist items remain open tonight")
+                    : ""
+                recap = String(localized: "notification.checklistRecap.multipleItems", defaultValue: "Still open: \(joined)\(suffix).", comment: "Push notification body: multiple checklist items still open tonight; first placeholder is up to 2 item names joined by commas, second is an optional ', and more' suffix")
+            }
             await scheduleChecklistNudge(
                 hour: Self.checklistEveningRecapHour, minute: Self.checklistEveningRecapMinute,
                 identifier: "checklist-recap-\(date)",
-                title: "Today's checklist", body: recap,
+                title: String(localized: "notification.checklistRecap.title", defaultValue: "Today's checklist", comment: "Push notification: evening recap title listing still-open checklist items"),
+                body: recap,
                 deepLink: workoutLoggedToday ? .healthDashboard : .startWorkout
             )
         }

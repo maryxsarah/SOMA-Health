@@ -238,7 +238,7 @@ struct DailyChecklistCardView: View {
                 try await SupabaseClient.shared.deleteDailyChecklistState(itemKey: item.key, date: date)
             } else {
                 try await SupabaseClient.shared.upsertDailyChecklistState(scope: scope, itemKey: item.key, date: date)
-                if item.deepLink == .progressPicture || item.deepLink == .profileKitchenEquipment || item.deepLink == .healthDashboard {
+                if item.deepLink == .progressPicture || item.deepLink == .profileKitchenEquipment || item.deepLink == .healthDashboard || item.deepLink == .chooseWidgets {
                     onDeepLink(item.deepLink!)
                 }
             }
@@ -282,7 +282,8 @@ struct DailyChecklistCardView: View {
                 || onboardingRows.contains { $0.itemKey == "onboarding_review_plan" },
             hasLoggedFirstWorkout: workoutEver,
             hasLoggedFirstMeal: mealEver,
-            hasSeenHowSomaWorks: onboardingRows.contains { $0.itemKey == "onboarding_how_soma_works" }
+            hasSeenHowSomaWorks: onboardingRows.contains { $0.itemKey == "onboarding_how_soma_works" },
+            hasChosenWidgets: onboardingRows.contains { $0.itemKey == "onboarding_choose_widgets" }
         )
 
         let dayCompleteDates = dailyRows.filter { $0.itemKey == "__day_complete__" }.map(\.date)

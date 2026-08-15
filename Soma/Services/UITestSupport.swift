@@ -97,7 +97,7 @@ enum UITestSupport {
         defaults.set(true, forKey: "dashboardWidget.water")
         defaults.set(true, forKey: "dashboardWidget.sleep")
         defaults.set(true, forKey: "dashboardWidget.dailyTasks")
-        defaults.set(false, forKey: "dashboardWidget.mood")
+        defaults.set(true, forKey: "dashboardWidget.mood")
         defaults.set(true, forKey: "dashboardWidget.sportGoal")
         defaults.set(false, forKey: "dashboardWidget.photoProgress")
     }

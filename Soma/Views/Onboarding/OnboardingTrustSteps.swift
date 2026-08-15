@@ -197,6 +197,8 @@ struct OnTrackStepView: View {
             Text("Your tailored health journey")
                 .font(Theme.eyebrow)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.top, 20)

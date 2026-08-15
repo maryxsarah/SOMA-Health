@@ -133,8 +133,9 @@ struct HomeView: View {
     /// handoff mockup's toggle states.
     @AppStorage("dashboardWidget.water") private var waterWidgetEnabled = true
     @AppStorage("dashboardWidget.sleep") private var sleepWidgetEnabled = true
+    @AppStorage("dashboardWidget.streak") private var streakWidgetEnabled = true
     @AppStorage("dashboardWidget.dailyTasks") private var dailyTasksWidgetEnabled = true
-    @AppStorage("dashboardWidget.mood") private var moodWidgetEnabled = false
+    @AppStorage("dashboardWidget.mood") private var moodWidgetEnabled = true
     @AppStorage("dashboardWidget.sportGoal") private var sportGoalWidgetEnabled = true
     @AppStorage("dashboardWidget.photoProgress") private var photoProgressWidgetEnabled = false
     @State private var showEditWidgets = false
@@ -304,6 +305,12 @@ struct HomeView: View {
             // The beta toggle lives in Profile -- refetch so the promo
             // card appears (or disappears) the moment the sheet closes.
             Task { await loadSportGoal() }
+            // Date of birth is also edited inside Profile (Account
+            // settings) -- without this, isConfirmedAdultForBodyPhotos
+            // stayed stuck at whatever it was on Home's initial load, so
+            // the "Add your date of birth" nudge never cleared even after
+            // the user actually added one and dismissed back to Home.
+            Task { await loadGoalBodyPhotoState() }
         }) {
             ProfileView()
         }
@@ -405,7 +412,7 @@ struct HomeView: View {
             set: { if !$0 { selectedDay = nil } }
         )) {
             if let selectedDay {
-                DayDetailView(date: selectedDay, recentRecommendations: recentRecommendations)
+                DayDetailView(date: selectedDay, recentRecommendations: recentRecommendations, activeSportGoal: activeSportGoal)
             }
         }
         .sheet(isPresented: $showChecklistSheet) {
@@ -415,6 +422,7 @@ struct HomeView: View {
             EditWidgetsSheet(
                 waterEnabled: $waterWidgetEnabled,
                 sleepEnabled: $sleepWidgetEnabled,
+                streakEnabled: $streakWidgetEnabled,
                 dailyTasksEnabled: $dailyTasksWidgetEnabled,
                 moodEnabled: $moodWidgetEnabled,
                 sportGoalEnabled: $sportGoalWidgetEnabled,
@@ -721,6 +729,8 @@ struct HomeView: View {
             showProfile = true
         case .enableNotifications:
             Task { try? await NotificationManager.shared.requestAuthorization() }
+        case .chooseWidgets:
+            showEditWidgets = true
         }
     }
 
@@ -781,9 +791,20 @@ struct HomeView: View {
             // category's own fixed suggestion pool, not fabricated); health
             // inputs only when a source actually reported them.
             let chips = heroChips(for: recommendation)
-            if !chips.isEmpty {
-                HStack(spacing: 8) {
+            if chips.count > 1 {
+                // True equal-width columns (unlike an HStack + maxWidth:
+                // .infinity, which only splits LEFTOVER space -- each child
+                // still claims its own minimum content width first, so the
+                // longest chip, e.g. "Resting HR 61 bpm", won out and got
+                // truncated instead of shrinking evenly with the rest).
+                // Same flexible-GridItem recipe the Sleep widget's 2x2 grid
+                // already uses successfully, just N columns in one row.
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: chips.count), spacing: 8) {
                     ForEach(chips, id: \.self) { HomeMetricChip(text: $0) }
+                }
+            } else if let onlyChip = chips.first {
+                HStack(spacing: 8) {
+                    HomeMetricChip(text: onlyChip, fillsRow: false)
                 }
             }
 
@@ -975,7 +996,10 @@ struct HomeView: View {
             parts.append(String(localized: "home.readiness.hrv", defaultValue: "HRV \(Int(hrv.rounded())) ms", comment: "Home: readiness disclosure input chip -- heart rate variability in milliseconds"))
         }
         if let rhr = todaysSnapshots.compactMap(\.restingHr).first {
-            parts.append(String(localized: "home.readiness.restingHR", defaultValue: "Resting HR \(Int(rhr.rounded())) bpm", comment: "Home: readiness disclosure input chip -- resting heart rate in beats per minute"))
+            // Abbreviated ("RHR", not "Resting HR") to match "HRV"'s own
+            // compactness -- this chip sits in a hard equal-width 4-column
+            // row (readinessCard) with no room for the spelled-out form.
+            parts.append(String(localized: "home.readiness.restingHR", defaultValue: "RHR \(Int(rhr.rounded())) bpm", comment: "Home: readiness disclosure input chip -- resting heart rate in beats per minute, abbreviated to match this row's tight equal-width chip layout"))
         }
         return parts
     }
@@ -1039,7 +1063,7 @@ struct HomeView: View {
                         .foregroundStyle(SomaTokens.ink4)
                     Spacer(minLength: 0)
                     MoodFaceIcon(rating: rating, color: .white, lineWidth: 1.4)
-                        .frame(width: 15, height: 15)
+                        .frame(width: 18, height: 18)
                         .frame(width: 27, height: 27)
                         .glassGel(.blue, cornerRadius: 13.5)
                 }
@@ -1087,7 +1111,19 @@ struct HomeView: View {
                 .disabled(isSavingMood)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // maxHeight too, not just maxWidth -- LazyVGrid equalizes each
+        // ROW's layout height across columns, but without this each tile's
+        // own background only wraps ITS content's natural height, leaving
+        // the shorter tile's card visibly shorter than its row-mate's
+        // (e.g. Water taller than Sleep once Sleep's phase-breakdown line
+        // wraps to 2 lines in a longer translation). minHeight ALSO fixed,
+        // not just maxHeight -- row-only equalization still let a tile with
+        // no row-mate (Streak, whenever Mood is off and it lands alone in
+        // row 2) end up visibly shorter than row 1's pair, since nothing
+        // forces separate ROWS to match each other, only same-row siblings.
+        // 172 matches Water/Sleep's own natural height (4 content lines +
+        // this padding) -- the tallest realistic tile, not a magic number.
+        .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
         .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
         .background(HomeWidgetTileBackground())
     }
@@ -1198,7 +1234,7 @@ struct HomeView: View {
 
     @ViewBuilder
     private var widgetGrid: some View {
-        if waterWidgetEnabled || sleepWidgetEnabled || moodWidgetEnabled {
+        if waterWidgetEnabled || sleepWidgetEnabled || streakWidgetEnabled || moodWidgetEnabled {
             LazyVGrid(columns: Self.widgetGridColumns, alignment: .leading, spacing: 14) {
                 if waterWidgetEnabled {
                     waterWidgetTile
@@ -1206,11 +1242,63 @@ struct HomeView: View {
                 if sleepWidgetEnabled {
                     sleepWidgetTile
                 }
+                if streakWidgetEnabled {
+                    streakWidgetTile
+                }
                 if moodWidgetEnabled {
                     moodCheckInRow
                 }
             }
         }
+    }
+
+    /// Same source as Profile's streakSection (SupabaseClient.fetchRecentWorkoutLogDates,
+    /// already fetched here for the calendar strip's crown badges) -- reuses
+    /// ProfileStore's pure streak-counting function instead of duplicating it.
+    private var currentStreak: Int { ProfileStore.streak(from: completedDates) }
+
+    private var streakWidgetTile: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(currentStreak > 0 ? SomaTokens.accent : SomaTokens.ink4)
+                Text("Streak")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(SomaTokens.ink4)
+                Spacer(minLength: 0)
+            }
+            Text(currentStreak > 0
+                ? String(localized: "profile.header.streakDays", defaultValue: "\(currentStreak)-day streak", comment: "Profile header status line: current workout streak length in days")
+                : String(localized: "No active streak", defaultValue: "No active streak", comment: "Streak widget headline when there is no current streak"))
+                .font(currentStreak > 0 ? Theme.display : .system(size: 14.5, weight: .semibold))
+                .fontWidth(currentStreak > 0 ? .condensed : nil)
+                .padding(.top, 3)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(currentStreak > 0
+                ? String(localized: "Keep showing up -- consistency compounds.", defaultValue: "Keep showing up -- consistency compounds.", comment: "Streak widget subtitle when a streak is active")
+                : String(localized: "Log a workout today to start one.", defaultValue: "Log a workout today to start one.", comment: "Streak widget subtitle when there is no current streak"))
+                .font(.system(size: 11.5))
+                .foregroundStyle(SomaTokens.ink5)
+                .padding(.top, 2)
+        }
+        // maxHeight too, not just maxWidth -- LazyVGrid equalizes each
+        // ROW's layout height across columns, but without this each tile's
+        // own background only wraps ITS content's natural height, leaving
+        // the shorter tile's card visibly shorter than its row-mate's
+        // (e.g. Water taller than Sleep once Sleep's phase-breakdown line
+        // wraps to 2 lines in a longer translation). minHeight ALSO fixed,
+        // not just maxHeight -- row-only equalization still let a tile with
+        // no row-mate (Streak, whenever Mood is off and it lands alone in
+        // row 2) end up visibly shorter than row 1's pair, since nothing
+        // forces separate ROWS to match each other, only same-row siblings.
+        // 172 matches Water/Sleep's own natural height (4 content lines +
+        // this padding) -- the tallest realistic tile, not a magic number.
+        .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
+        .background(HomeWidgetTileBackground())
     }
 
     private var waterGoalReached: Bool { waterGlassesToday >= 8 }
@@ -1243,7 +1331,19 @@ struct HomeView: View {
             waterDropletRow
             waterControlRow
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // maxHeight too, not just maxWidth -- LazyVGrid equalizes each
+        // ROW's layout height across columns, but without this each tile's
+        // own background only wraps ITS content's natural height, leaving
+        // the shorter tile's card visibly shorter than its row-mate's
+        // (e.g. Water taller than Sleep once Sleep's phase-breakdown line
+        // wraps to 2 lines in a longer translation). minHeight ALSO fixed,
+        // not just maxHeight -- row-only equalization still let a tile with
+        // no row-mate (Streak, whenever Mood is off and it lands alone in
+        // row 2) end up visibly shorter than row 1's pair, since nothing
+        // forces separate ROWS to match each other, only same-row siblings.
+        // 172 matches Water/Sleep's own natural height (4 content lines +
+        // this padding) -- the tallest realistic tile, not a magic number.
+        .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
         .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
         .background(HomeWidgetTileBackground())
     }
@@ -1435,7 +1535,19 @@ struct HomeView: View {
                 .disabled(isSavingSleep)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // maxHeight too, not just maxWidth -- LazyVGrid equalizes each
+        // ROW's layout height across columns, but without this each tile's
+        // own background only wraps ITS content's natural height, leaving
+        // the shorter tile's card visibly shorter than its row-mate's
+        // (e.g. Water taller than Sleep once Sleep's phase-breakdown line
+        // wraps to 2 lines in a longer translation). minHeight ALSO fixed,
+        // not just maxHeight -- row-only equalization still let a tile with
+        // no row-mate (Streak, whenever Mood is off and it lands alone in
+        // row 2) end up visibly shorter than row 1's pair, since nothing
+        // forces separate ROWS to match each other, only same-row siblings.
+        // 172 matches Water/Sleep's own natural height (4 content lines +
+        // this padding) -- the tallest realistic tile, not a magic number.
+        .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
         .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
         .background(HomeWidgetTileBackground())
     }
@@ -1551,10 +1663,26 @@ struct HomeView: View {
     /// affordance, so they never get the raised-control treatment.
     private struct HomeMetricChip: View {
         let text: String
+        /// Equal-width only makes sense with 2+ chips in the row -- with
+        /// just one (e.g. only the always-present duration chip, no health
+        /// source reporting yet), forcing maxWidth: .infinity stretches it
+        /// across the whole card instead of hugging its content.
+        var fillsRow: Bool = true
         var body: some View {
             Text(text)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(SomaTokens.accent)
+                .lineLimit(1)
+                // Low-ish floor deliberately: with 4 true-equal-width
+                // columns, the longest chip needs real room to shrink into
+                // or it truncates and hides the actual number -- losing the
+                // reading is worse than smaller text. Paired with
+                // shortening "Resting HR"/"HRV"-style labels at the source
+                // (readinessInputs) rather than relying on scale alone,
+                // which would need an illegibly tiny floor to guarantee a
+                // fit for every language's translation.
+                .minimumScaleFactor(0.45)
+                .frame(maxWidth: fillsRow ? .infinity : nil)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 7)
                 .background {

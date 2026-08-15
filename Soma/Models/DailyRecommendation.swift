@@ -243,40 +243,45 @@ enum RecommendationReason: String, Codable {
     case insufficientData = "insufficient_data"
     case unknown
 
-    /// Fixed explanation template. `%@` is filled in with the relevant
-    /// metric's real value from today's daily_snapshot row when available.
-    var explanationTemplate: String {
-        switch self {
-        case .whoopHigh: String(localized: "recommendationReason.explanation.whoopHigh", defaultValue: "Your Whoop recovery was %@%%, well into the high range (67%%+) -- your body is well-recovered today.", comment: "%@ = recovery percent number; %% is a literal percent sign")
-        case .whoopMedium: String(localized: "recommendationReason.explanation.whoopMedium", defaultValue: "Your Whoop recovery was %@%%, in the medium range (34-66%%) -- your body has some room to work, but isn't fully topped up.", comment: "%@ = recovery percent number; %% is a literal percent sign")
-        case .whoopLow: String(localized: "recommendationReason.explanation.whoopLow", defaultValue: "Your Whoop recovery was %@%%, in the low range (under 34%%) -- your body is signaling it needs rest.", comment: "%@ = recovery percent number; %% is a literal percent sign")
-        case .ouraHigh: String(localized: "recommendationReason.explanation.ouraHigh", defaultValue: "Your Oura readiness was %@, well into the high range (85+) -- you're set up well for a hard effort.", comment: "%@ = Oura readiness score number, no percent sign")
-        case .ouraMediumHigh: String(localized: "recommendationReason.explanation.ouraMediumHigh", defaultValue: "Your Oura readiness was %@, in the medium-high range (70-84) -- solidly good, if not peak.", comment: "%@ = Oura readiness score number, no percent sign")
-        case .ouraMedium: String(localized: "recommendationReason.explanation.ouraMedium", defaultValue: "Your Oura readiness was %@, in the medium range (60-69) -- moderate effort suits today.", comment: "%@ = Oura readiness score number, no percent sign")
-        case .ouraLow: String(localized: "recommendationReason.explanation.ouraLow", defaultValue: "Your Oura readiness was %@, under 60 -- your body needs a lighter day.", comment: "%@ = Oura readiness score number, no percent sign")
-        case .healthkitHigh: String(localized: "recommendationReason.explanation.healthkitHigh", defaultValue: "Your HRV was close to your recent baseline and you slept enough -- a good sign of recovery.", comment: "No placeholders")
-        case .healthkitMedium: String(localized: "recommendationReason.explanation.healthkitMedium", defaultValue: "Your HRV was somewhat below your recent baseline, or sleep was a little short -- a moderate day fits best.", comment: "No placeholders")
-        case .healthkitLow: String(localized: "recommendationReason.explanation.healthkitLow", defaultValue: "Your HRV was well below your recent baseline, or sleep was short -- your body needs to ease up today.", comment: "No placeholders")
-        case .insufficientData: String(localized: "recommendationReason.explanation.insufficientData", defaultValue: "Not enough health data yet to build a personalized read -- Soma is defaulting to a cautious moderate session while your baseline builds.", comment: "No placeholders")
-        case .unknown: String(localized: "recommendationReason.explanation.unknown", defaultValue: "Today's recommendation is based on the data currently available.", comment: "No placeholders; fallback for unrecognized server reason codes")
-        }
-    }
-
-    /// explanationTemplate with the real metric value substituted in --
-    /// the ONLY way templates should reach the screen, since rendering
-    /// them raw shows a literal "%@" to the user.
+    /// Value is interpolated directly -- a stored "%@" with no matching
+    /// interpolation argument crashes String(localized:) resolution on-device.
     func explanation(snapshots: [DailySnapshotRow]) -> String {
         func formatted(_ value: Double?) -> String {
             guard let value else { return "—" }
             return String(Int(value.rounded()))
         }
         switch self {
-        case .whoopHigh, .whoopMedium, .whoopLow:
-            return String(format: explanationTemplate, formatted(snapshots.first(where: { $0.source == "whoop" })?.recoveryScore))
-        case .ouraHigh, .ouraMediumHigh, .ouraMedium, .ouraLow:
-            return String(format: explanationTemplate, formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore))
-        case .healthkitHigh, .healthkitMedium, .healthkitLow, .insufficientData, .unknown:
-            return explanationTemplate
+        case .whoopHigh:
+            let percent = formatted(snapshots.first(where: { $0.source == "whoop" })?.recoveryScore)
+            return String(localized: "recommendationReason.explanation.whoopHigh", defaultValue: "Your Whoop recovery was \(percent)%, well into the high range (67%+) -- your body is well-recovered today.", comment: "Recovery percent is pre-formatted text, e.g. '72' or '—' when unavailable")
+        case .whoopMedium:
+            let percent = formatted(snapshots.first(where: { $0.source == "whoop" })?.recoveryScore)
+            return String(localized: "recommendationReason.explanation.whoopMedium", defaultValue: "Your Whoop recovery was \(percent)%, in the medium range (34-66%) -- your body has some room to work, but isn't fully topped up.", comment: "Recovery percent is pre-formatted text, e.g. '72' or '—' when unavailable")
+        case .whoopLow:
+            let percent = formatted(snapshots.first(where: { $0.source == "whoop" })?.recoveryScore)
+            return String(localized: "recommendationReason.explanation.whoopLow", defaultValue: "Your Whoop recovery was \(percent)%, in the low range (under 34%) -- your body is signaling it needs rest.", comment: "Recovery percent is pre-formatted text, e.g. '72' or '—' when unavailable")
+        case .ouraHigh:
+            let score = formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore)
+            return String(localized: "recommendationReason.explanation.ouraHigh", defaultValue: "Your Oura readiness was \(score), well into the high range (85+) -- you're set up well for a hard effort.", comment: "Readiness score is pre-formatted text, e.g. '88' or '—' when unavailable")
+        case .ouraMediumHigh:
+            let score = formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore)
+            return String(localized: "recommendationReason.explanation.ouraMediumHigh", defaultValue: "Your Oura readiness was \(score), in the medium-high range (70-84) -- solidly good, if not peak.", comment: "Readiness score is pre-formatted text, e.g. '88' or '—' when unavailable")
+        case .ouraMedium:
+            let score = formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore)
+            return String(localized: "recommendationReason.explanation.ouraMedium", defaultValue: "Your Oura readiness was \(score), in the medium range (60-69) -- moderate effort suits today.", comment: "Readiness score is pre-formatted text, e.g. '88' or '—' when unavailable")
+        case .ouraLow:
+            let score = formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore)
+            return String(localized: "recommendationReason.explanation.ouraLow", defaultValue: "Your Oura readiness was \(score), under 60 -- your body needs a lighter day.", comment: "Readiness score is pre-formatted text, e.g. '88' or '—' when unavailable")
+        case .healthkitHigh:
+            return String(localized: "recommendationReason.explanation.healthkitHigh", defaultValue: "Your HRV was close to your recent baseline and you slept enough -- a good sign of recovery.", comment: "No placeholders")
+        case .healthkitMedium:
+            return String(localized: "recommendationReason.explanation.healthkitMedium", defaultValue: "Your HRV was somewhat below your recent baseline, or sleep was a little short -- a moderate day fits best.", comment: "No placeholders")
+        case .healthkitLow:
+            return String(localized: "recommendationReason.explanation.healthkitLow", defaultValue: "Your HRV was well below your recent baseline, or sleep was short -- your body needs to ease up today.", comment: "No placeholders")
+        case .insufficientData:
+            return String(localized: "recommendationReason.explanation.insufficientData", defaultValue: "Not enough health data yet to build a personalized read -- Soma is defaulting to a cautious moderate session while your baseline builds.", comment: "No placeholders")
+        case .unknown:
+            return String(localized: "recommendationReason.explanation.unknown", defaultValue: "Today's recommendation is based on the data currently available.", comment: "No placeholders; fallback for unrecognized server reason codes")
         }
     }
 
