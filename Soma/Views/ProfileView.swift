@@ -46,11 +46,11 @@ struct ProfileView: View {
                 .padding(20)
             }
             .somaBackground()
-            .navigationTitle("Settings")
+            .navigationTitle(String(localized: "profile.settings.navTitle", defaultValue: "Settings", comment: "Navigation title of the Settings hub screen"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(String(localized: "profile.doneButton", defaultValue: "Done", comment: "Toolbar button dismissing a settings screen or sheet")) { dismiss() }
                 }
             }
         }
@@ -83,7 +83,7 @@ struct ProfileView: View {
         HStack(spacing: 12) {
             avatarButton
             VStack(alignment: .leading, spacing: 2) {
-                Text("Your profile")
+                Text(String(localized: "profile.yourProfile.title", defaultValue: "Your profile", comment: "Heading label next to the avatar in the identity row"))
                     .font(Theme.display)
                 Text(identitySubtitle)
                     .font(.system(size: 12.5))
@@ -128,13 +128,13 @@ struct ProfileView: View {
             Button {
                 store.showAvatarPicker = true
             } label: {
-                Label("Choose Photo", systemImage: "photo")
+                Label(LocalizedStringKey(String(localized: "profile.avatar.choosePhoto", defaultValue: "Choose Photo", comment: "Menu option to pick a new profile photo")), systemImage: "photo")
             }
             if store.avatarImage != nil {
                 Button(role: .destructive) {
                     Task { await store.removeAvatar() }
                 } label: {
-                    Label("Remove Photo", systemImage: "trash")
+                    Label(LocalizedStringKey(String(localized: "profile.avatar.removePhoto", defaultValue: "Remove Photo", comment: "Menu option to remove the current profile photo")), systemImage: "trash")
                 }
             }
         } label: {
@@ -191,9 +191,13 @@ struct ProfileView: View {
                             .foregroundStyle(.white)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(store.completedWorkoutStreak > 0 ? "\(store.completedWorkoutStreak)-day streak" : "No active streak")
+                        Text(store.completedWorkoutStreak > 0
+                            ? String(localized: "profile.header.streakDays", defaultValue: "\(store.completedWorkoutStreak)-day streak", comment: "Profile header status line: current workout streak length in days")
+                            : String(localized: "profile.streak.noActiveStreak", defaultValue: "No active streak", comment: "Headline shown when the user has no active workout streak"))
                             .font(.system(size: 16.5, weight: .bold))
-                        Text(store.completedWorkoutStreak > 0 ? "Keep showing up -- consistency compounds." : "Log a workout today to start one.")
+                        Text(store.completedWorkoutStreak > 0
+                            ? String(localized: "profile.streak.keepShowingUp", defaultValue: "Keep showing up -- consistency compounds.", comment: "Subtitle shown when the user has an active workout streak")
+                            : String(localized: "profile.streak.logWorkoutToStart", defaultValue: "Log a workout today to start one.", comment: "Subtitle shown when the user has no active workout streak"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -403,14 +407,14 @@ struct ProfileView: View {
                             VStack(spacing: 10) {
                                 if let category {
                                     Toggle(isOn: $includeEffort) {
-                                        Text("Today's effort — \(category.displayTitle)")
+                                        Text(String(localized: "profile.streakShare.todaysEffort", defaultValue: "Today's effort — \(category.displayTitle)", comment: "Toggle label including today's training category name on the streak-share sheet"))
                                             .font(.system(size: 14.5, weight: .semibold))
                                     }
                                     .tint(SomaTokens.accent)
                                 }
                                 if let steps, steps > 0 {
                                     Toggle(isOn: $includeSteps) {
-                                        Text("Step count — \(steps.formatted()) steps")
+                                        Text(String(localized: "profile.streakShare.stepCountToggle", defaultValue: "Step count — \(steps.formatted()) steps", comment: "Toggle label including today's step count on the streak-share sheet"))
                                             .font(.system(size: 14.5, weight: .semibold))
                                     }
                                     .tint(SomaTokens.accent)
@@ -425,9 +429,9 @@ struct ProfileView: View {
                     if let shareImage {
                         ShareLink(
                             item: Image(uiImage: shareImage),
-                            preview: SharePreview("My \(streakDays)-day Soma streak", image: Image(uiImage: shareImage))
+                            preview: SharePreview(String(localized: "profile.streakShare.sharePreviewTitle", defaultValue: "My \(streakDays)-day Soma streak", comment: "Share sheet preview title for the exported streak card image"), image: Image(uiImage: shareImage))
                         ) {
-                            Label("Share streak", systemImage: "square.and.arrow.up")
+                            Label(LocalizedStringKey(String(localized: "profile.streakShare.shareButton", defaultValue: "Share streak", comment: "Button sharing the rendered streak card image")), systemImage: "square.and.arrow.up")
                                 .font(.system(size: 15, weight: .bold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
@@ -438,11 +442,11 @@ struct ProfileView: View {
                     }
                 }
                 .somaBackground()
-                .navigationTitle("Share your streak")
+                .navigationTitle(String(localized: "profile.streakShare.navTitle", defaultValue: "Share your streak", comment: "Navigation title of the streak-share sheet"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
+                        Button(String(localized: "profile.streakShare.cancel", defaultValue: "Cancel", comment: "Cancel button on the streak-share sheet")) { dismiss() }
                     }
                 }
             }
@@ -508,10 +512,10 @@ struct ProfileView: View {
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(SomaTokens.warn)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(nudges.count) to finish")
+                Text(String(localized: "profile.completionNotice.toFinishCount", defaultValue: "\(nudges.count) to finish", comment: "Headline on the profile completion notice showing how many items remain"))
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(SomaTokens.warn)
-                Text("\(sentenceCased(nudges.map(\.text).joined(separator: " and "))) to sharpen suggestions.")
+                Text(String(localized: "profile.completionNotice.body", defaultValue: "\(sentenceCased(nudges.map(\.text).joined(separator: " and "))) to sharpen suggestions.", comment: "Body text on the profile completion notice listing the remaining items"))
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink2)
             }
@@ -535,19 +539,19 @@ struct ProfileView: View {
     /// from the mockup's fictional "Vlad" persona.
     private var cardsSection: some View {
         VStack(spacing: 10) {
-            settingsCard(icon: "dumbbell.fill", title: "Training", subtitle: trainingCardSubtitle) {
+            settingsCard(icon: "dumbbell.fill", title: LocalizedStringKey(String(localized: "profile.hub.training.title", defaultValue: "Training", comment: "Hub card title and settings page navigation title for Training")), subtitle: trainingCardSubtitle) {
                 TrainingSettingsView(store: store)
             }
-            settingsCard(icon: "heart.fill", title: "Health & Safety", subtitle: healthCardSubtitle) {
+            settingsCard(icon: "heart.fill", title: LocalizedStringKey(String(localized: "profile.hub.healthSafety.title", defaultValue: "Health & Safety", comment: "Hub card title and settings page navigation title for Health & Safety")), subtitle: healthCardSubtitle) {
                 HealthSafetySettingsView(store: store)
             }
             settingsCard(
-                icon: "antenna.radiowaves.left.and.right", title: "Devices & Data", subtitle: devicesCardSubtitle,
+                icon: "antenna.radiowaves.left.and.right", title: LocalizedStringKey(String(localized: "profile.hub.devicesData.title", defaultValue: "Devices & Data", comment: "Hub card title and settings page navigation title for Devices & Data")), subtitle: devicesCardSubtitle,
                 showsStatusDot: !appState.connectedProviders.isEmpty
             ) {
                 DevicesSettingsView(store: store)
             }
-            settingsCard(icon: "person.fill", title: "Account", subtitle: accountCardSubtitle) {
+            settingsCard(icon: "person.fill", title: LocalizedStringKey(String(localized: "profile.hub.account.title", defaultValue: "Account", comment: "Hub card title and settings page navigation title for Account")), subtitle: accountCardSubtitle) {
                 AccountSettingsView(store: store)
             }
         }
@@ -1270,19 +1274,19 @@ private struct TrainingSettingsView: View {
         ScrollView {
             VStack(spacing: 22) {
                 groupCard(
-                    eyebrow: "TRAINING",
+                    eyebrow: LocalizedStringKey(String(localized: "profile.training.eyebrow", defaultValue: "TRAINING", comment: "All-caps section eyebrow label on the Training settings page")),
                     footnote: String(localized: "profile.training.groupFootnote", defaultValue: "Experience sets block count, supersets and rest. A real lift number beats an estimate.", comment: "Footnote under the Training settings group")
                 ) {
-                    groupRow(title: "Experience", value: store.experienceLevel?.displayName ?? store.notSetLabel, isSet: store.experienceLevel != nil) { store.activeSheet = .experience }
+                    groupRow(title: LocalizedStringKey(String(localized: "profile.experience.title", defaultValue: "Experience", comment: "Row title opening the experience-level editor")), value: store.experienceLevel?.displayName ?? store.notSetLabel, isSet: store.experienceLevel != nil) { store.activeSheet = .experience }
                     groupDivider
                     groupRow(
-                        title: "Goals",
+                        title: LocalizedStringKey(String(localized: "profile.goals.title", defaultValue: "Goals", comment: "Row title opening the training-goals editor")),
                         value: store.goals.isEmpty ? store.notSetLabel : String(localized: "profile.goals.selectedCount", defaultValue: "\(store.goals.count) selected", comment: "Training goals row value: number of goals selected"),
                         isSet: !store.goals.isEmpty
                     ) { store.activeSheet = .goals }
                     groupDivider
                     groupRow(
-                        title: "Weekly target",
+                        title: LocalizedStringKey(String(localized: "profile.weeklyTarget.title", defaultValue: "Weekly target", comment: "Row title opening the weekly-target editor")),
                         value: store.weeklySessionTarget.map {
                             String(localized: "profile.weeklyTarget.progress", defaultValue: "\($0)/wk · \(store.sessionsDoneThisWeek) done", comment: "Weekly target row value: target sessions per week and sessions done so far, e.g. '4/wk · 2 done'")
                         } ?? store.notSetLabel,
@@ -1302,7 +1306,7 @@ private struct TrainingSettingsView: View {
                     ) { store.activeSheet = .knownLifts }
                     if store.showSportGoalRow {
                         groupDivider
-                        groupRow(title: "My goal", value: store.sportGoalRowValue, isSet: store.sportGoalRowValue != store.notSetLabel, tinted: true) {
+                        groupRow(title: LocalizedStringKey(String(localized: "profile.sportGoal.rowTitle", defaultValue: "My goal", comment: "Row title opening the sport-goal flow")), value: store.sportGoalRowValue, isSet: store.sportGoalRowValue != store.notSetLabel, tinted: true) {
                             AnalyticsManager.shared.featureUsed(name: "sport_goal_flow")
                             store.showSportGoals = true
                         }
@@ -1310,11 +1314,11 @@ private struct TrainingSettingsView: View {
                 }
 
                 groupCard(
-                    eyebrow: "EQUIPMENT",
+                    eyebrow: LocalizedStringKey(String(localized: "profile.equipment.eyebrow", defaultValue: "EQUIPMENT", comment: "All-caps section eyebrow label on the Equipment settings group")),
                     footnote: String(localized: "profile.equipment.groupFootnote", defaultValue: "Suggestions only use what you actually have.", comment: "Footnote under the Equipment settings group")
                 ) {
                     groupRow(
-                        title: "Gym & access",
+                        title: LocalizedStringKey(String(localized: "profile.gymAccess.rowTitle", defaultValue: "Gym & access", comment: "Row title opening the gym/equipment-access editor")),
                         value: store.equipment.isEmpty ? store.notSetLabel : EquipmentTag.allCases.filter(store.equipment.contains).map(\.displayName).joined(separator: ", "),
                         isSet: !store.equipment.isEmpty
                     ) { store.activeSheet = .equipment }
@@ -1329,7 +1333,7 @@ private struct TrainingSettingsView: View {
             .padding(20)
         }
         .somaBackground()
-        .navigationTitle("Training")
+        .navigationTitle(String(localized: "profile.hub.training.title", defaultValue: "Training", comment: "Hub card title and settings page navigation title for Training"))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $store.activeSheet) { sheet in
             DetailSheetContent(sheet: sheet, store: store)
@@ -1351,17 +1355,17 @@ private struct HealthSafetySettingsView: View {
         ScrollView {
             VStack(spacing: 22) {
                 groupCard(
-                    eyebrow: "SAFETY",
+                    eyebrow: LocalizedStringKey(String(localized: "profile.safety.eyebrow", defaultValue: "SAFETY", comment: "All-caps section eyebrow label on the Safety settings group")),
                     footnote: String(localized: "profile.safety.groupFootnote", defaultValue: "Injuries and pregnancy status shape today's intensity and what gets suggested.", comment: "Footnote under the Safety settings group")
                 ) {
                     groupRow(
-                        title: "Injuries",
+                        title: LocalizedStringKey(String(localized: "profile.injuries.title", defaultValue: "Injuries", comment: "Row title opening the injuries editor")),
                         value: store.injuryTags.isEmpty ? String(localized: "profile.injuries.noneNoted", defaultValue: "None noted", comment: "Injuries row value when no injuries are recorded") : store.injuryTags.map(\.displayName).joined(separator: ", "),
                         isSet: !store.injuryTags.isEmpty
                     ) { store.activeSheet = .injuries }
                     groupDivider
                     groupRow(
-                        title: "Pregnancy",
+                        title: LocalizedStringKey(String(localized: "profile.pregnancy.title", defaultValue: "Pregnancy", comment: "Row title opening the pregnancy editor")),
                         value: store.pregnancy == true
                             ? (store.pregnancyWeek.map { String(localized: "profile.pregnancy.week", defaultValue: "Week \($0)", comment: "Pregnancy row value showing the current week number, e.g. 'Week 12'") } ?? String(localized: "profile.pregnancy.yes", defaultValue: "Yes", comment: "Pregnancy row value when pregnant but no week number is set"))
                             : store.notSetLabel,
@@ -1379,20 +1383,20 @@ private struct HealthSafetySettingsView: View {
 
                     if Config.enableBodyPhotoUpload && store.isConfirmedAdultForBodyPhotos {
                         groupDivider
-                        groupRow(title: "Your progress") { store.showGoalBodyProgress = true }
+                        groupRow(title: LocalizedStringKey(String(localized: "profile.yourProgress.rowTitle", defaultValue: "Your progress", comment: "Row title opening the Goal Body progress photos page"))) { store.showGoalBodyProgress = true }
                     }
                 }
 
                 groupCard(
-                    eyebrow: "INSIGHTS",
+                    eyebrow: LocalizedStringKey(String(localized: "profile.insights.eyebrow", defaultValue: "INSIGHTS", comment: "All-caps section eyebrow label on the Insights settings group")),
                     footnote: String(localized: "profile.insights.groupFootnote", defaultValue: "Training history and recovery trends, at a glance.", comment: "Footnote under the Insights settings group")
                 ) {
-                    groupRow(title: "Training history") {
+                    groupRow(title: LocalizedStringKey(String(localized: "profile.trainingHistory.rowTitle", defaultValue: "Training history", comment: "Row title opening the training-history page"))) {
                         AnalyticsManager.shared.featureUsed(name: "training_history")
                         store.showTrainingHistory = true
                     }
                     groupDivider
-                    groupRow(title: "Health dashboard") {
+                    groupRow(title: LocalizedStringKey(String(localized: "profile.healthDashboard.rowTitle", defaultValue: "Health dashboard", comment: "Row title opening the health-dashboard page"))) {
                         AnalyticsManager.shared.featureUsed(name: "health_dashboard")
                         store.showHealthDashboard = true
                     }
@@ -1401,7 +1405,7 @@ private struct HealthSafetySettingsView: View {
             .padding(20)
         }
         .somaBackground()
-        .navigationTitle("Health & Safety")
+        .navigationTitle(String(localized: "profile.hub.healthSafety.title", defaultValue: "Health & Safety", comment: "Hub card title and settings page navigation title for Health & Safety"))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $store.activeSheet) { sheet in
             DetailSheetContent(sheet: sheet, store: store)
@@ -1427,7 +1431,7 @@ private struct DevicesSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                groupEyebrow("CONNECTED DEVICES")
+                groupEyebrow(LocalizedStringKey(String(localized: "profile.devices.eyebrow", defaultValue: "CONNECTED DEVICES", comment: "All-caps section eyebrow label above the connected-device rows")))
                 VStack(spacing: 0) {
                     ForEach(Array(Provider.allCases.enumerated()), id: \.element) { index, provider in
                         if index > 0 { groupDivider }
@@ -1449,7 +1453,7 @@ private struct DevicesSettingsView: View {
             .padding(20)
         }
         .somaBackground()
-        .navigationTitle("Devices & Data")
+        .navigationTitle(String(localized: "profile.hub.devicesData.title", defaultValue: "Devices & Data", comment: "Hub card title and settings page navigation title for Devices & Data"))
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -1466,34 +1470,34 @@ private struct AccountSettingsView: View {
         ScrollView {
             VStack(spacing: 22) {
                 groupCard(
-                    eyebrow: "ABOUT",
+                    eyebrow: LocalizedStringKey(String(localized: "profile.about.eyebrow", defaultValue: "ABOUT", comment: "All-caps section eyebrow label on the About settings group")),
                     footnote: String(localized: "profile.about.groupFootnote", defaultValue: "Region powers nearby gym & coach suggestions; date of birth unlocks Goal Body progress photos.", comment: "Footnote under the About settings group")
                 ) {
                     groupRow(
-                        title: "Contact email",
+                        title: LocalizedStringKey(String(localized: "profile.contactEmail.title", defaultValue: "Contact email", comment: "Row title opening the contact-email editor")),
                         value: store.contactEmailText.isEmpty ? store.notSetLabel : store.contactEmailText,
                         isSet: !store.contactEmailText.isEmpty
                     ) { store.activeSheet = .contactEmail }
                     groupDivider
                     groupRow(
-                        title: "Region",
+                        title: LocalizedStringKey(String(localized: "profile.region.title", defaultValue: "Region", comment: "Row title opening the region editor")),
                         value: UserProfile.regionDisplay(country: store.countryCode, city: store.cityText) ?? store.notSetLabel,
                         isSet: UserProfile.regionDisplay(country: store.countryCode, city: store.cityText) != nil
                     ) { store.activeSheet = .region }
                     groupDivider
                     groupRow(
-                        title: "Date of birth",
+                        title: LocalizedStringKey(String(localized: "profile.dateOfBirth.title", defaultValue: "Date of birth", comment: "Row title opening the date-of-birth editor")),
                         value: store.dateOfBirthDate.map { ProfileStore.dobFormatter.string(from: $0) } ?? store.notSetLabel,
                         isSet: store.dateOfBirthDate != nil
                     ) { store.activeSheet = .dateOfBirth }
                 }
 
                 groupCard(
-                    eyebrow: "PREFERENCES",
+                    eyebrow: LocalizedStringKey(String(localized: "profile.preferences.eyebrow", defaultValue: "PREFERENCES", comment: "All-caps section eyebrow label on the Preferences settings group")),
                     footnote: String(localized: "profile.preferences.groupFootnote", defaultValue: "Overrides your device's language just for Soma.", comment: "Footnote under the Preferences settings group")
                 ) {
                     groupRow(
-                        title: "Language",
+                        title: LocalizedStringKey(String(localized: "profile.language.title", defaultValue: "Language", comment: "Row title opening the language editor")),
                         value: languageManager.selected.displayName(locale: languageManager.effectiveLocale),
                         isSet: true
                     ) { store.activeSheet = .language }
@@ -1501,20 +1505,20 @@ private struct AccountSettingsView: View {
                 }
 
                 groupCard(
-                    eyebrow: "PLAN",
+                    eyebrow: LocalizedStringKey(String(localized: "profile.plan.eyebrow", defaultValue: "PLAN", comment: "All-caps section eyebrow label on the Plan settings group")),
                     footnote: String(localized: "profile.plan.groupFootnote", defaultValue: "Subscription, referral codes, feedback, and a refresher on how Soma works.", comment: "Footnote under the Plan settings group")
                 ) {
                     groupRow(
-                        title: "Subscription",
+                        title: LocalizedStringKey(String(localized: "profile.subscription.title", defaultValue: "Subscription", comment: "Row title opening the subscription/paywall")),
                         value: subscriptionStatusText(isSubscribed: subscriptionManager.isSubscribed, referralBonusUntil: appState.referralBonusUntil, locale: languageManager.effectiveLocale),
                         isSet: subscriptionManager.isSubscribed
                     ) {
                         if !subscriptionManager.isSubscribed { store.presentPremiumPaywall() }
                     }
                     groupDivider
-                    groupRow(title: "Referral code") { store.showReferralCodeSheet = true }
+                    groupRow(title: LocalizedStringKey(String(localized: "profile.referralCode.rowTitle", defaultValue: "Referral code", comment: "Row title opening the referral-code sheet"))) { store.showReferralCodeSheet = true }
                     groupDivider
-                    groupRow(title: "Feedback") { FeedbackPresenter.present() }
+                    groupRow(title: LocalizedStringKey(String(localized: "profile.feedback.rowTitle", defaultValue: "Feedback", comment: "Row title opening the feedback presenter"))) { FeedbackPresenter.present() }
                     groupDivider
                     groupRow(title: LocalizedStringKey(String(localized: "profile.howSomaWorks.title", defaultValue: "How Soma works", comment: "Row title opening the How Soma Works tour refresher"))) {
                         store.showHowSomaWorks = true
@@ -1522,9 +1526,45 @@ private struct AccountSettingsView: View {
                 }
 
                 groupCard(
-                    eyebrow: "NOTIFICATIONS",
+                    eyebrow: LocalizedStringKey(String(localized: "profile.notifications.eyebrow", defaultValue: "NOTIFICATIONS", comment: "All-caps section eyebrow label on the Notifications settings group")),
                     footnote: String(localized: "profile.notifications.groupFootnote", defaultValue: "Quiet hours delay any notification that would otherwise land inside the window -- nothing is lost, just pushed to when it ends.", comment: "Footnote under the Notifications settings group")
                 ) {
+                    // Same permission, same call as the onboarding "Enable
+                    // notifications" screen and the daily checklist's
+                    // .enableNotifications deep link (HomeView.handleChecklistDeepLink)
+                    // -- linked to that one existing mechanism rather than a
+                    // new one, so Settings has somewhere to see/act on it too.
+                    groupRow(
+                        title: LocalizedStringKey(String(localized: "profile.notifications.title", defaultValue: "Push notifications", comment: "Row title opening the system notification permission from Account settings")),
+                        value: store.notificationsAuthorized
+                            ? String(localized: "profile.notifications.onValue", defaultValue: "On", comment: "Push notifications row value when enabled")
+                            : String(localized: "profile.notifications.offValue", defaultValue: "Off", comment: "Push notifications row value when disabled"),
+                        isSet: store.notificationsAuthorized
+                    ) {
+                        Task {
+                            // iOS never re-shows the system prompt after a
+                            // first denial, so a prior "Don't Allow" routes
+                            // to Settings instead of silently no-opping.
+                            if await NotificationManager.shared.isDenied() {
+                                SystemSettings.open()
+                                return
+                            }
+                            do {
+                                try await NotificationManager.shared.requestAuthorization()
+                                store.notificationsAuthorized = await NotificationManager.shared.isAuthorized()
+                                if store.notificationsAuthorized {
+                                    AnalyticsManager.shared.notificationsEnabled()
+                                    // Same-day coverage, matching NotificationEnablementView's
+                                    // grant path -- BackgroundTaskManager's daily refresh won't
+                                    // run again until tomorrow.
+                                    Task { await NotificationManager.shared.scheduleTodaysEngagementNotifications() }
+                                }
+                            } catch {
+                                store.errorMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                    groupDivider
                     groupRow(
                         title: LocalizedStringKey(String(localized: "profile.quietHours.title", defaultValue: "Quiet hours", comment: "Settings row/sheet title for the notification quiet-hours editor")),
                         value: store.quietHoursEnabled
@@ -1538,13 +1578,13 @@ private struct AccountSettingsView: View {
                     Text(errorMessage).font(.caption).foregroundStyle(SomaTokens.danger)
                 }
                 if store.savedConfirmation {
-                    Text("Saved.").font(.caption).foregroundStyle(SomaTokens.success)
+                    Text(String(localized: "profile.save.confirmation", defaultValue: "Saved.", comment: "Confirmation text shown briefly after a successful profile save")).font(.caption).foregroundStyle(SomaTokens.success)
                 }
             }
             .padding(20)
         }
         .somaBackground()
-        .navigationTitle("Account")
+        .navigationTitle(String(localized: "profile.hub.account.title", defaultValue: "Account", comment: "Hub card title and settings page navigation title for Account"))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $store.activeSheet) { sheet in
             DetailSheetContent(sheet: sheet, store: store)
@@ -1672,11 +1712,13 @@ private func deviceRow(_ provider: Provider, appState: AppState, store: ProfileS
             if store.connecting.contains(provider) {
                 ProgressView()
             } else if needsReconnect {
-                Text("Reconnect")
+                Text(String(localized: "profile.device.reconnect", defaultValue: "Reconnect", comment: "Device row value shown when a connected provider needs re-authorization"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(SomaTokens.warn)
             } else {
-                Text(isConnected ? "Connected" : "Connect")
+                Text(isConnected
+                    ? String(localized: "profile.device.connectedStatus", defaultValue: "Connected", comment: "Device row value shown when a provider is connected")
+                    : String(localized: "profile.device.connectAction", defaultValue: "Connect", comment: "Device row value shown when a provider is not yet connected"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(isConnected ? SomaTokens.success : SomaTokens.accent)
             }
@@ -1707,20 +1749,20 @@ private enum ProfileSheet: String, Identifiable {
     /// reliably override `Bundle.main`'s resolved language in testing.
     func title(locale: Locale) -> String {
         switch self {
-        case .experience: localizedString("Experience", locale: locale)
-        case .goals: localizedString("Goals", locale: locale)
-        case .equipment: localizedString("Equipment & access", locale: locale)
+        case .experience: localizedString("profile.experience.title", locale: locale)
+        case .goals: localizedString("profile.goals.title", locale: locale)
+        case .equipment: localizedString("profile.equipmentAccess.sheetTitle", locale: locale)
         case .kitchenEquipment: localizedString("profile.kitchenEquipment.title", locale: locale)
-        case .weeklyTarget: localizedString("Weekly target", locale: locale)
-        case .injuries: localizedString("Injuries", locale: locale)
-        case .pregnancy: localizedString("Pregnancy", locale: locale)
-        case .contactEmail: localizedString("Contact email", locale: locale)
-        case .region: localizedString("Region", locale: locale)
+        case .weeklyTarget: localizedString("profile.weeklyTarget.title", locale: locale)
+        case .injuries: localizedString("profile.injuries.title", locale: locale)
+        case .pregnancy: localizedString("profile.pregnancy.title", locale: locale)
+        case .contactEmail: localizedString("profile.contactEmail.title", locale: locale)
+        case .region: localizedString("profile.region.title", locale: locale)
         case .knownLifts: localizedString("profile.knownLifts.title", locale: locale)
-        case .dateOfBirth: localizedString("Date of birth", locale: locale)
+        case .dateOfBirth: localizedString("profile.dateOfBirth.title", locale: locale)
         case .anchorSession: localizedString("profile.anchorSession.title", locale: locale)
         case .cycleTracking: localizedString("profile.cycleTracking.title", locale: locale)
-        case .language: localizedString("Language", locale: locale)
+        case .language: localizedString("profile.language.title", locale: locale)
         case .quietHours: localizedString("profile.quietHours.title", locale: locale)
         }
     }
@@ -1762,7 +1804,7 @@ private struct DetailSheetContent: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
+                    Button(String(localized: "profile.doneButton", defaultValue: "Done", comment: "Toolbar button dismissing a settings screen or sheet")) {
                         // Language and quiet hours are local device
                         // preferences applied immediately by their own
                         // editors, not synced profile fields -- skip the
@@ -1778,7 +1820,7 @@ private struct DetailSheetContent: View {
 
     private var experienceEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Adjusts the AI workout plan's structure -- how many blocks, whether it uses supersets, and rest periods.")
+            Text(String(localized: "profile.experience.explainer", defaultValue: "Adjusts the AI workout plan's structure -- how many blocks, whether it uses supersets, and rest periods.", comment: "Explainer text at top of the experience-level editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             FlowLayout {
@@ -1801,7 +1843,7 @@ private struct DetailSheetContent: View {
                 }
             }
             if store.goals.contains(.other) {
-                TextField("What's your goal?", text: $store.otherGoalText)
+                TextField(String(localized: "profile.goals.otherPlaceholder", defaultValue: "What's your goal?", comment: "Placeholder for the free-text 'other goal' field"), text: $store.otherGoalText)
                     .textFieldStyle(.roundedBorder)
             }
         }
@@ -1817,7 +1859,7 @@ private struct DetailSheetContent: View {
                 }
             }
             if store.equipment.contains(.other) {
-                TextField("What else do you have access to?", text: $store.otherEquipmentText)
+                TextField(String(localized: "profile.equipment.otherPlaceholder", defaultValue: "What else do you have access to?", comment: "Placeholder for the free-text 'other equipment' field"), text: $store.otherEquipmentText)
                     .textFieldStyle(.roundedBorder)
             }
         }
@@ -1844,17 +1886,17 @@ private struct DetailSheetContent: View {
 
     private var weeklyTargetEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("A personal tracking goal -- doesn't change what Soma recommends, just what it shows you here.")
+            Text(String(localized: "profile.weeklyTarget.explainer", defaultValue: "A personal tracking goal -- doesn't change what Soma recommends, just what it shows you here.", comment: "Explainer text at top of the weekly-target editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Stepper(
-                "Target: \(store.weeklySessionTarget.map(String.init) ?? store.notSetLowerLabel) sessions/week",
+                String(localized: "profile.weeklyTarget.stepperTitle", defaultValue: "Target: \(store.weeklySessionTarget.map(String.init) ?? store.notSetLowerLabel) sessions/week", comment: "Stepper title for the weekly session target, e.g. 'Target: 4 sessions/week'"),
                 value: Binding(get: { store.weeklySessionTarget ?? 3 }, set: { store.weeklySessionTarget = $0 }),
                 in: 1...14
             )
             .font(.caption)
             if store.weeklySessionTarget != nil {
-                Text("\(store.sessionsDoneThisWeek) done this week so far.")
+                Text(String(localized: "profile.weeklyTarget.doneThisWeek", defaultValue: "\(store.sessionsDoneThisWeek) done this week so far.", comment: "Text showing sessions completed so far this week"))
                     .font(.caption.bold())
                     .foregroundStyle(SomaTokens.accent)
             }
@@ -1882,7 +1924,7 @@ private struct DetailSheetContent: View {
                             set: { store.knownLiftsText[pattern] = $0 }
                         ))
                         .keyboardType(.numberPad)
-                        Text("kg")
+                        Text(String(localized: "profile.knownLifts.unitKg", defaultValue: "kg", comment: "Unit label shown next to each known-lift weight entry field"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1895,7 +1937,7 @@ private struct DetailSheetContent: View {
 
     private var injuriesEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Any active injury caps today's intensity at Moderate and hides high-impact workouts.")
+            Text(String(localized: "profile.injuries.explainer", defaultValue: "Any active injury caps today's intensity at Moderate and hides high-impact workouts.", comment: "Explainer text at top of the injuries editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             FlowLayout {
@@ -1923,11 +1965,11 @@ private struct DetailSheetContent: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Picker("Type (optional)", selection: Binding(
+                    Picker(String(localized: "profile.injuries.typeLabel", defaultValue: "Type (optional)", comment: "Picker label for the optional injury type"), selection: Binding(
                         get: { store.injuryType[tag] },
                         set: { store.injuryType[tag] = $0 }
                     )) {
-                        Text("Not specified").tag(InjuryType?.none)
+                        Text(String(localized: "profile.injuries.typeNotSpecified", defaultValue: "Not specified", comment: "Picker option meaning no injury type was chosen")).tag(InjuryType?.none)
                         ForEach(InjuryType.allCases) { type in
                             Text(type.displayName).tag(InjuryType?.some(type))
                         }
@@ -1935,21 +1977,21 @@ private struct DetailSheetContent: View {
                     .font(.caption)
 
                     Stepper(
-                        "Pain level: \(store.injuryPainLevel[tag].map(String.init) ?? store.notSetLowerLabel)",
+                        String(localized: "profile.injuries.painLevelStepper", defaultValue: "Pain level: \(store.injuryPainLevel[tag].map(String.init) ?? store.notSetLowerLabel)", comment: "Stepper title for an injury's pain level, e.g. 'Pain level: 3'"),
                         value: Binding(get: { store.injuryPainLevel[tag] ?? 1 }, set: { store.injuryPainLevel[tag] = $0 }),
                         in: 1...10
                     )
                     .font(.caption)
 
                     if store.injurySeverity[tag] == .moderate || store.injurySeverity[tag] == .severe {
-                        Text("Given the severity you've selected, consider seeing a physician or physiotherapist before continuing to train this area. Soma's guidance here is informational only, not a diagnosis.")
+                        Text(String(localized: "profile.injuries.severityWarning", defaultValue: "Given the severity you've selected, consider seeing a physician or physiotherapist before continuing to train this area. Soma's guidance here is informational only, not a diagnosis.", comment: "Warning shown for moderate/severe injuries"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                 }
                 .padding(.top, 4)
             }
-            TextField("Notes (optional)", text: $store.injuryNotesText, axis: .vertical)
+            TextField(String(localized: "profile.injuries.notesPlaceholder", defaultValue: "Notes (optional)", comment: "Placeholder for the free-text injury notes field"), text: $store.injuryNotesText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(2...5)
         }
@@ -1957,7 +1999,7 @@ private struct DetailSheetContent: View {
 
     private var pregnancyEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Optional, and never assumed -- only set if you tell us. Soma will adjust your workouts to your pregnancy stage rather than withhold them. This is general guidance only -- please follow your doctor's or midwife's advice, especially if you have any pregnancy complications.")
+            Text(String(localized: "profile.pregnancy.explainer", defaultValue: "Optional, and never assumed -- only set if you tell us. Soma will adjust your workouts to your pregnancy stage rather than withhold them. This is general guidance only -- please follow your doctor's or midwife's advice, especially if you have any pregnancy complications.", comment: "Explainer text at top of the pregnancy editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             FlowLayout {
@@ -1968,7 +2010,7 @@ private struct DetailSheetContent: View {
             }
             if store.pregnancy == true {
                 Stepper(
-                    "Week: \(store.pregnancyWeek.map(String.init) ?? store.notSetLowerLabel)",
+                    String(localized: "profile.pregnancy.weekStepper", defaultValue: "Week: \(store.pregnancyWeek.map(String.init) ?? store.notSetLowerLabel)", comment: "Stepper title for the current pregnancy week, e.g. 'Week: 12'"),
                     value: Binding(get: { store.pregnancyWeek ?? 1 }, set: { store.pregnancyWeek = $0 }),
                     in: 1...42
                 )
@@ -2016,7 +2058,7 @@ private struct DetailSheetContent: View {
     }
 
     private var contactEmailEditor: some View {
-        TextField("you@example.com", text: $store.contactEmailText)
+        TextField(String(localized: "profile.contactEmail.placeholder", defaultValue: "you@example.com", comment: "Placeholder example text in the contact-email field"), text: $store.contactEmailText)
             .textInputAutocapitalization(.never)
             .keyboardType(.emailAddress)
             .autocorrectionDisabled()
@@ -2025,17 +2067,17 @@ private struct DetailSheetContent: View {
 
     private var regionEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Used for future nearby gym and coach partner suggestions.")
+            Text(String(localized: "profile.region.explainer", defaultValue: "Used for future nearby gym and coach partner suggestions.", comment: "Explainer text at top of the region editor sheet"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Picker("Country", selection: $store.countryCode) {
-                Text("Not set").tag(String?.none)
+            Picker(String(localized: "profile.region.countryPickerLabel", defaultValue: "Country", comment: "Label for the country picker in the region editor"), selection: $store.countryCode) {
+                Text(store.notSetLabel).tag(String?.none)
                 ForEach(ProfileStore.countryOptions, id: \.code) { option in
                     Text(option.name).tag(String?.some(option.code))
                 }
             }
             .pickerStyle(.menu)
-            TextField("City", text: $store.cityText)
+            TextField(String(localized: "profile.region.cityPlaceholder", defaultValue: "City", comment: "Placeholder for the free-text city field in the region editor"), text: $store.cityText)
                 .textFieldStyle(.roundedBorder)
         }
     }
@@ -2136,7 +2178,7 @@ private struct DetailSheetContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             DatePicker(
-                "Date of birth",
+                String(localized: "profile.dateOfBirth.title", defaultValue: "Date of birth", comment: "Row title opening the date-of-birth editor; also used as this hidden DatePicker's accessibility label"),
                 selection: Binding(
                     get: { store.dateOfBirthDate ?? ProfileStore.defaultDateOfBirth },
                     set: { store.dateOfBirthDate = $0 }

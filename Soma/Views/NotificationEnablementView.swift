@@ -12,21 +12,23 @@ struct NotificationEnablementView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            Text("Never wonder what to do today.")
+            Text(String(localized: "notificationEnablement.headline", defaultValue: "Never wonder what to do today.", comment: "Notification enablement screen: headline"))
                 .font(Theme.display)
                 .multilineTextAlignment(.center)
                 .padding(.top, 56)
                 .padding(.horizontal, 24)
 
             CardView {
-                Text(notificationsEnabled ? "Notifications enabled" : "Enable notifications")
+                Text(notificationsEnabled
+                    ? String(localized: "notificationEnablement.enabledTitle", defaultValue: "Notifications enabled", comment: "Notification enablement screen: card title once notifications are enabled")
+                    : String(localized: "notificationEnablement.disabledTitle", defaultValue: "Enable notifications", comment: "Notification enablement screen: card title before notifications are enabled"))
                     .font(.body.bold())
-                Text("Soma sends your morning training recommendation, plus a few light check-ins through the day -- a movement nudge, an evening reminder if today's workout is still open, and a quick progress update.")
+                Text(String(localized: "notificationEnablement.body", defaultValue: "Soma sends your morning training recommendation, plus a few light check-ins through the day -- a movement nudge, an evening reminder if today's workout is still open, and a quick progress update.", comment: "Notification enablement screen: explanation of what notifications will be sent"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 PillButton(
-                    title: "Enable Notifications",
+                    title: LocalizedStringKey(String(localized: "notificationEnablement.cta.enable", defaultValue: "Enable Notifications", comment: "Notification enablement screen: CTA button to request notification permission")),
                     style: notificationsEnabled ? .connected : .primary
                 ) {
                     Task {
@@ -52,9 +54,9 @@ struct NotificationEnablementView: View {
             .padding(.horizontal, 20)
 
             CardView {
-                Text("What time do you usually wake up?")
+                Text(String(localized: "notificationEnablement.wakeTimeQuestion", defaultValue: "What time do you usually wake up?", comment: "Notification enablement screen: prompt above the wake-time picker"))
                     .font(.body.bold())
-                DatePicker("Wake time", selection: $wakeTime, displayedComponents: .hourAndMinute)
+                DatePicker(String(localized: "notificationEnablement.wakeTimeLabel", defaultValue: "Wake time", comment: "Notification enablement screen: accessibility label for the wake-time picker (visually hidden)"), selection: $wakeTime, displayedComponents: .hourAndMinute)
                     .datePickerStyle(.wheel)
                     .labelsHidden()
                     .frame(maxWidth: .infinity)
@@ -71,7 +73,7 @@ struct NotificationEnablementView: View {
 
             Spacer()
 
-            PillButton(title: "Finish Setup", isEnabled: !isSaving) {
+            PillButton(title: LocalizedStringKey(String(localized: "notificationEnablement.cta.finish", defaultValue: "Finish Setup", comment: "Notification enablement screen: CTA button completing onboarding setup")), isEnabled: !isSaving) {
                 finishSetup()
             }
             .padding(.horizontal, 24)

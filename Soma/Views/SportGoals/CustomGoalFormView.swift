@@ -17,6 +17,7 @@ struct CustomGoalFormView: View {
     @State private var scheduleRule: GoalScheduleRule?
     @State private var scheduleDays: Set<Int> = []
     @State private var courtDays: Set<Int> = []
+    @State private var showFrequencySheet = false
     @State private var addMetric = false
     @State private var metricName = ""
     @State private var metricUnit = ""
@@ -50,9 +51,9 @@ struct CustomGoalFormView: View {
                         .font(.system(size: 12, weight: .bold))
                         .tracking(0.8)
                         .foregroundStyle(SomaTokens.ink3)
-                    Text("Coach's task")
+                    Text(String(localized: "customGoalForm.header.title", defaultValue: "Coach's task", comment: "Screen heading for the custom goal form, where a user enters an assignment from their coach"))
                         .font(Theme.display)
-                    Text("The original stays attached — your coach sees exactly what you trained against.")
+                    Text(String(localized: "customGoalForm.header.subtitle", defaultValue: "The original stays attached — your coach sees exactly what you trained against.", comment: "Subtitle under the custom goal form heading, explaining the original assignment stays attached"))
                         .font(.system(size: 13))
                         .foregroundStyle(SomaTokens.ink2)
                 }
@@ -73,7 +74,10 @@ struct CustomGoalFormView: View {
                 }
 
                 if conflicts.isEmpty {
-                    SomaButton(title: isCreating ? "Starting…" : "Start the block", size: .lg, variant: .primary, isEnabled: canSubmit) {
+                    SomaButton(title: LocalizedStringKey(isCreating
+                        ? String(localized: "goalCreation.button.starting", defaultValue: "Starting…", comment: "Label on the primary CTA button while a goal creation request is in flight")
+                        : String(localized: "goalCreation.button.startBlock", defaultValue: "Start the block", comment: "Label on the primary CTA button that creates and starts the goal block")
+                    ), size: .lg, variant: .primary, isEnabled: canSubmit) {
                         Task { await create(acknowledged: false) }
                     }
                 }
@@ -86,7 +90,7 @@ struct CustomGoalFormView: View {
             .dismissKeyboardOnTap()
         }
         .scrollDismissesKeyboard(.interactively)
-        .navigationTitle("Your own goal")
+        .navigationTitle(String(localized: "customGoalForm.navigationTitle", defaultValue: "Your own goal", comment: "Navigation bar title for the custom goal form screen"))
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: photoItem) { _, newItem in
             Task {
@@ -94,13 +98,21 @@ struct CustomGoalFormView: View {
                 photoImage = UIImage(data: data)
             }
         }
+        // Attached here, not inside ScheduleFrequencyPicker -- kept
+        // consistent with GoalStartView's own root-level attachment (see
+        // that file's comment): a `.sheet` belongs on a stable ancestor,
+        // not a reused leaf component, regardless of whether this
+        // particular call site is itself unconditional.
+        .sheet(isPresented: $showFrequencySheet) {
+            ScheduleRulesSheet(scheduleRule: $scheduleRule, scheduleDays: $scheduleDays, courtDays: $courtDays)
+        }
     }
 
     // MARK: - Assignment
 
     private var assignmentCard: some View {
         CardView {
-            Text("The assignment")
+            Text(String(localized: "customGoalForm.assignmentCard.title", defaultValue: "The assignment", comment: "Card heading above the photo/text entry for the coach's assignment"))
                 .font(.body.bold())
 
             PhotosPicker(selection: $photoItem, matching: .images) {
@@ -111,7 +123,7 @@ struct CustomGoalFormView: View {
                             .scaledToFill()
                             .frame(width: 44, height: 44)
                             .clipShape(RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous))
-                        Text("Photo attached — tap to replace")
+                        Text(String(localized: "customGoalForm.photo.attachedLabel", defaultValue: "Photo attached — tap to replace", comment: "Label next to the thumbnail once a photo of the assignment has been attached"))
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(SomaTokens.ink2)
                     } else {
@@ -120,7 +132,7 @@ struct CustomGoalFormView: View {
                             .foregroundStyle(SomaTokens.accent)
                             .frame(width: 36, height: 36)
                             .background(RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous).fill(SomaTokens.accentSoft))
-                        Text("Attach a photo of the assignment (optional)")
+                        Text(String(localized: "customGoalForm.photo.attachLabel", defaultValue: "Attach a photo of the assignment (optional)", comment: "Label prompting the user to attach an optional photo of the coach's assignment"))
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(SomaTokens.ink2)
                     }
@@ -128,42 +140,42 @@ struct CustomGoalFormView: View {
                 }
             }
             if photoImage != nil, !isParsingAssignment {
-                assistButton(title: "Read photo with AI") { Task { await autoFillFromPhoto() } }
+                assistButton(title: LocalizedStringKey(String(localized: "customGoalForm.assist.readPhoto", defaultValue: "Read photo with AI", comment: "Button that runs AI parsing on the attached assignment photo to auto-fill the form"))) { Task { await autoFillFromPhoto() } }
             }
 
-            TextField("What did your coach set as the goal? (optional)", text: $givenText, axis: .vertical)
+            TextField(String(localized: "customGoalForm.givenText.placeholder", defaultValue: "What did your coach set as the goal? (optional)", comment: "Placeholder text in the multi-line field where the user optionally types what their coach set as the goal"), text: $givenText, axis: .vertical)
                 .lineLimit(2...4)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .glassCardFlat(cornerRadius: SomaTokens.rXL)
-            TextField("The workout, in your coach's words", text: $workoutText, axis: .vertical)
+            TextField(String(localized: "customGoalForm.workoutText.placeholder", defaultValue: "The workout, in your coach's words", comment: "Placeholder text in the multi-line field where the user types the workout as their coach described it"), text: $workoutText, axis: .vertical)
                 .lineLimit(3...6)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .glassCardFlat(cornerRadius: SomaTokens.rXL)
                 .accessibilityIdentifier("workoutTextField")
             if !workoutText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isParsingAssignment {
-                assistButton(title: "Auto-fill with AI") { Task { await autoFillFromText() } }
+                assistButton(title: LocalizedStringKey(String(localized: "customGoalForm.assist.autoFillText", defaultValue: "Auto-fill with AI", comment: "Button that runs AI parsing on the typed workout text to auto-fill the form"))) { Task { await autoFillFromText() } }
             }
             if isParsingAssignment {
                 HStack(spacing: 8) {
                     ProgressView()
-                    Text("Reading the assignment…")
+                    Text(String(localized: "customGoalForm.assist.readingProgress", defaultValue: "Reading the assignment…", comment: "Progress label shown while AI is parsing the coach's assignment"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             if assistLowConfidence {
-                Text("Couldn't confidently read an assignment there — check the fields below, or try again.")
+                Text(String(localized: "customGoalForm.assist.lowConfidence", defaultValue: "Couldn't confidently read an assignment there — check the fields below, or try again.", comment: "Warning shown when AI parsing of the assignment returned low-confidence results"))
                     .font(.caption)
                     .foregroundStyle(SomaTokens.warn)
             }
-            TextField("Coach's name (optional)", text: $coachName)
+            TextField(String(localized: "customGoalForm.coachName.placeholder", defaultValue: "Coach's name (optional)", comment: "Placeholder text in the field for the coach's name"), text: $coachName)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .glassCardFlat(cornerRadius: SomaTokens.rXL)
                 .accessibilityIdentifier("coachNameField")
-            Text("The name goes on your workouts and the progress card you can send back.")
+            Text(String(localized: "customGoalForm.coachName.caption", defaultValue: "The name goes on your workouts and the progress card you can send back.", comment: "Caption under the coach's name field explaining where the name is used"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -180,16 +192,17 @@ struct CustomGoalFormView: View {
 
     private var scheduleCard: some View {
         CardView {
-            Text("Schedule")
+            Text(String(localized: "goalCreation.schedule.title", defaultValue: "Schedule", comment: "Card heading above the frequency/schedule picker for a goal block"))
                 .font(.body.bold())
-            Stepper("How many weeks did your coach set? \(durationWeeks)", value: $durationWeeks, in: 1...26)
+            Stepper(String(localized: "customGoalForm.schedule.weeksStepper", defaultValue: "How many weeks did your coach set? \(durationWeeks)", comment: "Stepper label showing the current number of weeks the coach set for this assignment; durationWeeks is an integer"), value: $durationWeeks, in: 1...26)
                 .font(.system(size: 13.5))
 
             ScheduleFrequencyPicker(
                 frequencyPerWeek: $frequencyPerWeek,
                 scheduleRule: $scheduleRule,
                 scheduleDays: $scheduleDays,
-                courtDays: $courtDays
+                courtDays: $courtDays,
+                showFrequencySheet: $showFrequencySheet
             )
         }
     }
@@ -200,9 +213,9 @@ struct CustomGoalFormView: View {
         CardView {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Track a measurable (optional)")
+                    Text(String(localized: "customGoalForm.metric.title", defaultValue: "Track a measurable (optional)", comment: "Card heading for the optional toggle to track a numeric measurable alongside the custom goal"))
                         .font(.body.bold())
-                    Text("Adds re-tests, the chart, and the progress card.")
+                    Text(String(localized: "customGoalForm.metric.subtitle", defaultValue: "Adds re-tests, the chart, and the progress card.", comment: "Caption explaining what tracking a measurable adds to the goal"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -212,11 +225,11 @@ struct CustomGoalFormView: View {
                     .tint(SomaTokens.accent)
             }
             if addMetric {
-                TextField("What are you measuring? e.g. Approach jump", text: $metricName)
+                TextField(String(localized: "customGoalForm.metric.namePlaceholder", defaultValue: "What are you measuring? e.g. Approach jump", comment: "Placeholder text in the field for naming the custom measurable, with an example"), text: $metricName)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                     .glassCardFlat(cornerRadius: SomaTokens.rXL)
-                TextField("Unit, e.g. cm", text: $metricUnit)
+                TextField(String(localized: "customGoalForm.metric.unitPlaceholder", defaultValue: "Unit, e.g. cm", comment: "Placeholder text in the field for the measurable's unit, with an example"), text: $metricUnit)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                     .glassCardFlat(cornerRadius: SomaTokens.rXL)

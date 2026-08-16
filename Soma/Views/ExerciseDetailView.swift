@@ -45,7 +45,7 @@ struct ExerciseDetailView: View {
                         // seen the plan list's own footnote) shouldn't be
                         // left guessing what "RPE 7/10" means.
                         if exercise.intensity.localizedCaseInsensitiveContains("rpe") {
-                            Text("RPE = Rate of Perceived Exertion, how hard a set feels (1 = very easy, 10 = maximum effort).")
+                            Text(String(localized: "exerciseDetail.rpeExplainer", defaultValue: "RPE = Rate of Perceived Exertion, how hard a set feels (1 = very easy, 10 = maximum effort).", comment: "Explainer for RPE shown when an exercise's intensity mentions RPE"))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -53,7 +53,7 @@ struct ExerciseDetailView: View {
 
                     if !exercise.instructions.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Coaching cue")
+                            Text(String(localized: "exerciseDetail.coachingCue", defaultValue: "Coaching cue", comment: "Header above the AI's own coaching cue text for this exercise"))
                                 .font(.caption.bold())
                                 .foregroundStyle(.secondary)
                             Text(exercise.instructions)
@@ -70,11 +70,11 @@ struct ExerciseDetailView: View {
                 }
                 .padding(20)
             }
-            .navigationTitle("Exercise")
+            .navigationTitle(String(localized: "exerciseDetail.navigationTitle", defaultValue: "Exercise", comment: "Navigation title for the exercise detail sheet"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button(String(localized: "exerciseDetail.done", defaultValue: "Done", comment: "Button closing the exercise detail sheet")) { dismiss() }
                 }
             }
         }
@@ -115,7 +115,7 @@ struct ExerciseDetailView: View {
             Image(systemName: "figure.strengthtraining.traditional")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            Text("No reference photo for this exercise")
+            Text(String(localized: "exerciseDetail.noMedia", defaultValue: "No reference photo for this exercise", comment: "Shown when an exercise has no reference photo/media"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -141,7 +141,7 @@ struct ExerciseDetailView: View {
 
     private func instructionsSection(_ entry: ExerciseLibraryEntry) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("How to perform it")
+            Text(String(localized: "exerciseDetail.howToPerform", defaultValue: "How to perform it", comment: "Header above the numbered exercise-library instructions"))
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
             ForEach(Array(entry.instructions.enumerated()), id: \.offset) { index, step in

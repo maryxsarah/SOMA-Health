@@ -87,12 +87,12 @@ struct GymPhotoWorkoutView: View {
                     .somaSheetBackground()
                 }
             }
-            .navigationTitle(step == .result ? "" : "Scan your gym")
+            .navigationTitle(step == .result ? "" : String(localized: "gymPhoto.navigationTitle", defaultValue: "Scan your gym", comment: "Navigation title for the gym-photo scan flow"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(step == .result ? .hidden : .visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button(String(localized: "gymPhoto.close", defaultValue: "Close", comment: "Button closing the gym-photo scan flow")) { dismiss() }
                 }
             }
         }
@@ -125,7 +125,7 @@ struct GymPhotoWorkoutView: View {
 
     private var pickPhotoContent: some View {
         VStack(spacing: 16) {
-            Text("Take or choose a photo of your gym or workout space, and Soma will build a workout around the equipment it sees.")
+            Text(String(localized: "gymPhoto.pickPhoto.explainer", defaultValue: "Take or choose a photo of your gym or workout space, and Soma will build a workout around the equipment it sees.", comment: "Gym-photo scan: explainer shown before picking a photo"))
                 .font(.body)
                 .foregroundStyle(.secondary)
 
@@ -154,7 +154,7 @@ struct GymPhotoWorkoutView: View {
                 .frame(width: 56, height: 56)
                 .glassLens(cornerRadius: 28)
 
-            Text("Take or choose a photo")
+            Text(String(localized: "gymPhoto.dropZone.title", defaultValue: "Take or choose a photo", comment: "Gym-photo scan: decorative drop-zone label"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SomaTokens.ink2)
         }
@@ -175,14 +175,14 @@ struct GymPhotoWorkoutView: View {
     /// "this is coming up next", not as live progress.
     private var analysisPreview: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("THEN, WHILE SOMA LOOKS")
+            Text(String(localized: "gymPhoto.analysisPreview.header", defaultValue: "THEN, WHILE SOMA LOOKS", comment: "Gym-photo scan: uppercase header previewing the analysis stage copy"))
                 .font(.system(size: 11, weight: .bold))
                 .tracking(0.6)
                 .foregroundStyle(SomaTokens.inkPlaceholder)
 
-            analysisPreviewLine("Looking at your photo…", opacity: 0.5)
-            analysisPreviewLine("Identifying equipment…", opacity: 0.75)
-            analysisPreviewLine("Checking what's usable…", opacity: 1)
+            analysisPreviewLine(String(localized: "gymPhoto.analysisPreview.step1", defaultValue: "Looking at your photo…", comment: "Gym-photo scan: analysis preview step 1"), opacity: 0.5)
+            analysisPreviewLine(String(localized: "gymPhoto.analysisPreview.step2", defaultValue: "Identifying equipment…", comment: "Gym-photo scan: analysis preview step 2"), opacity: 0.75)
+            analysisPreviewLine(String(localized: "gymPhoto.analysisPreview.step3", defaultValue: "Checking what's usable…", comment: "Gym-photo scan: analysis preview step 3"), opacity: 1)
         }
         .padding(.top, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,19 +231,23 @@ struct GymPhotoWorkoutView: View {
                     .font(.largeTitle)
                     .foregroundStyle(Theme.pillFill)
 
-                Text(cameraRestricted ? "Camera is restricted" : "Camera access is off")
+                Text(cameraRestricted
+                    ? String(localized: "gymPhoto.cameraBlocked.restrictedTitle", defaultValue: "Camera is restricted", comment: "Title shown when camera access is blocked by a device restriction")
+                    : String(localized: "gymPhoto.cameraBlocked.offTitle", defaultValue: "Camera access is off", comment: "Title shown when camera access is simply denied"))
                     .font(.title3.bold())
 
                 Text(cameraRestricted
-                    ? "Something on this device is blocking the camera — usually Screen Time or a work/school profile. You can still scan your gym from a photo you already have."
-                    : "Soma needs camera access to see your gym equipment. You can turn it back on in Settings.")
+                    ? String(localized: "gymPhoto.cameraBlocked.restrictedBody", defaultValue: "Something on this device is blocking the camera — usually Screen Time or a work/school profile. You can still scan your gym from a photo you already have.", comment: "Explainer shown when camera access is blocked by a device restriction")
+                    : String(localized: "gymPhoto.cameraBlocked.offBody", defaultValue: "Soma needs camera access to see your gym equipment. You can turn it back on in Settings.", comment: "Explainer shown when camera access is simply denied"))
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(cameraRestricted ? "How to allow it" : "How to turn it on")
+                Text(cameraRestricted
+                    ? String(localized: "gymPhoto.cameraBlocked.restrictedHeading", defaultValue: "How to allow it", comment: "Heading above the numbered steps to allow camera access on a restricted device")
+                    : String(localized: "gymPhoto.cameraBlocked.offHeading", defaultValue: "How to turn it on", comment: "Heading above the numbered steps to turn camera access back on"))
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
 
@@ -274,7 +278,7 @@ struct GymPhotoWorkoutView: View {
 
                 libraryPicker(fullWidth: true)
 
-                Button("Back") { step = .pickPhoto }
+                Button(String(localized: "gymPhoto.back", defaultValue: "Back", comment: "Button returning from the camera-blocked explainer to photo picking")) { step = .pickPhoto }
                     .font(.subheadline)
             }
         }
@@ -311,7 +315,9 @@ struct GymPhotoWorkoutView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
 
-            Text(lowConfidenceNotice ? "Soma wasn't sure what it saw -- add the equipment you have available." : "Here's what Soma detected. Add or remove anything before continuing.")
+            Text(lowConfidenceNotice
+                ? String(localized: "gymPhoto.confirmEquipment.lowConfidence", defaultValue: "Soma wasn't sure what it saw -- add the equipment you have available.", comment: "Shown when gym-photo analysis had low confidence in what it detected")
+                : String(localized: "gymPhoto.confirmEquipment.detected", defaultValue: "Here's what Soma detected. Add or remove anything before continuing.", comment: "Shown when gym-photo analysis detected equipment normally"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -322,9 +328,9 @@ struct GymPhotoWorkoutView: View {
             }
 
             HStack(spacing: 8) {
-                TextField("Add equipment", text: $newEquipmentText)
+                TextField(String(localized: "gymPhoto.addEquipment.placeholder", defaultValue: "Add equipment", comment: "Placeholder for the free-text add-equipment field"), text: $newEquipmentText)
                     .textFieldStyle(.roundedBorder)
-                Button("Add") {
+                Button(String(localized: "gymPhoto.addEquipment.button", defaultValue: "Add", comment: "Button adding the typed equipment item")) {
                     addEquipment()
                 }
                 .disabled(newEquipmentText.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -393,15 +399,15 @@ struct GymPhotoWorkoutView: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 6) {
                     Image(systemName: "sparkles")
-                    Text("SOMA AI ANALYSIS")
+                    Text(String(localized: "gymPhoto.result.header", defaultValue: "SOMA AI ANALYSIS", comment: "Gym-photo scan result: uppercase header above the generated plan"))
                         .font(.caption.bold())
                         .tracking(1)
                 }
                 .foregroundStyle(SomaTokens.accent)
 
                 Text(resultPlan != nil
-                    ? "Based on your setup and health, here's today's workout to reach your goal:"
-                    : "Let's check in first")
+                    ? String(localized: "gymPhoto.result.withPlan", defaultValue: "Based on your setup and health, here's today's workout to reach your goal:", comment: "Gym-photo scan result: intro line when a workout plan was generated")
+                    : String(localized: "gymPhoto.result.noPlan", defaultValue: "Let's check in first", comment: "Gym-photo scan result: intro line when no plan was generated yet (safety check-in needed)"))
                     .font(.body.bold())
 
                 if let resultPlan {
@@ -426,7 +432,7 @@ struct GymPhotoWorkoutView: View {
 
                 if resultPlan != nil {
                     if addedToPlan {
-                        Label("Added to today's plan", systemImage: "checkmark.circle.fill")
+                        Label(String(localized: "gymPhoto.result.addedToPlan", defaultValue: "Added to today's plan", comment: "Confirmation shown after the generated workout is added to today's plan"), systemImage: "checkmark.circle.fill")
                             .font(.subheadline.bold())
                             .foregroundStyle(.green)
                             .frame(maxWidth: .infinity)
@@ -440,7 +446,7 @@ struct GymPhotoWorkoutView: View {
                                     ProgressView()
                                         .tint(.white)
                                 } else {
-                                    Text("Add to today's plan")
+                                    Text(String(localized: "gymPhoto.result.addToPlanButton", defaultValue: "Add to today's plan", comment: "Button adding the generated gym-photo workout to today's plan"))
                                 }
                             }
                             .font(.system(size: 16.5, weight: .semibold))

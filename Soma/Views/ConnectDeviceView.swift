@@ -10,9 +10,9 @@ struct ConnectDeviceView: View {
     var body: some View {
         VStack(spacing: 24) {
             VStack(spacing: 8) {
-                Text("Connect your devices.")
+                Text(String(localized: "connectDevice.headline", defaultValue: "Connect your devices.", comment: "Connect device screen: headline"))
                     .font(Theme.display)
-                Text("Soma plans each day from your body's signals — sleep, HRV and workouts. Connect at least one source to get a tailored plan.")
+                Text(String(localized: "connectDevice.body", defaultValue: "Soma plans each day from your body's signals — sleep, HRV and workouts. Connect at least one source to get a tailored plan.", comment: "Connect device screen: explanation of why a device connection is needed"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -32,7 +32,7 @@ struct ConnectDeviceView: View {
             }
             .padding(.horizontal, 20)
 
-            Text("Add or remove sources anytime in Settings → Health.")
+            Text(String(localized: "connectDevice.footer", defaultValue: "Add or remove sources anytime in Settings → Health.", comment: "Connect device screen: footer note about changing sources later"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -49,7 +49,7 @@ struct ConnectDeviceView: View {
             Spacer()
 
             PillButton(
-                title: "Continue",
+                title: LocalizedStringKey(String(localized: "connectDevice.cta.continue", defaultValue: "Continue", comment: "Connect device screen: CTA button to proceed to the next onboarding step")),
                 isEnabled: !appState.connectedProviders.isEmpty
             ) {
                 appState.advanceToNotifications()

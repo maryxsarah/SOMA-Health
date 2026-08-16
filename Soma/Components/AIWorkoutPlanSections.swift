@@ -269,7 +269,7 @@ struct AIWorkoutPlanView: View {
                             // Only populated by the gym-photo-workout flow --
                             // nil for the normal generate-workout-plan flow.
                             if let targetArea = exercise.targetArea {
-                                Text("Targets: \(targetArea)")
+                                Text(String(localized: "aiWorkoutPlan.targetArea", defaultValue: "Targets: \(targetArea)", comment: "Gym-photo workout exercise row: which equipment/body area this exercise targets"))
                                     .font(.caption2.bold())
                                     .foregroundStyle(.secondary)
                             }

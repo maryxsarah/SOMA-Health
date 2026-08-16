@@ -48,7 +48,7 @@ struct ProviderCardView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     Button(action: action) {
-                        Text("Connect")
+                        Text(String(localized: "provider.connect", defaultValue: "Connect", comment: "Connect Device screen: CTA to connect a provider that isn't yet connected"))
                             .font(.subheadline.bold())
                             .foregroundStyle(SomaTokens.accent)
                             .padding(.horizontal, 16)

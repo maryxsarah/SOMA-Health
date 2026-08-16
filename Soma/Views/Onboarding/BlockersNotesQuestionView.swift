@@ -15,9 +15,9 @@ struct BlockersNotesQuestionView: View {
             OnboardingTopBar(progress: progress, onBack: onBack)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Anything else in your way?")
+                Text(String(localized: "onboarding.blockersNotes.title", defaultValue: "Anything else in your way?", comment: "Headline on the blockers notes question step"))
                     .font(Theme.display)
-                Text("Optional -- a sentence or two helps us understand your situation. Totally fine to skip.")
+                Text(String(localized: "onboarding.blockersNotes.subtitle", defaultValue: "Optional -- a sentence or two helps us understand your situation. Totally fine to skip.", comment: "Subtitle on the blockers notes question step"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -25,7 +25,7 @@ struct BlockersNotesQuestionView: View {
             .padding(.horizontal, 24)
             .padding(.top, 24)
 
-            TextField("e.g. \"I travel a lot for work\"", text: $notes, axis: .vertical)
+            TextField(String(localized: "onboarding.blockersNotes.placeholder", defaultValue: "e.g. \"I travel a lot for work\"", comment: "Placeholder text for the optional blockers free-text field"), text: $notes, axis: .vertical)
                 .lineLimit(4...8)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -35,7 +35,7 @@ struct BlockersNotesQuestionView: View {
 
             Spacer()
 
-            PillButton(title: "Continue", action: onContinue)
+            PillButton(title: LocalizedStringKey(String(localized: "onboarding.blockersNotes.continueButton", defaultValue: "Continue", comment: "Continue button on the blockers notes question step")), action: onContinue)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }

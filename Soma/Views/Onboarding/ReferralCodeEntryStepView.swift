@@ -16,9 +16,9 @@ struct ReferralCodeEntryStepView: View {
             Spacer()
 
             VStack(spacing: 8) {
-                Text("Enter referral code")
+                Text(String(localized: "referral_code.title", defaultValue: "Enter referral code", comment: "Headline on the referral code entry step"))
                     .font(Theme.display)
-                Text("Optional -- you can skip this step.")
+                Text(String(localized: "referral_code.subtitle", defaultValue: "Optional -- you can skip this step.", comment: "Subtitle on the referral code entry step"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -27,13 +27,13 @@ struct ReferralCodeEntryStepView: View {
 
             CardView {
                 HStack(spacing: 8) {
-                    TextField("Referral Code", text: $code)
+                    TextField(String(localized: "referral_code.placeholder", defaultValue: "Referral Code", comment: "Placeholder text for the referral code input field"), text: $code)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                         .glassCardFlat(cornerRadius: SomaTokens.rXL)
-                    Button("Submit") { redeem() }
+                    Button(String(localized: "referral_code.submit", defaultValue: "Submit", comment: "Button that submits the entered referral code")) { redeem() }
                         .font(.body.bold())
                         .disabled(isRedeeming || code.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
@@ -47,7 +47,7 @@ struct ReferralCodeEntryStepView: View {
 
             Spacer()
 
-            PillButton(title: "Skip", isEnabled: !isRedeeming, action: onSkip)
+            PillButton(title: LocalizedStringKey(String(localized: "referral_code.skip", defaultValue: "Skip", comment: "Button that skips the optional referral code step")), isEnabled: !isRedeeming, action: onSkip)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }

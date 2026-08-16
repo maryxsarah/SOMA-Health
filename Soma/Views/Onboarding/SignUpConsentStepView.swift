@@ -22,9 +22,9 @@ struct SignUpConsentStepView: View {
             Spacer()
 
             VStack(spacing: 8) {
-                Text("Save your progress")
+                Text(String(localized: "onboarding.signUpConsent.title", defaultValue: "Save your progress", comment: "Headline on the sign-up consent step"))
                     .font(Theme.display)
-                Text("Just a couple of things before we continue.")
+                Text(String(localized: "onboarding.signUpConsent.subtitle", defaultValue: "Just a couple of things before we continue.", comment: "Subtitle on the sign-up consent step"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -34,11 +34,11 @@ struct SignUpConsentStepView: View {
             VStack(alignment: .leading, spacing: 16) {
                 consentRow(
                     isOn: $acceptedTerms,
-                    text: "I agree to Soma's Terms of Service and Privacy Policy, and understand Soma's recommendations are not medical advice."
+                    text: String(localized: "onboarding.signUpConsent.termsText", defaultValue: "I agree to Soma's Terms of Service and Privacy Policy, and understand Soma's recommendations are not medical advice.", comment: "Consent checkbox label for accepting Terms of Service and Privacy Policy")
                 )
                 HStack(spacing: 16) {
-                    Button("View Privacy Policy") { showingPrivacyPolicy = true }
-                    Button("View Terms of Service") { showingTermsOfService = true }
+                    Button(String(localized: "onboarding.signUpConsent.viewPrivacyPolicy", defaultValue: "View Privacy Policy", comment: "Button that opens the Privacy Policy sheet")) { showingPrivacyPolicy = true }
+                    Button(String(localized: "onboarding.signUpConsent.viewTermsOfService", defaultValue: "View Terms of Service", comment: "Button that opens the Terms of Service sheet")) { showingTermsOfService = true }
                 }
                 .font(.caption)
                 .foregroundStyle(Theme.pillFill)
@@ -46,11 +46,11 @@ struct SignUpConsentStepView: View {
 
                 consentRow(
                     isOn: $marketingOptIn,
-                    text: "Send me tips, new features, and personalized offers from Soma Health."
+                    text: String(localized: "onboarding.signUpConsent.marketingOptInText", defaultValue: "Send me tips, new features, and personalized offers from Soma Health.", comment: "Consent checkbox label for opting into marketing communications")
                 )
 
                 if showError {
-                    Text("You must accept the Terms of Service and Privacy Policy to continue.")
+                    Text(String(localized: "onboarding.signUpConsent.errorMessage", defaultValue: "You must accept the Terms of Service and Privacy Policy to continue.", comment: "Error shown when the user tries to continue without accepting Terms/Privacy Policy"))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -61,7 +61,7 @@ struct SignUpConsentStepView: View {
 
             Spacer()
 
-            PillButton(title: "Continue") {
+            PillButton(title: LocalizedStringKey(String(localized: "onboarding.signUpConsent.continueButton", defaultValue: "Continue", comment: "Continue button on the sign-up consent step"))) {
                 if acceptedTerms {
                     onContinue(marketingOptIn)
                 } else {
@@ -80,7 +80,7 @@ struct SignUpConsentStepView: View {
         }
     }
 
-    private func consentRow(isOn: Binding<Bool>, text: LocalizedStringKey) -> some View {
+    private func consentRow(isOn: Binding<Bool>, text: String) -> some View {
         Button {
             isOn.wrappedValue.toggle()
         } label: {

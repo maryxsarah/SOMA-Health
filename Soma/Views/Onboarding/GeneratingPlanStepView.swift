@@ -34,12 +34,12 @@ struct GeneratingPlanStepView: View {
             progressRing
 
             VStack(spacing: 9) {
-                Text("Creating your plan")
+                Text(String(localized: "onboarding.generatingPlan.eyebrow", defaultValue: "Creating your plan", comment: "Small uppercase eyebrow label above the plan-generation headline"))
                     .font(.system(size: 11, weight: .bold))
                     .tracking(1)
                     .textCase(.uppercase)
                     .foregroundStyle(SomaTokens.accent)
-                Text("Setting everything up for you")
+                Text(String(localized: "onboarding.generatingPlan.headline", defaultValue: "Setting everything up for you", comment: "Headline on the plan-generation loading screen"))
                     .font(.system(size: 30, weight: .bold, design: .serif).italic())
                     .multilineTextAlignment(.center)
                 // The single status line that swaps in place -- no second,
@@ -53,7 +53,7 @@ struct GeneratingPlanStepView: View {
             .padding(.horizontal, 24)
 
             CardView {
-                Text("Daily recommendations for")
+                Text(String(localized: "onboarding.generatingPlan.dailyRecommendationsLabel", defaultValue: "Daily recommendations for", comment: "Card heading introducing the checklist of daily recommendations being generated"))
                     .font(.body.bold())
                 ForEach(Array(checklist.enumerated()), id: \.offset) { index, item in
                     let isChecked = index < checkedCount
@@ -106,7 +106,7 @@ struct GeneratingPlanStepView: View {
                 .frame(width: 86, height: 86)
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut, value: percent)
-            Text("\(percent)%")
+            Text(String(localized: "onboarding.generatingPlan.percentLabel", defaultValue: "\(percent)%", comment: "Percent-complete label shown inside the plan-generation progress ring"))
                 .font(.system(size: 27, weight: .bold, design: .serif).italic())
                 .foregroundStyle(SomaTokens.ink)
                 .contentTransition(.numericText())

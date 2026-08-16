@@ -24,13 +24,13 @@ struct EditWidgetsSheet: View {
 
     private var rows: [Row] {
         [
-            Row(id: "water", systemImage: "drop.fill", title: "Water tracker", subtitle: "Goal 8 glasses · tap to change", binding: $waterEnabled),
-            Row(id: "sleep", systemImage: "moon.fill", title: "Sleep summary", subtitle: "Last night, on home", binding: $sleepEnabled),
-            Row(id: "streak", systemImage: "flame.fill", title: "Workout streak", subtitle: "Consecutive days trained", binding: $streakEnabled),
-            Row(id: "tasks", systemImage: "checklist", title: "Daily tasks", subtitle: "Checklist with today's to-dos", binding: $dailyTasksEnabled),
-            Row(id: "mood", systemImage: "face.smiling", title: "Mood check-in", subtitle: "How you're feeling today", binding: $moodEnabled),
-            Row(id: "goal", systemImage: "target", title: "Sport goal", subtitle: "Your active goal's progress", binding: $sportGoalEnabled),
-            Row(id: "photos", systemImage: "photo.on.rectangle.angled", title: "Photo progress", subtitle: "Goal photo comparison", binding: $photoProgressEnabled)
+            Row(id: "water", systemImage: "drop.fill", title: LocalizedStringKey(String(localized: "editWidgets.row.water.title", defaultValue: "Water tracker", comment: "Edit widgets sheet: title for the water tracker widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.water.subtitle", defaultValue: "Goal 8 glasses · tap to change", comment: "Edit widgets sheet: subtitle for the water tracker widget row")), binding: $waterEnabled),
+            Row(id: "sleep", systemImage: "moon.fill", title: LocalizedStringKey(String(localized: "editWidgets.row.sleep.title", defaultValue: "Sleep summary", comment: "Edit widgets sheet: title for the sleep summary widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.sleep.subtitle", defaultValue: "Last night, on home", comment: "Edit widgets sheet: subtitle for the sleep summary widget row")), binding: $sleepEnabled),
+            Row(id: "streak", systemImage: "flame.fill", title: LocalizedStringKey(String(localized: "editWidgets.row.streak.title", defaultValue: "Workout streak", comment: "Edit widgets sheet: title for the workout streak widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.streak.subtitle", defaultValue: "Consecutive days trained", comment: "Edit widgets sheet: subtitle for the workout streak widget row")), binding: $streakEnabled),
+            Row(id: "tasks", systemImage: "checklist", title: LocalizedStringKey(String(localized: "editWidgets.row.tasks.title", defaultValue: "Daily tasks", comment: "Edit widgets sheet: title for the daily tasks widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.tasks.subtitle", defaultValue: "Checklist with today's to-dos", comment: "Edit widgets sheet: subtitle for the daily tasks widget row")), binding: $dailyTasksEnabled),
+            Row(id: "mood", systemImage: "face.smiling", title: LocalizedStringKey(String(localized: "editWidgets.row.mood.title", defaultValue: "Mood check-in", comment: "Edit widgets sheet: title for the mood check-in widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.mood.subtitle", defaultValue: "How you're feeling today", comment: "Edit widgets sheet: subtitle for the mood check-in widget row")), binding: $moodEnabled),
+            Row(id: "goal", systemImage: "target", title: LocalizedStringKey(String(localized: "editWidgets.row.goal.title", defaultValue: "Sport goal", comment: "Edit widgets sheet: title for the sport goal widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.goal.subtitle", defaultValue: "Your active goal's progress", comment: "Edit widgets sheet: subtitle for the sport goal widget row")), binding: $sportGoalEnabled),
+            Row(id: "photos", systemImage: "photo.on.rectangle.angled", title: LocalizedStringKey(String(localized: "editWidgets.row.photos.title", defaultValue: "Photo progress", comment: "Edit widgets sheet: title for the photo progress widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.photos.subtitle", defaultValue: "Goal photo comparison", comment: "Edit widgets sheet: subtitle for the photo progress widget row")), binding: $photoProgressEnabled)
         ]
     }
 
@@ -38,7 +38,7 @@ struct EditWidgetsSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Toggle what shows on home. Log workout is always there.")
+                    Text(String(localized: "editWidgets.intro", defaultValue: "Toggle what shows on home. Log workout is always there.", comment: "Edit widgets sheet: intro copy above the list of toggleable widgets"))
                         .font(.system(size: 12.5))
                         .foregroundStyle(SomaTokens.ink3)
 
@@ -70,7 +70,7 @@ struct EditWidgetsSheet: View {
                         }
                     }
 
-                    Text("Changes apply instantly.")
+                    Text(String(localized: "editWidgets.footer", defaultValue: "Changes apply instantly.", comment: "Edit widgets sheet: footer note under the widget list"))
                         .font(.system(size: 11.5))
                         .foregroundStyle(SomaTokens.ink5)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -78,11 +78,11 @@ struct EditWidgetsSheet: View {
                 .padding(20)
             }
             .somaSheetBackground()
-            .navigationTitle("Your widgets")
+            .navigationTitle(String(localized: "editWidgets.navigationTitle", defaultValue: "Your widgets", comment: "Edit widgets sheet: navigation title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(String(localized: "editWidgets.done", defaultValue: "Done", comment: "Edit widgets sheet: done button in the toolbar")) { dismiss() }
                 }
             }
         }

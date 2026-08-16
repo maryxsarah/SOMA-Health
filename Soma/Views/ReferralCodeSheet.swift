@@ -17,18 +17,18 @@ struct ReferralCodeSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Have a referral code?")
+                Text(String(localized: "referral_code.title", defaultValue: "Have a referral code?", comment: "Referral code sheet: headline"))
                     .font(.title3.bold())
-                Text("Redeeming a valid code unlocks free access to Soma Premium for a limited time.")
+                Text(String(localized: "referral_code.subtitle", defaultValue: "Redeeming a valid code unlocks free access to Soma Premium for a limited time.", comment: "Referral code sheet: explanation of what redeeming a code does"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: 8) {
-                    TextField("Enter code", text: $referralCode)
+                    TextField(String(localized: "referral_code.placeholder", defaultValue: "Enter code", comment: "Referral code sheet: placeholder for the code text field"), text: $referralCode)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textFieldStyle(.roundedBorder)
-                    Button("Apply") {
+                    Button(String(localized: "referral_code.apply", defaultValue: "Apply", comment: "Referral code sheet: button that submits the entered code")) {
                         redeemCode()
                     }
                     .font(.body.bold())
@@ -51,11 +51,11 @@ struct ReferralCodeSheet: View {
             .padding(20)
             .dismissKeyboardOnTap()
             .somaBackground()
-            .navigationTitle("Referral code")
+            .navigationTitle(String(localized: "referral_code.navigationTitle", defaultValue: "Referral code", comment: "Referral code sheet: navigation title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button(String(localized: "referral_code.close", defaultValue: "Close", comment: "Referral code sheet: close button in the toolbar")) { dismiss() }
                 }
             }
         }

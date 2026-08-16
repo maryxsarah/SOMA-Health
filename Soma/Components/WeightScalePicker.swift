@@ -18,7 +18,7 @@ struct WeightScalePicker: View {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(String(format: "%.1f", weightKg))
                     .font(.system(size: 48, weight: .bold, design: .rounded))
-                Text("kg")
+                Text(String(localized: "weightScalePicker.unit", defaultValue: "kg", comment: "Weight scale picker: unit label next to the entered weight value"))
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }

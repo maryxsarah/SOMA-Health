@@ -21,9 +21,9 @@ struct DateOfBirthQuestionView: View {
             OnboardingTopBar(progress: progress, onBack: onBack)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("When were you born?")
+                Text(String(localized: "onboarding.dateOfBirth.title", defaultValue: "When were you born?", comment: "Headline on the date of birth question step"))
                     .font(Theme.display)
-                Text("This will be taken into account when generating your daily tailored plan.")
+                Text(String(localized: "onboarding.dateOfBirth.subtitle", defaultValue: "This will be taken into account when generating your daily tailored plan.", comment: "Subtitle on the date of birth question step"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -34,7 +34,7 @@ struct DateOfBirthQuestionView: View {
             Spacer()
 
             DatePicker(
-                "Date of birth",
+                LocalizedStringKey(String(localized: "onboarding.dateOfBirth.pickerLabel", defaultValue: "Date of birth", comment: "Accessibility label for the date of birth wheel picker (visually hidden)")),
                 selection: $dateOfBirth,
                 in: minDate...maxDate,
                 displayedComponents: .date
@@ -45,7 +45,7 @@ struct DateOfBirthQuestionView: View {
 
             Spacer()
 
-            PillButton(title: "Continue", action: onContinue)
+            PillButton(title: LocalizedStringKey(String(localized: "onboarding.dateOfBirth.continueButton", defaultValue: "Continue", comment: "Continue button on the date of birth question step")), action: onContinue)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }
