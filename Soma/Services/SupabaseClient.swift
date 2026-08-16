@@ -532,6 +532,62 @@ final class SupabaseClient {
         return date
     }
 
+    /// Plain read via RLS, same shape as fetchReferralBonusUntil above --
+    /// used to frequency-cap the exit-intent win-back offer (WinBackOfferManager).
+    func fetchExitOfferShownAt(id: String) async throws -> Date? {
+        let path = "rest/v1/users?id=eq.\(id)&select=exit_offer_shown_at&limit=1"
+        var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct Row: Decodable {
+            let exit_offer_shown_at: String?
+        }
+        let rows = try JSONDecoder().decode([Row].self, from: data)
+        guard let iso = rows.first?.exit_offer_shown_at else { return nil }
+        return Self.parsePostgRESTDate(iso)
+    }
+
+    /// Fire-and-forget, best-effort, same trust model as updateSubscriptionTier
+    /// above -- this is a frequency-cap soft limit, not a security boundary
+    /// (see the migration's own comment). Called the moment the offer paywall
+    /// actually presents, not merely when it's requested.
+    func markExitOfferShown() async throws {
+        guard let userId = currentUserID else { return }
+        var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "id": userId,
+            "exit_offer_shown_at": ISO8601DateFormatter().string(from: Date()),
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+    }
+
+    /// Calls the sign-promotional-offer Edge Function; returns a compact
+    /// JWS suitable for `Product.PurchaseOption.promotionalOffer(_:compactJWS:)`.
+    /// See WinBackOfferManager -- this is deliberately NOT routed through
+    /// Superwall.shared.purchase() (SomaPurchaseController), since
+    /// SuperwallKit 4.16.1's own StoreKit 2 purchase path never inserts a
+    /// `.promotionalOffer`/`.winBackOffer` PurchaseOption (confirmed against
+    /// ProductPurchaserSK2.swift in the pinned SDK checkout).
+    /// `transactionId` is optional but Apple-recommended (their own
+    /// PromotionalOfferV2SignatureCreator accepts it even for a customer
+    /// who's never purchased anything, via AppTransaction's appTransactionID)
+    /// -- omit rather than guess if the caller couldn't obtain one.
+    func signPromotionalOffer(productID: String, offerID: String, transactionID: String?) async throws -> String {
+        var request = try await authorizedRequest(path: "functions/v1/sign-promotional-offer", method: "POST")
+        var body: [String: Any] = ["productId": productID, "offerId": offerID]
+        body["transactionId"] = transactionID
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try Self.assertSuccess(response, data: data)
+
+        struct Response: Decodable { let compactJWS: String }
+        return try JSONDecoder().decode(Response.self, from: data).compactJWS
+    }
+
     private static func parsePostgRESTDate(_ string: String) -> Date? {
         let withFractional = ISO8601DateFormatter()
         withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -1246,10 +1302,18 @@ final class SupabaseClient {
         return Set(rows.map(\.date))
     }
 
-    /// Total AI generations logged for `date` across ALL sources -- mirrors
-    /// the server's tiered quota check (generationLimits.ts counts every row).
+    /// Count of actual AI *workout* generations logged for `date` -- mirrors
+    /// the server's tiered quota check (generationLimits.ts's
+    /// WORKOUT_GENERATION_SOURCES). Must stay source-filtered the same way:
+    /// the server used to count every row in ai_generation_log with no
+    /// source filter, which silently consumed the daily workout-generation
+    /// quota on meal ratings/text parses/addon suggestions that log into
+    /// this same shared table. This client mirror had the identical bug --
+    /// counting every source made Home's scan row (and its "N generations
+    /// used" copy) lock out based on unrelated AI activity for the day, not
+    /// on actual workout generations.
     func fetchTodaysGenerationCount(date: String) async throws -> Int {
-        let path = "rest/v1/ai_generation_log?date=eq.\(date)&select=id"
+        let path = "rest/v1/ai_generation_log?date=eq.\(date)&source=in.(suggestion,gym_photo)&select=id"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)
@@ -1271,14 +1335,7 @@ final class SupabaseClient {
             return cached
         }
 
-        let path: String
-        if let libraryId, !libraryId.isEmpty {
-            let encodedId = libraryId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? libraryId
-            path = "rest/v1/exercise_library?id=eq.\(encodedId)&select=*&limit=1"
-        } else {
-            let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
-            path = "rest/v1/exercise_library?name=eq.\(encodedName)&select=*&limit=1"
-        }
+        let path = Self.exerciseLibraryLookupPath(libraryId: libraryId, name: name)
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try Self.assertSuccess(response, data: data)

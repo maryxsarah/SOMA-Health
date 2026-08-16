@@ -1567,7 +1567,11 @@ struct ProfileView: View {
     /// placements -- someone who explicitly taps in to see premium options
     /// should see them regardless.
     private func presentPremiumPaywall() {
-        Superwall.shared.register(placement: "view_premium")
+        let handler = SuperwallDiagnostics.handler(placement: "view_premium")
+        handler.onDismiss { _, result in
+            WinBackOfferManager.maybePresentAfterDecline(result: result)
+        }
+        Superwall.shared.register(placement: "view_premium", handler: handler)
     }
 
     /// Consecutive days up to and including today with a logged workout --

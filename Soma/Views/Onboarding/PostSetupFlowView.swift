@@ -121,7 +121,10 @@ struct PostSetupFlowView: View {
             appState.markOnboardingComplete()
             return
         }
-        Superwall.shared.register(placement: "onboarding_paywall") {
+        Superwall.shared.register(
+            placement: "onboarding_paywall",
+            handler: SuperwallDiagnostics.handler(placement: "onboarding_paywall")
+        ) {
             appState.markOnboardingComplete()
         }
     }
