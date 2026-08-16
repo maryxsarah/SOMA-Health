@@ -58,6 +58,31 @@ export const VOLUME_LANDMARKS: Record<string, Record<ExperienceLevel, VolumeLand
   },
 };
 
+/// DRAFTED, NOT EXPERT-REVIEWED, added 2026-08-15 alongside
+/// generate-recommendation's volume cap becoming body-part-aware (see that
+/// function's own comment). Session-count-shaped per body part, same unit
+/// choice as VOLUME_LANDMARKS.full_body above and for the identical
+/// reason (workout_log has no per-set logging) -- NOT the same numbers as
+/// VOLUME_LANDMARKS.upper_body/lower_body/core's mrv above, which are in
+/// sets/week and describe a DIFFERENT thing (describeVolumeGuidance's
+/// prompt-text sanity check on a single session's set count, not a
+/// weekly session-frequency cap).
+///
+/// Tighter than full_body's session mrv (4/5/6) by design: repeatedly
+/// training the SAME specific body part is more concentrated fatigue on
+/// that tissue than a full_body day that spreads load across every major
+/// group at once, so real recovery guidance for a single muscle group
+/// generally calls for at least 48h+ between sessions targeting it --
+/// roughly 2-4x/week depending on experience, not the 4-6x/week full_body
+/// figure. `core` and `cardio` are deliberately excluded: core work is
+/// commonly programmed daily/near-daily even in mainstream guidance (low
+/// systemic fatigue cost), and cardio has no comparable "hits one specific
+/// group repeatedly" concern this cap exists to catch.
+export const BODY_PART_SESSION_MRV: Partial<Record<string, Record<ExperienceLevel, number>>> = {
+  upper_body: { newbie: 2, moderate: 3, advanced: 4 },
+  lower_body: { newbie: 2, moderate: 3, advanced: 4 },
+};
+
 /// Prompt-ready guidance sentence -- feeds generate-workout-plan's
 /// buildPrompt as additional context, same "describeXxx returns a prompt
 /// line" convention as describeContraindications.

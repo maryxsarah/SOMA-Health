@@ -2,7 +2,9 @@ import { assertEquals } from "jsr:@std/assert";
 import {
   computeInjuryProtocolRestApplied,
   computeMoodCapApplied,
+  computeProactiveRestCapApplied,
   LOW_MOOD_RATING_THRESHOLD,
+  PROACTIVE_REST_MIN_RECOMMENDATIONS,
   RECENT_SEVERE_INJURY_WINDOW_HOURS,
   SEVERE_INJURY_BAD_DAYS_TO_REST,
 } from "./independentCaps.ts";
@@ -86,4 +88,63 @@ Deno.test("computeMoodCapApplied: rough mood on an already-light day doesn't re-
 
 Deno.test("computeMoodCapApplied: no check-in today (null) never caps", () => {
   assertEquals(computeMoodCapApplied(null, "push_hard"), false);
+});
+
+// --- computeProactiveRestCapApplied ---
+
+const aFullWeekOfHardTraining: ("rest" | "light" | "moderate" | "push_hard")[] = [
+  "moderate", "push_hard", "moderate", "push_hard", "moderate", "push_hard", "moderate",
+];
+
+Deno.test("REGRESSION: the exact reported scenario -- good signals every day, realistic workouts_per_week, no logged rest, fires", () => {
+  // Real reported gap: a user can go a full week on nothing but
+  // moderate/push_hard because every existing cap is reactive.
+  assertEquals(
+    computeProactiveRestCapApplied("three_to_five", aFullWeekOfHardTraining, false, "push_hard"),
+    true,
+  );
+  assertEquals(
+    computeProactiveRestCapApplied("six_plus", aFullWeekOfHardTraining, false, "moderate"),
+    true,
+  );
+});
+
+Deno.test("a week that already had a rest or light day anywhere in it never fires", () => {
+  const withARestDay = ["moderate", "push_hard", "light", "push_hard", "moderate", "push_hard", "moderate"] as const;
+  assertEquals(computeProactiveRestCapApplied("three_to_five", [...withARestDay], false, "push_hard"), false);
+  const withAFullRestDay = ["moderate", "push_hard", "rest", "push_hard", "moderate", "push_hard", "moderate"] as const;
+  assertEquals(computeProactiveRestCapApplied("three_to_five", [...withAFullRestDay], false, "push_hard"), false);
+});
+
+Deno.test("skipped entirely for zero_to_two -- that cadence already includes plenty of rest", () => {
+  assertEquals(computeProactiveRestCapApplied("zero_to_two", aFullWeekOfHardTraining, false, "push_hard"), false);
+});
+
+Deno.test("applies for three_to_five, six_plus, AND unset/null (unset defaults to applying, not skipping)", () => {
+  for (const freq of ["three_to_five", "six_plus", null]) {
+    assertEquals(computeProactiveRestCapApplied(freq, aFullWeekOfHardTraining, false, "push_hard"), true, `freq=${freq}`);
+  }
+});
+
+Deno.test("insufficient data (fewer real recommendation rows than the minimum) never fires", () => {
+  const sparse = aFullWeekOfHardTraining.slice(0, PROACTIVE_REST_MIN_RECOMMENDATIONS - 1);
+  assertEquals(computeProactiveRestCapApplied("three_to_five", sparse, false, "push_hard"), false);
+});
+
+Deno.test("exactly at the minimum row count with no rest/light day still fires", () => {
+  const exact = aFullWeekOfHardTraining.slice(0, PROACTIVE_REST_MIN_RECOMMENDATIONS);
+  assertEquals(computeProactiveRestCapApplied("three_to_five", exact, false, "push_hard"), true);
+});
+
+Deno.test("exceptional readiness today skips the proactive floor, same bar as the consecutive-days/volume caps", () => {
+  assertEquals(computeProactiveRestCapApplied("three_to_five", aFullWeekOfHardTraining, true, "push_hard"), false);
+});
+
+Deno.test("never fires when today's own band is already light/rest -- nothing to cap further down", () => {
+  assertEquals(computeProactiveRestCapApplied("three_to_five", aFullWeekOfHardTraining, false, "light"), false);
+  assertEquals(computeProactiveRestCapApplied("three_to_five", aFullWeekOfHardTraining, false, "rest"), false);
+});
+
+Deno.test("an empty window (brand-new user, no history yet) never fires", () => {
+  assertEquals(computeProactiveRestCapApplied("three_to_five", [], false, "push_hard"), false);
 });

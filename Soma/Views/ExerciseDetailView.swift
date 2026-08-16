@@ -11,6 +11,14 @@ struct ExerciseDetailView: View {
 
     @State private var entry: ExerciseLibraryEntry?
     @State private var isLoading = true
+    /// True only when the library lookup itself threw (network/auth/server
+    /// error) -- distinct from `entry == nil` after a *successful* lookup
+    /// that genuinely found no row or an empty `image_paths`. Both used to
+    /// collapse into the same "no reference photo" placeholder, which read
+    /// as "every exercise is missing media" during a transient blip (e.g.
+    /// an expired/refreshing session) instead of "retry this one." See
+    /// mediaArea below.
+    @State private var lookupFailed = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -91,9 +99,35 @@ struct ExerciseDetailView: View {
                 .fill(Color(.systemGray6))
                 .frame(height: 220)
                 .overlay(SomaLoadingBar())
+        } else if lookupFailed {
+            retryPlaceholder
         } else {
             noMediaPlaceholder
         }
+    }
+
+    /// Shown only when the lookup itself errored (network/auth/server) --
+    /// tapping retries the same lookup rather than leaving the user stuck
+    /// on a placeholder that looks identical to "this exercise genuinely
+    /// has no photo on file."
+    private var retryPlaceholder: some View {
+        Button {
+            isLoading = true
+            lookupFailed = false
+            Task { await load() }
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+                Text("Couldn't load photo, tap to retry")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 180)
+            .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
+        }
+        .buttonStyle(.plain)
     }
 
     private func imagePager(_ entry: ExerciseLibraryEntry) -> some View {
@@ -108,14 +142,82 @@ struct ExerciseDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous))
     }
 
+    /// Roughly half of a gym-photo-generated workout is exercises that
+    /// genuinely have no real photo anywhere in exercise_library (breathing
+    /// drills, in-place cardio, a handful of holds/carries where the closest
+    /// library entry would show materially different equipment -- see
+    /// generate-gym-workout/templates.ts's CONFIRMED_NO_LIBRARY_EQUIVALENT
+    /// for the hand-audited list). Showing the exact same flat "No reference
+    /// photo" box for all of them read as one broken feature; this instead
+    /// reads target_area (already fixed per exercise, not LLM-guessed -- see
+    /// AIExercise.targetArea) to pick a distinct, intentional-looking icon
+    /// and tint per exercise family, the same "why, not just what" instinct
+    /// the rest of this file already applies to the retry-vs-no-photo split
+    /// above. Only generate-gym-workout ever sets targetArea, so an
+    /// AI-generated (non-gym-photo) plan -- which the exerciseLibraryMatch.ts
+    /// fix already constrains to real-photo exercise names, so this should
+    /// be rare there anyway -- always falls into the .strength default.
+    private enum MediaFallbackCategory {
+        case cardio
+        case breathingMobility
+        case strength
+
+        var icon: String {
+            switch self {
+            case .cardio: "figure.run"
+            case .breathingMobility: "wind"
+            case .strength: "dumbbell.fill"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .cardio: SomaTokens.heart
+            case .breathingMobility: SomaTokens.accent
+            case .strength: SomaTokens.ink2
+            }
+        }
+
+        var softTint: Color {
+            switch self {
+            case .cardio: SomaTokens.heartSoft
+            case .breathingMobility: SomaTokens.accentSoft
+            case .strength: SomaTokens.surface3
+            }
+        }
+
+        var caption: String {
+            switch self {
+            case .cardio: "No reference photo — this one's about pace and effort, not a position to copy"
+            case .breathingMobility: "No reference photo — follow the breathing/mobility cue above"
+            case .strength: "No reference photo for this exercise"
+            }
+        }
+    }
+
+    private var mediaFallbackCategory: MediaFallbackCategory {
+        let area = (exercise.targetArea ?? "").lowercased()
+        if area.contains("nervous system") { return .breathingMobility }
+        if area.contains("cardio") || area.contains("heart rate") { return .cardio }
+        return .strength
+    }
+
     private var noMediaPlaceholder: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "figure.strengthtraining.traditional")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-            Text("No reference photo for this exercise")
+        let category = mediaFallbackCategory
+        return VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(category.softTint)
+                    .frame(width: 60, height: 60)
+                Image(systemName: category.icon)
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(category.tint)
+            }
+            Text(category.caption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
         }
         .frame(maxWidth: .infinity, minHeight: 180)
         .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
@@ -155,13 +257,20 @@ struct ExerciseDetailView: View {
     }
 
     private func load() async {
-        // A failed lookup collapses to the same "no reference photo" state
-        // as a genuine no-match -- there's no useful distinct error UI for
-        // a background media lookup that isn't blocking the actual workout.
-        entry = try? await SupabaseClient.shared.fetchExerciseLibraryEntry(
-            libraryId: exercise.libraryId,
-            name: exercise.name
-        )
+        // A transient lookup failure (network/auth/server error) now gets
+        // its own retry state instead of collapsing into the same "no
+        // reference photo" placeholder as a genuine no-match -- see
+        // `lookupFailed` and `retryPlaceholder` above.
+        do {
+            entry = try await SupabaseClient.shared.fetchExerciseLibraryEntry(
+                libraryId: exercise.libraryId,
+                name: exercise.name
+            )
+            lookupFailed = false
+        } catch {
+            entry = nil
+            lookupFailed = true
+        }
         isLoading = false
     }
 }
