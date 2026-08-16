@@ -18,9 +18,20 @@ import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { assessHealthKit } from "./healthkitBand.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
-import { type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
-import { computeInjuryProtocolRestApplied, computeMoodCapApplied } from "../_shared/independentCaps.ts";
+import { BODY_PART_SESSION_MRV, type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
+import {
+  computeInjuryProtocolRestApplied,
+  computeMoodCapApplied,
+  computeProactiveRestCapApplied,
+} from "../_shared/independentCaps.ts";
 import { buildReasoningMessage } from "./reasoningMessage.ts";
+import {
+  countConsecutiveTrainingDays,
+  countRecentTrainingDays,
+  countRecentTrainingDaysByBodyPart,
+  fetchRecentRecommendationCategories,
+  fetchTrainingDates,
+} from "./trainingDayCounters.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -202,12 +213,16 @@ Deno.serve(async (req: Request) => {
     // moderate max for the day, same safety-first pattern as the sleep cap.
     const { data: userRow } = await supabase
       .from("users")
-      .select("injury_tags, pregnancy, experience_level")
+      .select("injury_tags, pregnancy, experience_level, workouts_per_week")
       .eq("id", userId)
       .maybeSingle();
     const hasInjury = ((userRow?.injury_tags as string[] | null) ?? []).length > 0;
     const hasPregnancy = userRow?.pregnancy === true;
     const experienceLevel = ((userRow?.experience_level as ExperienceLevel | null) ?? "moderate");
+    // 'zero_to_two' | 'three_to_five' | 'six_plus' | null -- see
+    // computeProactiveRestCapApplied (_shared/independentCaps.ts), the
+    // only place this is consumed.
+    const workoutsPerWeek = (userRow?.workouts_per_week as string | null) ?? null;
 
     // Any moderate/severe-tier injury protocol currently active/recovering
     // -- a soft cap (product decision), not a hard block like pregnancy:
@@ -383,16 +398,21 @@ Deno.serve(async (req: Request) => {
     // breaking a streak regardless of how good today's recovery signals
     // look, not about discounting those signals themselves.
     // countConsecutiveTrainingDays already only counts moderate/push_hard
-    // logged days (not light/rest), so the streak itself is already a real
-    // accumulated-load signal, not a blind day-count. On top of that: an
-    // EXCEPTIONAL readiness day (same bar generate-workout-plan uses for
-    // its finisher) skips the cap entirely -- a body that's clearly
-    // recovered exceptionally well doesn't need to be forced down just
-    // because of the calendar. And a streak that goes well past the
-    // threshold (REST_ESCALATION_THRESHOLD) lands on full "rest" instead
-    // of "light" -- the accumulated load at that point calls for more than
-    // active recovery.
-    const consecutiveDays = await countConsecutiveTrainingDays(supabase, userId, date);
+    // TRAINING days (not light/rest), so the streak itself is already a
+    // real accumulated-load signal, not a blind day-count -- and, as of
+    // 2026-08-15, "training day" itself now means logged OR recommended
+    // (see fetchTrainingDates below): a user who follows every
+    // recommendation but never explicitly logs completion used to be
+    // invisible to this whole safety net regardless of real accumulated
+    // load. On top of that: an EXCEPTIONAL readiness day (same bar
+    // generate-workout-plan uses for its finisher) skips the cap entirely
+    // -- a body that's clearly recovered exceptionally well doesn't need
+    // to be forced down just because of the calendar. And a streak that
+    // goes well past the threshold (REST_ESCALATION_THRESHOLD) lands on
+    // full "rest" instead of "light" -- the accumulated load at that point
+    // calls for more than active recovery.
+    const trainingDates = await fetchTrainingDates(supabase, userId, date);
+    const consecutiveDays = countConsecutiveTrainingDays(trainingDates, date);
     const exceptionalReadinessToday =
       (whoopRecovery !== null && whoopRecovery.recoveryScore >= EXCEPTIONAL_WHOOP_RECOVERY) ||
       (ouraReadiness !== null && ouraReadiness >= EXCEPTIONAL_OURA_READINESS);
@@ -409,11 +429,40 @@ Deno.serve(async (req: Request) => {
     // VOLUME_LANDMARKS.full_body's MRV (session-count-shaped, unlike the
     // sets/week landmarks for upper/lower body) as the threshold, since
     // workout_log only has session-level data, not per-set volume --
-    // an honest proxy, not true per-muscle-group volume tracking.
-    const recentTrainingDays = await countRecentTrainingDays(supabase, userId, date);
-    const volumeCapApplied = recentTrainingDays >= VOLUME_LANDMARKS.full_body[experienceLevel].mrv &&
+    // an honest proxy, not true per-muscle-group volume tracking. Also
+    // reuses the same logged-OR-recommended trainingDates set as the
+    // consecutive-days cap above.
+    const recentTrainingDays = countRecentTrainingDays(trainingDates);
+    // BODY_PART_SESSION_MRV addition (2026-08-15): the coarse full_body
+    // count alone misses a legs-heavy (or upper-heavy) week -- e.g. 5
+    // lower_body sessions plus 1 full_body session in 7 days wouldn't trip
+    // the full_body-only check at a moderate lifter's mrv of 5, but is a
+    // real concentrated-fatigue pattern on one specific body part. Checked
+    // against LOGGED workout_log rows only (not the recommendation
+    // fallback): workout_log.body_part reflects what was actually done,
+    // and daily_recommendation doesn't carry a body-part column to fall
+    // back to for this specific check.
+    const recentTrainingDaysByBodyPart = await countRecentTrainingDaysByBodyPart(supabase, userId, date);
+    const bodyPartVolumeExceeded = Object.entries(recentTrainingDaysByBodyPart).some(([bodyPart, count]) => {
+      const mrv = BODY_PART_SESSION_MRV[bodyPart]?.[experienceLevel];
+      return mrv !== undefined && count >= mrv;
+    });
+    const volumeCapApplied = (recentTrainingDays >= VOLUME_LANDMARKS.full_body[experienceLevel].mrv || bodyPartVolumeExceeded) &&
       !exceptionalReadinessToday &&
       (bandCategory === "moderate" || bandCategory === "push_hard");
+    // Proactive rest floor (2026-08-15): every cap in this file up to here
+    // is REACTIVE -- it only ever fires off a bad signal. If the wearable
+    // looks fine every single day, nothing ever proactively guarantees a
+    // calendar-based recovery day, which isn't how real hypertrophy/
+    // general-fitness programming works. Independent of every cap above
+    // (see computeProactiveRestCapApplied, _shared/independentCaps.ts).
+    const recentCategoriesRaw = await fetchRecentRecommendationCategories(supabase, userId, date);
+    const proactiveRestCapApplied = computeProactiveRestCapApplied(
+      workoutsPerWeek,
+      recentCategoriesRaw,
+      exceptionalReadinessToday,
+      bandCategory,
+    );
     // Same post-processing-on-final-category mechanism as the consecutive-
     // days cap just above, and independent of it -- either or both can fire.
     const injuryProtocolCapApplied = hasSevereInjuryProtocol &&
@@ -434,7 +483,7 @@ Deno.serve(async (req: Request) => {
     const computedCategory: Category = consecutiveDaysRestEscalated || injuryProtocolRestApplied
       ? "rest"
       : (consecutiveDaysCapApplied || injuryProtocolCapApplied || volumeCapApplied ||
-          sleepCapApplied || hrvCapApplied || stressCapApplied || moodCapApplied)
+          sleepCapApplied || hrvCapApplied || stressCapApplied || moodCapApplied || proactiveRestCapApplied)
       ? "light"
       : injuryProtocolModerateCapApplied
       ? "moderate"
@@ -472,6 +521,21 @@ Deno.serve(async (req: Request) => {
         injury: injuryProtocolCapApplied,
         injuryModerate: injuryProtocolModerateCapApplied,
         injuryRest: injuryProtocolRestApplied,
+        proactiveRest: proactiveRestCapApplied,
+        // Deliberately NOT also added as a proactive_rest_cap_applied field
+        // on the jsonResponse/upsert below, unlike every other cap boolean
+        // here -- those are real daily_recommendation COLUMNS, and the
+        // fresh-generation response below is shaped to match that same row
+        // exactly ("the app uses one Codable model for both paths": this
+        // generation response AND a plain cached-row GET read the identical
+        // Swift type). Adding a field here that only exists on ONE of those
+        // two paths would make the same Codable model decode inconsistent
+        // shapes depending on which path served it -- worse than just not
+        // exposing the raw flag. The category change and the `message`
+        // explanation below are the actual user-visible effect; a real
+        // proactive_rest_cap_applied column is a fine follow-up (behind its
+        // own migration) if something client-side ever needs to branch on
+        // it specifically, same note as this change's plan doc.
       },
     });
 
@@ -612,10 +676,10 @@ function mapBandToCategory(
   return { category, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
 }
 
-/// Consecutive prior days with a logged TRAINING workout (moderate or
-/// push_hard), strictly before `date`, stopping at the first gap -- e.g.
-/// training logs on d-1, d-2, d-3 but not d-4 counts as 3, regardless of
-/// what happened further back.
+/// Consecutive prior days with a TRAINING day (moderate or push_hard),
+/// strictly before `date`, stopping at the first gap -- e.g. training on
+/// d-1, d-2, d-3 but not d-4 counts as 3, regardless of what happened
+/// further back.
 ///
 /// The category filter is what makes the cap releasable: counting every
 /// workout_log row meant a dutifully-logged "Full rest day" or recovery
@@ -624,58 +688,21 @@ function mapBandToCategory(
 /// well-recovered user never saw another moderate/push_hard day. Rest and
 /// light days are the streak BREAKING, not the streak continuing; that is
 /// the entire point of capping to light.
-const CONSECUTIVE_DAYS_THRESHOLD = 5;
+const CONSECUTIVE_DAYS_THRESHOLD = 4;
 /// DRAFTED, NOT EXPERT-REVIEWED -- past this many consecutive hard-training
 /// days, the accumulated load calls for more than active recovery: the day
 /// lands on full "rest" instead of "light".
-const REST_ESCALATION_THRESHOLD = 6;
-
-async function countConsecutiveTrainingDays(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
-  userId: string,
-  date: string,
-): Promise<number> {
-  const { data } = await supabase
-    .from("workout_log")
-    .select("date")
-    .eq("user_id", userId)
-    .in("category", ["moderate", "push_hard"])
-    .gte("date", addDays(date, -7))
-    .lt("date", date);
-
-  const loggedDates = new Set((data ?? []).map((r: { date: string }) => r.date));
-  let count = 0;
-  let cursor = addDays(date, -1);
-  while (loggedDates.has(cursor)) {
-    count++;
-    cursor = addDays(cursor, -1);
-  }
-  return count;
-}
-
-/// Rolling count of moderate/push_hard training days in the trailing 7
-/// days, gaps allowed -- distinct from countConsecutiveTrainingDays above
-/// (which stops at the first gap). A user who trains hard 6 of the last 7
-/// days with one rest day in the middle has a LOW consecutive-streak count
-/// but a real accumulated-fatigue signal this rolling count catches
-/// instead. Reuses the same query as countConsecutiveTrainingDays (same
-/// window, same category filter) -- only the aggregation differs.
-async function countRecentTrainingDays(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
-  userId: string,
-  date: string,
-): Promise<number> {
-  const { data } = await supabase
-    .from("workout_log")
-    .select("date")
-    .eq("user_id", userId)
-    .in("category", ["moderate", "push_hard"])
-    .gte("date", addDays(date, -7))
-    .lt("date", date);
-  return new Set((data ?? []).map((r: { date: string }) => r.date)).size;
-}
+///
+/// 2026-08-15 recalibration (both this and CONSECUTIVE_DAYS_THRESHOLD
+/// above, 6->5 and 5->4): general recovery guidance discourages more than
+/// ~4-5 consecutive high-intensity days without at least a lighter one;
+/// the old 5/6 was already on the lenient edge of that. The new proactive
+/// rest floor (computeProactiveRestCapApplied, _shared/independentCaps.ts)
+/// now provides the PRIMARY guarantee of a real week-over-week rest day
+/// independent of streaks -- this pair is the secondary backstop for a
+/// genuine back-to-back grind, tightened by one day each rather than
+/// dramatically narrowed.
+const REST_ESCALATION_THRESHOLD = 5;
 
 function pickSleepHours(
   rows: { source: string; sleep_hours: number | null }[],

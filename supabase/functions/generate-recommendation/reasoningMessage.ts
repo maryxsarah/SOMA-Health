@@ -32,6 +32,11 @@ export interface ReasoningMessageCaps {
   injury: boolean;
   injuryModerate: boolean;
   injuryRest: boolean;
+  /// True when the proactive rest floor fired (computeProactiveRestCapApplied,
+  /// _shared/independentCaps.ts) -- a real, deliberate reason to cite, not a
+  /// fallback: the week simply had no bad signal at all, which is exactly
+  /// why this reads differently from every reactive cap above.
+  proactiveRest: boolean;
 }
 
 export interface ReasoningMessageInput {
@@ -130,9 +135,9 @@ function referenceNumbers(input: ReasoningMessageInput): string | null {
 /// Same left-to-right order as index.ts's light-tier OR-chain
 /// (consecutiveDaysCapApplied || injuryProtocolCapApplied ||
 /// volumeCapApplied || sleepCapApplied || hrvCapApplied || stressCapApplied
-/// || moodCapApplied) -- picks ONE explanation to name even when several
-/// caps are simultaneously true, for a readable sentence rather than a
-/// laundry list.
+/// || moodCapApplied || proactiveRestCapApplied) -- picks ONE explanation
+/// to name even when several caps are simultaneously true, for a readable
+/// sentence rather than a laundry list.
 const LIGHT_CAP_EXPLANATIONS: { key: keyof ReasoningMessageCaps; text: (i: ReasoningMessageInput) => string }[] = [
   { key: "consecutiveDays", text: () => "you've trained hard enough days in a row that it's time to back off" },
   { key: "injury", text: () => "your active injury protocol is capping today's intensity" },
@@ -144,6 +149,10 @@ const LIGHT_CAP_EXPLANATIONS: { key: keyof ReasoningMessageCaps; text: (i: Reaso
   { key: "hrv", text: () => "today's HRV is down from your usual baseline" },
   { key: "stress", text: () => "today's stress load is elevated" },
   { key: "mood", text: () => "you checked in feeling rough today" },
+  {
+    key: "proactiveRest",
+    text: () => "you've had a full week of solid training with no real rest or light day, so today's building one in proactively",
+  },
 ];
 
 /// The full reasoning sentence(s) for daily_recommendation.message -- 2-3

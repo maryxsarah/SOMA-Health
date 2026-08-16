@@ -20,6 +20,7 @@ const NO_CAPS: ReasoningMessageCaps = {
   injury: false,
   injuryModerate: false,
   injuryRest: false,
+  proactiveRest: false,
 };
 
 function baseInput(overrides: Partial<ReasoningMessageInput>): ReasoningMessageInput {
