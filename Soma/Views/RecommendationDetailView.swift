@@ -1002,6 +1002,11 @@ struct RecommendationDetailView: View {
             // identifier is day-stamped) pending request rather than
             // nagging someone who already finished.
             NotificationManager.shared.cancelEveningWorkoutReminder(for: recommendation.date)
+            // Streak protection reminder for tomorrow + milestone
+            // celebration if this log just crossed a tier -- best-effort,
+            // fire-and-forget so a slow/failed fetch inside it never
+            // blocks or fails the workout log that already succeeded above.
+            Task { await NotificationManager.shared.handleWorkoutLogged(at: Date()) }
             if !trimmedFeedback.isEmpty {
                 await fetchAddonSuggestions(feedback: trimmedFeedback, title: selectedTitle, bodyPart: selectedBodyPart)
             }

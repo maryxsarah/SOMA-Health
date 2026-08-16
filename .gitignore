@@ -59,6 +59,10 @@ docs/*
 # macOS
 .DS_Store
 
+# Python bytecode cache from running scripts/*.py locally.
+__pycache__/
+*.pyc
+
 # Snapshot-test reference images are machine-local (record with
 # scripts/test.sh snapshot --record); never committed by decision 2026-08-04.
 SnapshotTests/__Snapshots__/
