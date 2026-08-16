@@ -39,7 +39,7 @@ struct SportGoalFlowView: View {
         NavigationStack(path: $path) {
             rootContent
                 .somaBackground()
-                .navigationTitle("Your goal")
+                .navigationTitle(String(localized: "sportGoalFlow.navigationTitle", defaultValue: "Your goal", comment: "Navigation title for the sport goal flow (hub or picker)"))
                 .navigationBarTitleDisplayMode(.inline)
                 .navigationDestination(for: SportGoalRoute.self) { route in
                     destination(for: route)
@@ -110,7 +110,7 @@ struct SportGoalFlowView: View {
     private var unavailableCard: some View {
         ScrollView {
             CardView {
-                Text("Goals aren't available right now")
+                Text(String(localized: "sportGoalFlow.unavailable.title", defaultValue: "Goals aren't available right now", comment: "Sport goal flow: heading shown when the goal catalog is dark/unavailable"))
                     .font(.body.bold())
                 Text(loadFailed
                     ? String(localized: "sportGoalFlow.unavailable.loadFailed", defaultValue: "Couldn't load the goal catalog. Pull down to try again.", comment: "Sport goal flow: shown when the catalog fails to load; pull-to-refresh retries")

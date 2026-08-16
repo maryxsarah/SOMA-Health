@@ -26,6 +26,7 @@ struct GoalStartView: View {
     @State private var scheduleRule: GoalScheduleRule?
     @State private var scheduleDays: Set<Int> = []
     @State private var courtDays: Set<Int> = []
+    @State private var showFrequencySheet = false
 
     /// `seedStage` is for SomaSnapshotTests only -- renders the milestone
     /// target block without a tap.
@@ -85,10 +86,13 @@ struct GoalStartView: View {
                         .foregroundStyle(SomaTokens.danger)
                 }
                 if hasBaseline, conflicts.isEmpty {
-                    SomaButton(title: isCreating ? "Starting…" : "Start the block", size: .lg, variant: .primary, isEnabled: !isCreating) {
+                    SomaButton(title: LocalizedStringKey(isCreating
+                        ? String(localized: "goalCreation.button.starting", defaultValue: "Starting…", comment: "Label on the primary CTA button while a goal creation request is in flight")
+                        : String(localized: "goalCreation.button.startBlock", defaultValue: "Start the block", comment: "Label on the primary CTA button that creates and starts the goal block")
+                    ), size: .lg, variant: .primary, isEnabled: !isCreating) {
                         Task { await create(acknowledged: false) }
                     }
-                    Text("Your goal block starts with tomorrow's plan.")
+                    Text(String(localized: "goalStart.footer.startsTomorrow", defaultValue: "Your goal block starts with tomorrow's plan.", comment: "Footer note under the Start the block button, explaining the block begins with tomorrow's scheduled plan"))
                         .font(.system(size: 12))
                         .foregroundStyle(SomaTokens.ink3)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -104,6 +108,19 @@ struct GoalStartView: View {
                   let userId = SupabaseClient.shared.currentUserID,
                   let profile = try? await SupabaseClient.shared.fetchProfile(id: userId) else { return }
             experienceLevel = profile.experienceLevel
+        }
+        // Attached here, not inside ScheduleFrequencyPicker -- scheduleCard
+        // only renders once `hasBaseline` is true (see body above), and a
+        // `.sheet` attached to a view inside a conditional `if` branch is
+        // unreliable in SwiftUI. This root ScrollView is unconditional.
+        .sheet(isPresented: $showFrequencySheet) {
+            ScheduleRulesSheet(scheduleRule: $scheduleRule, scheduleDays: $scheduleDays, courtDays: $courtDays)
+        }
+        .onChange(of: showFrequencySheet) { old, new in
+            NSLog("DIAG showFrequencySheet %@ -> %@", old ? "true" : "false", new ? "true" : "false")
+        }
+        .onChange(of: hasBaseline) { old, new in
+            NSLog("DIAG hasBaseline %@ -> %@", old ? "true" : "false", new ? "true" : "false")
         }
     }
 
@@ -125,7 +142,7 @@ struct GoalStartView: View {
         let lines = goal.protocolLines
         if !lines.isEmpty {
             CardView {
-                Text("How to measure")
+                Text(String(localized: "goalStart.protocolCard.title", defaultValue: "How to measure", comment: "Card heading above the numbered list of steps for measuring the goal's baseline"))
                     .font(.body.bold())
                 ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                     HStack(alignment: .top, spacing: 10) {
@@ -171,7 +188,7 @@ struct GoalStartView: View {
                     }
                 }
             case .qualitative:
-                TextField("Your target, in your own words", text: $qualitativeTarget, axis: .vertical)
+                TextField(String(localized: "goalStart.qualitativeTarget.placeholder", defaultValue: "Your target, in your own words", comment: "Placeholder text in the multi-line field where the user describes their qualitative goal target"), text: $qualitativeTarget, axis: .vertical)
                     .lineLimit(2...4)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -182,11 +199,11 @@ struct GoalStartView: View {
         }
     }
 
-    private var entryTitle: LocalizedStringKey {
+    private var entryTitle: String {
         switch goal.kind {
-        case .milestone: "Where are you today?"
-        case .qualitative: "What does done look like?"
-        default: "Your baseline today"
+        case .milestone: String(localized: "goalStart.entryTitle.milestone", defaultValue: "Where are you today?", comment: "Heading above the entry field for a milestone-based goal, asking the user's current stage")
+        case .qualitative: String(localized: "goalStart.entryTitle.qualitative", defaultValue: "What does done look like?", comment: "Heading above the entry field for a qualitative goal, asking the user to describe their target")
+        default: String(localized: "goalStart.entryTitle.metric", defaultValue: "Your baseline today", comment: "Heading above the entry field for a metric-based goal, asking for the user's current baseline value")
         }
     }
 
@@ -203,7 +220,7 @@ struct GoalStartView: View {
            let gainLow = band.gainLow, let gainHigh = band.gainHigh,
            let weeksLow = band.weeksLow, let weeksHigh = band.weeksHigh {
             CardView {
-                Text("A realistic target")
+                Text(String(localized: "goalStart.targetBlock.title", defaultValue: "A realistic target", comment: "Small kicker heading above the revealed target range for a metric or milestone goal"))
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(SomaTokens.ink3)
@@ -215,12 +232,12 @@ struct GoalStartView: View {
                 Text(SportGoalFormat.gainRange(low: gainLow, high: gainHigh, unit: goal.unit))
                     .font(Theme.display)
                     .foregroundStyle(SomaTokens.accent)
-                Text("in \(weeksLow)–\(weeksHigh) weeks · re-test around \(retestRange(weeksLow: weeksLow, weeksHigh: weeksHigh))")
+                Text(String(localized: "goalStart.targetBlock.metricSubtitle", defaultValue: "in \(weeksLow)–\(weeksHigh) weeks · re-test around \(retestRange(weeksLow: weeksLow, weeksHigh: weeksHigh))", comment: "Subtitle under the target range: the week range to reach it, and the date range to re-test. weeksLow/weeksHigh are integers, the last value is an already-formatted date range string"))
                     .font(.system(size: 14))
                     .foregroundStyle(SomaTokens.ink2)
                 GoalPhaseStrip(current: nil)
                     .padding(.top, 4)
-                Text("In ~5 days we'll confirm your baseline — second attempts usually score higher.")
+                Text(String(localized: "goalStart.targetBlock.confirmNote", defaultValue: "In ~5 days we'll confirm your baseline — second attempts usually score higher.", comment: "Small note explaining the baseline will be re-confirmed a few days in"))
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink3)
             }
@@ -230,7 +247,7 @@ struct GoalStartView: View {
             // The next rung of the ladder IS the target -- honest horizon
             // from the evidence band, never a number (guide 03 milestone row).
             CardView {
-                Text("A realistic target")
+                Text(String(localized: "goalStart.targetBlock.title", defaultValue: "A realistic target", comment: "Small kicker heading above the revealed target range for a metric or milestone goal"))
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(SomaTokens.ink3)
@@ -239,27 +256,27 @@ struct GoalStartView: View {
                     .foregroundStyle(SomaTokens.accent)
                 if let band = goal.band(forLevel: experienceLevel),
                    let weeksLow = band.weeksLow, let weeksHigh = band.weeksHigh {
-                    Text("next stage · usually \(weeksLow)–\(weeksHigh) weeks")
+                    Text(String(localized: "goalStart.targetBlock.milestoneSubtitle", defaultValue: "next stage · usually \(weeksLow)–\(weeksHigh) weeks", comment: "Subtitle under the next milestone stage name, showing the typical week range to reach it. weeksLow/weeksHigh are integers"))
                         .font(.system(size: 14))
                         .foregroundStyle(SomaTokens.ink2)
                 } else {
-                    Text("the next stage on the ladder")
+                    Text(String(localized: "goalStart.targetBlock.milestoneFallback", defaultValue: "the next stage on the ladder", comment: "Fallback subtitle under the next milestone stage name when no typical timeframe is available"))
                         .font(.system(size: 14))
                         .foregroundStyle(SomaTokens.ink2)
                 }
-                Text("Stage-based — no numbers needed.")
+                Text(String(localized: "goalStart.targetBlock.milestoneCaption", defaultValue: "Stage-based — no numbers needed.", comment: "Small caption clarifying this milestone target has no numeric target"))
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink3)
             }
         } else if goal.kind == .qualitative {
             CardView {
-                Text("Your target")
+                Text(String(localized: "goalStart.targetBlock.qualitativeTitle", defaultValue: "Your target", comment: "Small kicker heading above the user's own written target for a qualitative goal"))
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(SomaTokens.ink3)
                 Text(qualitativeTarget)
                     .font(SomaType.metric(20))
-                Text("Progress here is sessions done plus your own check-in — no invented numbers.")
+                Text(String(localized: "goalStart.targetBlock.qualitativeCaption", defaultValue: "Progress here is sessions done plus your own check-in — no invented numbers.", comment: "Small caption clarifying how progress is tracked for a qualitative goal"))
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink3)
             }
@@ -267,13 +284,13 @@ struct GoalStartView: View {
             // Baseline recorded but the evidence table has no band for it
             // -- record honestly, promise nothing.
             CardView {
-                Text("Baseline recorded")
+                Text(String(localized: "goalStart.targetBlock.recordedTitle", defaultValue: "Baseline recorded", comment: "Small kicker heading shown when a baseline was entered but no evidence band matched it"))
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.8)
                     .foregroundStyle(SomaTokens.ink3)
                 Text(baselineText)
                     .font(Theme.display)
-                Text("In ~5 days we'll confirm your baseline — second attempts usually score higher.")
+                Text(String(localized: "goalStart.targetBlock.confirmNote", defaultValue: "In ~5 days we'll confirm your baseline — second attempts usually score higher.", comment: "Small note explaining the baseline will be re-confirmed a few days in"))
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink3)
             }
@@ -296,13 +313,14 @@ struct GoalStartView: View {
 
     private var scheduleCard: some View {
         CardView {
-            Text("Schedule")
+            Text(String(localized: "goalCreation.schedule.title", defaultValue: "Schedule", comment: "Card heading above the frequency/schedule picker for a goal block"))
                 .font(.body.bold())
             ScheduleFrequencyPicker(
                 frequencyPerWeek: $frequencyPerWeek,
                 scheduleRule: $scheduleRule,
                 scheduleDays: $scheduleDays,
-                courtDays: $courtDays
+                courtDays: $courtDays,
+                showFrequencySheet: $showFrequencySheet
             )
         }
     }

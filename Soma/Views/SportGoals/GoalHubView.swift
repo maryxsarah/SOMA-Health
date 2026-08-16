@@ -160,7 +160,7 @@ struct GoalHubView: View {
                     pausedBanner
                 }
                 if resumeNeedsRebaseline {
-                    inlineNotice("Your starting point moved — we'll re-measure first.")
+                    inlineNotice(String(localized: "goalHub.notice.rebaselineNeeded", defaultValue: "Your starting point moved — we'll re-measure first.", comment: "Inline notice shown when resuming a goal whose baseline went stale and needs a re-measurement"))
                 }
 
                 header
@@ -206,24 +206,24 @@ struct GoalHubView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("End this goal", role: .destructive) { showEndDialog = true }
+                    Button(endGoalActionTitle, role: .destructive) { showEndDialog = true }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .foregroundStyle(SomaTokens.ink3)
-                        .accessibilityLabel("Goal options")
+                        .accessibilityLabel(String(localized: "goalHub.accessibility.goalOptions", defaultValue: "Goal options", comment: "Accessibility label for the top-right goal-options menu button"))
                 }
             }
         }
         .confirmationDialog(
-            "End this goal?",
+            String(localized: "goalHub.endDialog.title", defaultValue: "End this goal?", comment: "Title of the confirmation dialog shown when the user chooses to end a goal"),
             isPresented: $showEndDialog,
             titleVisibility: .visible
         ) {
-            Button("Pause instead") { Task { await pause() } }
-            Button("End this goal", role: .destructive) { Task { await end() } }
-            Button("Cancel", role: .cancel) {}
+            Button(String(localized: "goalHub.endDialog.pauseInstead", defaultValue: "Pause instead", comment: "Confirmation dialog action offering to pause the goal instead of ending it")) { Task { await pause() } }
+            Button(endGoalActionTitle, role: .destructive) { Task { await end() } }
+            Button(String(localized: "goalHub.endDialog.cancel", defaultValue: "Cancel", comment: "Confirmation dialog action that dismisses the end-goal dialog without acting"), role: .cancel) {}
         } message: {
-            Text("Your measurements stay in your history.")
+            Text(String(localized: "goalHub.endDialog.message", defaultValue: "Your measurements stay in your history.", comment: "Confirmation dialog message shown when ending a goal, reassuring the user their data isn't deleted"))
         }
         .task { await load() }
     }
@@ -277,7 +277,7 @@ struct GoalHubView: View {
     private var etaLines: some View {
         if goal.kind == .custom {
             if let recheck = goal.recheckDate.flatMap(SportGoalFormat.parseDay) {
-                Text("Re-check with your coach around \(SportGoalFormat.shortDate(recheck))")
+                Text(String(localized: "goalHub.eta.customRecheck", defaultValue: "Re-check with your coach around \(SportGoalFormat.shortDate(recheck))", comment: "ETA line for a custom goal; placeholder is the formatted re-check date"))
                     .font(.system(size: 14))
                     .foregroundStyle(SomaTokens.ink2)
             }
@@ -285,7 +285,7 @@ struct GoalHubView: View {
             if let target = goal.targetRangeText(unit: unit),
                let lo = goal.etaStart.flatMap(SportGoalFormat.parseDay),
                let hi = goal.etaEnd.flatMap(SportGoalFormat.parseDay) {
-                Text("≈ \(target) by \(SportGoalFormat.dateRange(lo, hi))")
+                Text(String(localized: "goalHub.eta.presetRange", defaultValue: "≈ \(target) by \(SportGoalFormat.dateRange(lo, hi))", comment: "ETA line for a preset goal; first placeholder is the target range text, second is the formatted date range"))
                     .font(.system(size: 14))
                     .foregroundStyle(SomaTokens.ink2)
             }
@@ -293,20 +293,20 @@ struct GoalHubView: View {
             if isMilestone, let index = currentStageIndex, ladder.indices.contains(index + 1) {
                 let next = SportGoal.stageDisplayName(ladder[index + 1])
                 if let horizon = goal.horizonWeeks {
-                    Text("\(next) — next stage · usually \(horizon.low)–\(horizon.high) weeks")
+                    Text(String(localized: "goalHub.eta.nextStageWithHorizon", defaultValue: "\(next) — next stage · usually \(horizon.low)–\(horizon.high) weeks", comment: "ETA line for a milestone goal's next stage with an estimated week range; first placeholder is the next stage's name, second and third are the low/high week bounds"))
                         .font(.system(size: 14))
                         .foregroundStyle(SomaTokens.ink2)
                 } else {
-                    Text("\(next) — the next stage on the ladder")
+                    Text(String(localized: "goalHub.eta.nextStageNoHorizon", defaultValue: "\(next) — the next stage on the ladder", comment: "ETA line for a milestone goal's next stage with no estimated timeframe; placeholder is the next stage's name"))
                         .font(.system(size: 14))
                         .foregroundStyle(SomaTokens.ink2)
                 }
             }
             // A goal "in words" shows the words themselves as its target.
             if presetGoal?.kind == .qualitative, let words = goal.targetText, !words.isEmpty {
-                Text("“\(words)”")
+                Text(String(localized: "goalHub.eta.qualitativeQuoted", defaultValue: "“\(words)”", comment: "The user's own free-text goal words shown in quotation marks as the target; placeholder is the free text. Keep the locale-appropriate quotation marks around the placeholder."))
                     .font(SomaType.metric(20))
-                Text("Progress is sessions done plus your own check-in — no invented numbers.")
+                Text(String(localized: "goalHub.eta.qualitativeCaption", defaultValue: "Progress is sessions done plus your own check-in — no invented numbers.", comment: "Caption under a qualitative (in-words) goal's target text"))
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink3)
             }
@@ -331,7 +331,7 @@ struct GoalHubView: View {
            let start = goal.startDate,
            Date().timeIntervalSince(start) < 7 * 86400,
            !measurements.contains(where: { $0.kind == .baselineConfirm }) {
-            Text("Confirm your baseline in ~5 days — second attempts usually score higher. The better of the two becomes your starting point.")
+            Text(String(localized: "goalHub.baselineConfirmNote", defaultValue: "Confirm your baseline in ~5 days — second attempts usually score higher. The better of the two becomes your starting point.", comment: "Week-1 explainer card: user will be asked to confirm their baseline again in ~5 days"))
                 .font(.system(size: 12.5))
                 .foregroundStyle(SomaTokens.ink2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -352,9 +352,9 @@ struct GoalHubView: View {
 
     private var unavailableBanner: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Temporarily unavailable")
+            Text(String(localized: "goalHub.unavailable.title", defaultValue: "Temporarily unavailable", comment: "Banner title shown when a preset goal's sport program has gone offline server-side"))
                 .font(.system(size: 13.5, weight: .bold))
-            Text("This goal's program is offline right now. Your measurements and history stay right here.")
+            Text(String(localized: "goalHub.unavailable.message", defaultValue: "This goal's program is offline right now. Your measurements and history stay right here.", comment: "Banner message shown when a preset goal's sport program has gone offline server-side"))
                 .font(.system(size: 13))
                 .foregroundStyle(SomaTokens.ink2)
         }
@@ -367,25 +367,27 @@ struct GoalHubView: View {
     private var pausedBanner: some View {
         VStack(alignment: .leading, spacing: 8) {
             if goal.pauseReason == .safety {
-                Text("Safely paused")
+                Text(String(localized: "goalHub.paused.safety.title", defaultValue: "Safely paused", comment: "Banner title: goal was automatically paused for safety reasons"))
                     .font(.system(size: 13.5, weight: .bold))
-                Text("This goal's training isn't recommended for you right now, so it's safely paused. Your data stays put.")
+                Text(String(localized: "goalHub.paused.safety.message", defaultValue: "This goal's training isn't recommended for you right now, so it's safely paused. Your data stays put.", comment: "Banner message explaining why a goal was safely paused"))
                     .font(.system(size: 13))
                     .foregroundStyle(SomaTokens.ink2)
-                Button("Switch to a safe goal") { onPickNewGoal() }
+                Button(String(localized: "goalHub.paused.safety.switchGoal", defaultValue: "Switch to a safe goal", comment: "Button on the safety-paused banner that opens goal picking again")) { onPickNewGoal() }
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(SomaTokens.accent)
                     .buttonStyle(.plain)
             } else {
-                Text("On hold — not counting. Resume anytime.")
+                Text(String(localized: "goalHub.paused.user.title", defaultValue: "On hold — not counting. Resume anytime.", comment: "Banner title: goal was paused by the user themselves"))
                     .font(.system(size: 13.5, weight: .bold))
                 HStack(spacing: 16) {
-                    Button(isWorking ? "Resuming…" : "Resume") { Task { await resume() } }
+                    Button(isWorking
+                        ? String(localized: "goalHub.paused.user.resuming", defaultValue: "Resuming…", comment: "Resume button label while the resume action is in flight")
+                        : String(localized: "goalHub.paused.user.resume", defaultValue: "Resume", comment: "Button that resumes a user-paused goal")) { Task { await resume() } }
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(SomaTokens.accent)
                         .buttonStyle(.plain)
                         .disabled(isWorking)
-                    Button("Start a different goal") { onPickNewGoal() }
+                    Button(String(localized: "goalHub.paused.user.startDifferentGoal", defaultValue: "Start a different goal", comment: "Button on the user-paused banner that opens goal picking again")) { onPickNewGoal() }
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(SomaTokens.ink3)
                         .buttonStyle(.plain)
@@ -397,7 +399,13 @@ struct GoalHubView: View {
         .glassCardFlat(cornerRadius: SomaTokens.rXL)
     }
 
-    private func inlineNotice(_ text: LocalizedStringKey) -> some View {
+    /// Shared "End this goal" label, used both as the destructive menu item
+    /// and the destructive dialog action -- same text, same meaning.
+    private var endGoalActionTitle: String {
+        String(localized: "goalHub.action.endGoal", defaultValue: "End this goal", comment: "Destructive action title: ends the current goal block, used both as a menu item and a confirmation-dialog button")
+    }
+
+    private func inlineNotice(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 13))
             .foregroundStyle(SomaTokens.ink2)
@@ -412,7 +420,7 @@ struct GoalHubView: View {
     /// gets an honest description instead of a guessed one (see UpcomingSessions).
     private var upcomingCard: some View {
         CardView {
-            Text("Upcoming")
+            Text(String(localized: "goalHub.upcoming.title", defaultValue: "Upcoming", comment: "Card title for the upcoming-sessions preview"))
                 .font(.body.bold())
             switch UpcomingSessions.display(scheduleRule: goal.scheduleRule, scheduleDays: goal.scheduleDays, courtDays: goal.courtDays) {
             case .dates(let dates):
@@ -429,10 +437,10 @@ struct GoalHubView: View {
 
     private var sessionsCard: some View {
         CardView {
-            Text("Sessions")
+            Text(String(localized: "goalHub.sessions.title", defaultValue: "Sessions", comment: "Card title for the sessions-done counter"))
                 .font(.body.bold())
             if let committed = goal.committedSessions {
-                Text("\(sessionsDone) of \(committed)")
+                Text(String(localized: "goalHub.sessions.doneOfCommitted", defaultValue: "\(sessionsDone) of \(committed)", comment: "Sessions counter: sessions completed vs. committed total; both placeholders are counts"))
                     .font(Theme.display)
                 let fraction = min(Double(sessionsDone) / Double(max(committed, 1)), 1)
                 GeometryReader { geo in
@@ -443,7 +451,7 @@ struct GoalHubView: View {
                 }
                 .frame(height: 6)
             } else {
-                Text("\(sessionsDone) done since you started")
+                Text(String(localized: "goalHub.sessions.doneSinceStart", defaultValue: "\(sessionsDone) done since you started", comment: "Sessions counter with no committed total set; placeholder is the sessions-done count"))
                     .font(.system(size: 15, weight: .semibold))
             }
         }
@@ -455,16 +463,16 @@ struct GoalHubView: View {
     /// indices would dress ordinals up as measurements (copy rule 2).
     private var stageCard: some View {
         CardView {
-            Text("Progress")
+            Text(progressCardTitle)
                 .font(.body.bold())
             if let index = currentStageIndex, ladder.indices.contains(index) {
                 Text(SportGoal.stageDisplayName(ladder[index]))
                     .font(SomaType.metric(24))
-                Text("Stage \(index + 1) of \(ladder.count) — stage-based, no numbers needed.")
+                Text(String(localized: "goalHub.stage.progressCaption", defaultValue: "Stage \(index + 1) of \(ladder.count) — stage-based, no numbers needed.", comment: "Caption under the current stage name; both placeholders are counts (current stage position, total stages)"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("No stage recorded yet — your starting stage begins the ladder.")
+                Text(String(localized: "goalHub.stage.noneRecorded", defaultValue: "No stage recorded yet — your starting stage begins the ladder.", comment: "Caption shown when a milestone goal has no recorded stage yet"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -473,7 +481,7 @@ struct GoalHubView: View {
 
     private var chartCard: some View {
         CardView {
-            Text("Progress")
+            Text(progressCardTitle)
                 .font(.body.bold())
             let values = measurements.map { (date: $0.dayString, value: $0.value) }
             if values.count >= 2 {
@@ -481,15 +489,21 @@ struct GoalHubView: View {
             } else if values.count == 1 {
                 Text(SportGoalFormat.value(values[0].value, unit: unit))
                     .font(SomaType.metric(24))
-                Text("Only one data point so far.")
+                Text(String(localized: "goalHub.chart.onePoint", defaultValue: "Only one data point so far.", comment: "Caption shown when a metric goal has exactly one measurement so far"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("No measurements yet — your baseline starts the chart.")
+                Text(String(localized: "goalHub.chart.noMeasurements", defaultValue: "No measurements yet — your baseline starts the chart.", comment: "Caption shown when a metric goal has no measurements yet"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Shared "Progress" card title -- used by both the stage ladder card and
+    /// the metric trend-chart card.
+    private var progressCardTitle: String {
+        String(localized: "goalHub.progress.title", defaultValue: "Progress", comment: "Card title shown above either the stage ladder or the trend chart")
     }
 
     // MARK: - Re-test (A4, in place)
@@ -558,17 +572,17 @@ struct GoalHubView: View {
     private func retestButtonTitle(_ event: RetestEvent) -> String {
         if isMilestone {
             return switch event {
-            case .rebaseline: "Re-check your stage"
-            case .baselineConfirm: "Confirm your stage"
-            case .checkpoint: "Mid-block check-in"
-            case .final: "Final check-in"
+            case .rebaseline: String(localized: "goalHub.retest.button.recheckStage", defaultValue: "Re-check your stage", comment: "Button title: opens the re-test entry for a milestone goal whose baseline stage needs re-checking")
+            case .baselineConfirm: String(localized: "goalHub.retest.button.confirmStage", defaultValue: "Confirm your stage", comment: "Button title: opens the re-test entry to confirm a milestone goal's starting stage")
+            case .checkpoint: String(localized: "goalHub.retest.button.midBlockCheckIn", defaultValue: "Mid-block check-in", comment: "Button title: opens the mid-block check-in for a milestone goal")
+            case .final: String(localized: "goalHub.retest.button.finalCheckIn", defaultValue: "Final check-in", comment: "Button title: opens the final check-in for a milestone goal")
             }
         }
         return switch event {
-        case .rebaseline: "Re-measure your baseline"
-        case .baselineConfirm: "Confirm your baseline"
-        case .checkpoint: "Mid-block re-test"
-        case .final: "Final re-test"
+        case .rebaseline: String(localized: "goalHub.retest.button.remeasureBaseline", defaultValue: "Re-measure your baseline", comment: "Button title: opens the re-test entry to re-measure a metric goal's baseline")
+        case .baselineConfirm: String(localized: "goalHub.retest.button.confirmBaseline", defaultValue: "Confirm your baseline", comment: "Button title: opens the re-test entry to confirm a metric goal's baseline")
+        case .checkpoint: String(localized: "goalHub.retest.button.midBlockRetest", defaultValue: "Mid-block re-test", comment: "Button title: opens the mid-block re-test for a metric goal")
+        case .final: String(localized: "goalHub.retest.button.finalRetest", defaultValue: "Final re-test", comment: "Button title: opens the final re-test for a metric goal")
         }
     }
 
@@ -603,9 +617,9 @@ struct GoalHubView: View {
 
     private var deferredRow: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Not today — recovery is low.")
+            Text(String(localized: "goalHub.retest.deferred.title", defaultValue: "Not today — recovery is low.", comment: "Title shown when a max-effort re-test is deferred because readiness is too low"))
                 .font(.system(size: 13.5, weight: .semibold))
-            Text("A max test on a depleted day under-reads you. It'll open on your next moderate or better day.")
+            Text(String(localized: "goalHub.retest.deferred.message", defaultValue: "A max test on a depleted day under-reads you. It'll open on your next moderate or better day.", comment: "Explanation shown when a max-effort re-test is deferred because readiness is too low"))
                 .font(.system(size: 12.5))
                 .foregroundStyle(SomaTokens.ink3)
         }
@@ -620,7 +634,7 @@ struct GoalHubView: View {
     private func retestEntryCard(_ event: RetestEvent) -> some View {
         CardView {
             if let reminder = presetGoal?.protocolLines.first {
-                Text("Same setup as always: \(reminder.prefix(1).lowercased() + reminder.dropFirst())")
+                Text(String(localized: "goalHub.retest.protocolReminder", defaultValue: "Same setup as always: \(reminder.prefix(1).lowercased() + reminder.dropFirst())", comment: "Reminder line above a re-test entry, restating the goal's measurement protocol; placeholder is the protocol description, first letter lowercased"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -633,7 +647,9 @@ struct GoalHubView: View {
                     }
                 }
                 SomaButton(
-                    title: isWorking ? "Saving…" : "Save \(retestStage.map(SportGoal.stageDisplayName) ?? "your stage")",
+                    title: LocalizedStringKey(isWorking
+                        ? savingButtonTitle
+                        : String(localized: "goalHub.retest.saveStage", defaultValue: "Save \(retestStage.map(SportGoal.stageDisplayName) ?? stageFallbackText)", comment: "Save button for a milestone re-test entry; placeholder is the selected stage name, or a generic fallback if none is picked yet")),
                     size: .md,
                     variant: .primary,
                     isEnabled: !isWorking && retestStage != nil
@@ -648,12 +664,14 @@ struct GoalHubView: View {
                     unit: unit
                 )
                 HStack {
-                    Text(attempts.isEmpty ? "Best of 3 counts" : "Attempts: \(attempts.map { SportGoalFormat.value($0) }.joined(separator: " · "))")
+                    Text(attempts.isEmpty
+                        ? String(localized: "goalHub.retest.bestOf3", defaultValue: "Best of 3 counts", comment: "Caption shown before any attempt is recorded, explaining that the best of 3 attempts is used")
+                        : String(localized: "goalHub.retest.attemptsList", defaultValue: "Attempts: \(attempts.map { SportGoalFormat.value($0) }.joined(separator: " · "))", comment: "List of recorded re-test attempts so far; placeholder is the attempt values joined with a middle dot"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
                     if attempts.count < 3 {
-                        Button("Record attempt \(attempts.count + 1)") {
+                        Button(String(localized: "goalHub.retest.recordAttempt", defaultValue: "Record attempt \(attempts.count + 1)", comment: "Button that records the current ruler value as a re-test attempt; placeholder is the upcoming attempt number")) {
                             attempts.append(retestValue)
                         }
                         .font(.system(size: 13, weight: .semibold))
@@ -663,7 +681,9 @@ struct GoalHubView: View {
                 }
                 let best = attempts.max() ?? retestValue
                 SomaButton(
-                    title: isWorking ? "Saving…" : "Save \(SportGoalFormat.value(best, unit: unit))",
+                    title: LocalizedStringKey(isWorking
+                        ? savingButtonTitle
+                        : String(localized: "goalHub.retest.saveValue", defaultValue: "Save \(SportGoalFormat.value(best, unit: unit))", comment: "Save button for a metric re-test entry; placeholder is the best recorded value with its unit")),
                     size: .md,
                     variant: .primary,
                     isEnabled: !isWorking
@@ -671,7 +691,7 @@ struct GoalHubView: View {
                     Task { await saveRetest(event, value: best) }
                 }
             }
-            Button("Not now") { retestExpanded = false }
+            Button(String(localized: "goalHub.retest.notNow", defaultValue: "Not now", comment: "Button that collapses the re-test entry without saving")) { retestExpanded = false }
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SomaTokens.ink3)
                 .buttonStyle(.plain)
@@ -679,43 +699,62 @@ struct GoalHubView: View {
         }
     }
 
+    /// Generic fallback stage name shown before any stage chip is picked.
+    private var stageFallbackText: String {
+        String(localized: "goalHub.retest.stageFallback", defaultValue: "your stage", comment: "Generic fallback stage name used in the milestone re-test save button before a stage is picked")
+    }
+
+    /// Shared "Saving…" label, used by both the milestone and metric re-test
+    /// save buttons while the save request is in flight.
+    private var savingButtonTitle: String {
+        String(localized: "goalHub.retest.saving", defaultValue: "Saving…", comment: "Save button label while a re-test/baseline save is in flight")
+    }
+
     @ViewBuilder
     private func retestResultCard(_ result: RetestResult) -> some View {
         switch result {
         case .confirmed(let value):
             CardView {
-                Text(isMilestone ? "Stage confirmed" : "Baseline confirmed")
+                Text(isMilestone
+                    ? String(localized: "goalHub.retest.result.stageConfirmed", defaultValue: "Stage confirmed", comment: "Result card title after confirming a milestone goal's starting stage")
+                    : String(localized: "goalHub.retest.result.baselineConfirmed", defaultValue: "Baseline confirmed", comment: "Result card title after confirming a metric goal's baseline"))
                     .font(.body.bold())
                 Text(measurementText(value))
                     .font(Theme.display)
-                Text("This is your official starting point for the block.")
+                Text(String(localized: "goalHub.retest.result.officialStartingPoint", defaultValue: "This is your official starting point for the block.", comment: "Caption under a confirmed baseline/stage value"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 dismissResultButton
             }
         case .noChange:
             CardView {
-                Text(isMilestone ? "Same stage — normal at this point." : "No change yet — normal at this stage.")
+                Text(isMilestone
+                    ? String(localized: "goalHub.retest.result.sameStage", defaultValue: "Same stage — normal at this point.", comment: "Result card title when a milestone re-test shows no stage change")
+                    : String(localized: "goalHub.retest.result.noChange", defaultValue: "No change yet — normal at this stage.", comment: "Result card title when a metric re-test shows no measurable change"))
                     .font(.body.bold())
                 Text(isMilestone
-                    ? "Stages take time to unlock. Session data still shows the work happening."
-                    : "The re-test landed within measurement noise. Session data still shows the work happening.")
+                    ? String(localized: "goalHub.retest.result.stagesTakeTime", defaultValue: "Stages take time to unlock. Session data still shows the work happening.", comment: "Explanation under a no-stage-change result")
+                    : String(localized: "goalHub.retest.result.withinNoise", defaultValue: "The re-test landed within measurement noise. Session data still shows the work happening.", comment: "Explanation under a no-measurable-change result"))
                     .font(.system(size: 13))
                     .foregroundStyle(SomaTokens.ink2)
                 dismissResultButton
             }
         case .progress(let value, let delta):
             CardView {
-                Text(isMilestone ? (delta > 0 ? "New stage" : "Stage recorded") : "Progress")
+                Text(isMilestone
+                    ? (delta > 0
+                        ? String(localized: "goalHub.retest.result.newStage", defaultValue: "New stage", comment: "Result card title when a milestone re-test moved up the ladder")
+                        : String(localized: "goalHub.retest.result.stageRecorded", defaultValue: "Stage recorded", comment: "Result card title when a milestone re-test recorded a stage with no forward move"))
+                    : progressCardTitle)
                     .font(.body.bold())
                 Text(isMilestone ? measurementText(value) : SportGoalFormat.delta(delta, unit: unit))
                     .font(Theme.display)
                     .foregroundStyle(SomaTokens.accent)
                 Text(isMilestone
                     ? (delta > 0
-                        ? "Up from \(measurementText(value - delta))."
-                        : "An earlier stage than last time — stages wobble, the work still counts.")
-                    : "Now at \(SportGoalFormat.value(value, unit: unit))\(targetPositionSuffix(delta))")
+                        ? String(localized: "goalHub.retest.result.upFrom", defaultValue: "Up from \(measurementText(value - delta)).", comment: "Explanation showing the previous stage a milestone re-test moved up from; placeholder is the previous stage's display name")
+                        : String(localized: "goalHub.retest.result.earlierStage", defaultValue: "An earlier stage than last time — stages wobble, the work still counts.", comment: "Explanation shown when a milestone re-test recorded an earlier stage than before"))
+                    : String(localized: "goalHub.retest.result.nowAt", defaultValue: "Now at \(SportGoalFormat.value(value, unit: unit))\(targetPositionSuffix(delta))", comment: "Explanation showing the current metric value, optionally with the target range appended; first placeholder is the formatted value, second is an optional target-range suffix (may be empty)"))
                     .font(.system(size: 13))
                     .foregroundStyle(SomaTokens.ink2)
                 dismissResultButton
@@ -746,32 +785,42 @@ struct GoalHubView: View {
                 Spacer()
             }
             if achieved {
-                Text("1 session a week keeps your gains.")
+                Text(String(localized: "goalHub.retest.result.gainsReminder", defaultValue: "1 session a week keeps your gains.", comment: "Maintenance reminder shown after achieving a goal's final result"))
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink3)
                 if let goalId = goal.goalId {
-                    SomaButton(title: "Next block", size: .md, variant: .primary) {
+                    SomaButton(title: LocalizedStringKey(nextBlockButtonTitle), size: .md, variant: .primary) {
                         onNextBlock(goalId, value)
                     }
                 }
-                SomaButton(title: "New goal", size: .md, variant: .secondary) {
+                SomaButton(title: LocalizedStringKey(newGoalButtonTitle), size: .md, variant: .secondary) {
                     onPickNewGoal()
                 }
             } else {
                 if let goalId = goal.goalId {
-                    SomaButton(title: "Extend the block", size: .md, variant: .primary) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "goalHub.retest.result.extendBlock", defaultValue: "Extend the block", comment: "Button offered on a non-achieved final result: extends the current block instead of starting a new goal")), size: .md, variant: .primary) {
                         onNextBlock(goalId, value)
                     }
                 }
-                SomaButton(title: "New goal", size: .md, variant: .secondary) {
+                SomaButton(title: LocalizedStringKey(newGoalButtonTitle), size: .md, variant: .secondary) {
                     onPickNewGoal()
                 }
             }
         }
     }
 
+    private var nextBlockButtonTitle: String {
+        String(localized: "goalHub.retest.result.nextBlock", defaultValue: "Next block", comment: "Button offered on an achieved final result: starts the next block of the same goal")
+    }
+
+    /// Shared "New goal" label, offered on both the achieved and
+    /// not-achieved final-result cards.
+    private var newGoalButtonTitle: String {
+        String(localized: "goalHub.retest.result.newGoal", defaultValue: "New goal", comment: "Button offered on a final result card: opens goal picking for a new goal")
+    }
+
     private var dismissResultButton: some View {
-        Button("Done") {
+        Button(String(localized: "goalHub.retest.result.done", defaultValue: "Done", comment: "Button that dismisses a re-test result card")) {
             retestResult = nil
             retestExpanded = false
         }
@@ -789,9 +838,9 @@ struct GoalHubView: View {
 
     private var coachShareCard: some View {
         CardView {
-            Text("For your coach")
+            Text(String(localized: "goalHub.coachShare.title", defaultValue: "For your coach", comment: "Card title for the coach-export share card"))
                 .font(.body.bold())
-            Text("Sessions done and your measurements as one card — send it back to \(goal.coachName.map { "Coach \($0)" } ?? "your coach").")
+            Text(String(localized: "goalHub.coachShare.description", defaultValue: "Sessions done and your measurements as one card — send it back to \(coachShareRecipient).", comment: "Explanation of the coach-export share card; placeholder is the recipient text (either a named coach or a generic fallback)"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             AchievementCardShareLink(variant: .coachExport(
@@ -806,6 +855,14 @@ struct GoalHubView: View {
         }
     }
 
+    /// Recipient phrase for the coach-export description line: the named
+    /// coach if set, else a generic fallback.
+    private var coachShareRecipient: String {
+        goal.coachName.map {
+            String(localized: "goalHub.coachShare.recipientNamed", defaultValue: "Coach \($0)", comment: "Coach export share card: recipient label when the goal has a named coach; placeholder is the coach's name")
+        } ?? String(localized: "goalHub.coachShare.recipientFallback", defaultValue: "your coach", comment: "Coach export share card: generic recipient fallback when no coach name is set")
+    }
+
     // MARK: - History
 
     private var completedHistory: [UserGoal] {
@@ -814,7 +871,7 @@ struct GoalHubView: View {
 
     private var historySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("BLOCK HISTORY")
+            Text(String(localized: "goalHub.history.sectionTitle", defaultValue: "BLOCK HISTORY", comment: "All-caps section header above the list of completed goal blocks"))
                 .font(.system(size: 11, weight: .bold))
                 .tracking(0.5)
                 .foregroundStyle(SomaTokens.ink4)
@@ -869,7 +926,9 @@ struct GoalHubView: View {
     @ViewBuilder
     private var footer: some View {
         if goal.status == .active {
-            Button(isWorking ? "Pausing…" : "Pause goal") { Task { await pause() } }
+            Button(isWorking
+                ? String(localized: "goalHub.footer.pausing", defaultValue: "Pausing…", comment: "Pause-goal button label while the pause action is in flight")
+                : String(localized: "goalHub.footer.pauseGoal", defaultValue: "Pause goal", comment: "Footer button that pauses the current goal")) { Task { await pause() } }
                 .font(.system(size: 13.5, weight: .semibold))
                 .foregroundStyle(SomaTokens.ink3)
                 .buttonStyle(.plain)

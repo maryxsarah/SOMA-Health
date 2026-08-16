@@ -23,9 +23,9 @@ struct TrainingHistoryView: View {
                             .padding(.top, 40)
                     } else if logs.isEmpty {
                         CardView {
-                            Text("No workouts logged yet")
+                            Text(String(localized: "trainingHistory.empty.title", defaultValue: "No workouts logged yet", comment: "Training history: empty-state title"))
                                 .font(.body.bold())
-                            Text("Completed workouts from the last 30 days will show up here.")
+                            Text(String(localized: "trainingHistory.empty.subtitle", defaultValue: "Completed workouts from the last 30 days will show up here.", comment: "Training history: empty-state subtitle"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -57,7 +57,7 @@ struct TrainingHistoryView: View {
                 .padding(20)
             }
             .somaBackground()
-            .navigationTitle("Training History")
+            .navigationTitle(String(localized: "trainingHistory.navigationTitle", defaultValue: "Training History", comment: "Navigation title for the training history list"))
             .navigationBarTitleDisplayMode(.inline)
         }
         .sheet(isPresented: Binding(

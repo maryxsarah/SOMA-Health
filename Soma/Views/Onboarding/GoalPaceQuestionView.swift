@@ -23,9 +23,9 @@ struct GoalPaceQuestionView: View {
             OnboardingTopBar(progress: progress, onBack: onBack)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("How fast do you want to reach your goal?")
+                Text(String(localized: "goalPace.title", defaultValue: "How fast do you want to reach your goal?", comment: "Headline on the goal pace question step"))
                     .font(Theme.display)
-                Text("Your speed to reach your goal.")
+                Text(String(localized: "goalPace.subtitle", defaultValue: "Your speed to reach your goal.", comment: "Subtitle on the goal pace question step"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -90,7 +90,7 @@ struct GoalPaceQuestionView: View {
 
             Spacer()
 
-            PillButton(title: "Continue", action: onContinue)
+            PillButton(title: LocalizedStringKey(String(localized: "goalPace.continueButton", defaultValue: "Continue", comment: "Continue button on the goal pace question step")), action: onContinue)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }

@@ -80,7 +80,7 @@ struct LogManualWorkoutView: View {
                 // "Done", which uses .confirmationAction, not .cancellationAction
                 // (the latter renders leading and put this on the wrong side).
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(String(localized: "logWorkout.cancel", defaultValue: "Cancel", comment: "Log-activity form: cancel button in the toolbar")) { dismiss() }
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(SomaTokens.accent)
                         .padding(.horizontal, 16)
@@ -118,7 +118,7 @@ struct LogManualWorkoutView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Effort")
+                Text(String(localized: "logWorkout.effort.label", defaultValue: "Effort", comment: "Log-activity form: label for the effort/intensity picker"))
                     .font(SomaType.eyebrow)
                     .tracking(0.6)
                     .textCase(.uppercase)
@@ -239,7 +239,7 @@ struct LogManualWorkoutView: View {
 
     private var notesCard: some View {
         CardView {
-            Text("Notes (optional)")
+            Text(String(localized: "logWorkout.section.notes", defaultValue: "Notes (optional)", comment: "Log-activity form: header for the optional notes section"))
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(SomaTokens.ink)
             TextField(String(localized: "logWorkout.notes.placeholder", defaultValue: "Anything worth remembering", comment: "Log-activity form: placeholder for the optional free-text notes field"), text: $notes, axis: .vertical)

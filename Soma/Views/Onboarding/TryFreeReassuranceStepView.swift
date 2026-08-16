@@ -14,11 +14,11 @@ struct TryFreeReassuranceStepView: View {
                 .allowsHitTesting(false)
 
             VStack(spacing: 14) {
-                Text("We want you to try Soma for free")
+                Text(String(localized: "onboarding.tryFreeReassurance.title", defaultValue: "We want you to try Soma for free", comment: "Headline on the try-for-free reassurance step"))
                     .font(Theme.display)
                     .multilineTextAlignment(.center)
 
-                Label("No Payment Due Now", systemImage: "checkmark.circle.fill")
+                Label(LocalizedStringKey(String(localized: "onboarding.tryFreeReassurance.paymentBadge", defaultValue: "No Payment Due Now", comment: "Reassurance badge indicating no payment is due now")), systemImage: "checkmark.circle.fill")
                     .font(.body.bold())
                     .foregroundStyle(Theme.pillFill)
             }
@@ -26,7 +26,7 @@ struct TryFreeReassuranceStepView: View {
 
             Spacer()
 
-            PillButton(title: "Try Now", action: onContinue)
+            PillButton(title: LocalizedStringKey(String(localized: "onboarding.tryFreeReassurance.continueButton", defaultValue: "Try Now", comment: "Continue button on the try-for-free reassurance step")), action: onContinue)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }

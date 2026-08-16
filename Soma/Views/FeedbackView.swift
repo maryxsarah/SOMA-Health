@@ -50,11 +50,11 @@ struct FeedbackView: View {
                 .padding(20)
             }
             .somaBackground()
-            .navigationTitle("Feedback")
+            .navigationTitle(String(localized: "feedback.navigationTitle", defaultValue: "Feedback", comment: "Navigation title for the feedback form"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button(String(localized: "feedback.close", defaultValue: "Close", comment: "Feedback form: close button in the toolbar")) { dismiss() }
                 }
             }
         }
@@ -62,11 +62,11 @@ struct FeedbackView: View {
 
     private var formContent: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Found a bug or have an idea? It goes straight to the team.")
+            Text(String(localized: "feedback.intro", defaultValue: "Found a bug or have an idea? It goes straight to the team.", comment: "Feedback form: intro copy above the type picker"))
                 .font(.body)
                 .foregroundStyle(.secondary)
 
-            Picker("Type", selection: $type) {
+            Picker(String(localized: "feedback.typePicker.label", defaultValue: "Type", comment: "Feedback form: label for the bug/idea/other type picker"), selection: $type) {
                 ForEach(FeedbackType.allCases, id: \.self) { t in
                     Text(t.label).tag(t)
                 }
@@ -103,7 +103,9 @@ struct FeedbackView: View {
             }
 
             PillButton(
-                title: isSending ? "Sending…" : "Send",
+                title: LocalizedStringKey(isSending
+                    ? String(localized: "feedback.cta.sending", defaultValue: "Sending…", comment: "Feedback form: primary CTA button label while the report is sending")
+                    : String(localized: "feedback.cta.send", defaultValue: "Send", comment: "Feedback form: primary CTA button label")),
                 isEnabled: !isSending && !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ) {
                 Task { await send() }
@@ -111,7 +113,7 @@ struct FeedbackView: View {
 
             // Disclosed, not buried: the user sees exactly what rides along
             // with their words before they hit Send.
-            Text("Sent with your report: Soma \(Self.appVersion) (\(Self.build)), iOS \(Self.osVersion), \(Self.deviceModel), and your account ID.")
+            Text(String(localized: "feedback.disclosure", defaultValue: "Sent with your report: Soma \(Self.appVersion) (\(Self.build)), iOS \(Self.osVersion), \(Self.deviceModel), and your account ID.", comment: "Feedback form: disclosure of diagnostic info sent alongside the report"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -122,16 +124,16 @@ struct FeedbackView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.largeTitle)
                 .foregroundStyle(Theme.pillFill)
-            Text("Thank you!")
+            Text(String(localized: "feedback.sent.title", defaultValue: "Thank you!", comment: "Feedback form: headline shown after a report is sent"))
                 .font(.title3.bold())
             let noun = type == .bug
                 ? String(localized: "feedback.noun.report", defaultValue: "report", comment: "Noun substituted into 'Your ___ is in.' for a bug report")
                 : String(localized: "feedback.noun.feedback", defaultValue: "feedback", comment: "Noun substituted into 'Your ___ is in.' for general feedback")
-            Text("Your \(noun) is in. It helps more than you'd think.")
+            Text(String(localized: "feedback.sent.body", defaultValue: "Your \(noun) is in. It helps more than you'd think.", comment: "Feedback form: body text shown after a report is sent; noun is 'report' or 'feedback'"))
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            PillButton(title: "Done") { dismiss() }
+            PillButton(title: LocalizedStringKey(String(localized: "feedback.sent.done", defaultValue: "Done", comment: "Feedback form: button dismissing the confirmation after sending"))) { dismiss() }
                 .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)

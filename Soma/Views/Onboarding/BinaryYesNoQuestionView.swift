@@ -30,11 +30,11 @@ struct BinaryYesNoQuestionView: View {
             Spacer()
 
             VStack(spacing: 10) {
-                PillButton(title: "Yes") { onAnswer(true) }
+                PillButton(title: LocalizedStringKey(String(localized: "onboarding.binaryYesNo.yesButton", defaultValue: "Yes", comment: "Affirmative answer button on a yes/no onboarding question"))) { onAnswer(true) }
                 Button {
                     onAnswer(false)
                 } label: {
-                    Text("No")
+                    Text(String(localized: "onboarding.binaryYesNo.noButton", defaultValue: "No", comment: "Negative answer button on a yes/no onboarding question"))
                         .font(.body.bold())
                         .foregroundStyle(SomaTokens.inkParagraph)
                         .frame(maxWidth: .infinity)

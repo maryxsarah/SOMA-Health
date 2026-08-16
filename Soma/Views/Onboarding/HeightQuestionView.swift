@@ -14,9 +14,9 @@ struct HeightQuestionView: View {
             OnboardingTopBar(progress: progress, onBack: onBack)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("What's your height?")
+                Text(String(localized: "onboarding.height.title", defaultValue: "What's your height?", comment: "Headline on the height question step"))
                     .font(Theme.display)
-                Text("Used to personalize your training and nutrition targets.")
+                Text(String(localized: "onboarding.height.subtitle", defaultValue: "Used to personalize your training and nutrition targets.", comment: "Subtitle on the height question step"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -30,7 +30,7 @@ struct HeightQuestionView: View {
 
             Spacer()
 
-            PillButton(title: "Continue", action: onContinue)
+            PillButton(title: LocalizedStringKey(String(localized: "onboarding.height.continueButton", defaultValue: "Continue", comment: "Continue button on the height question step")), action: onContinue)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }

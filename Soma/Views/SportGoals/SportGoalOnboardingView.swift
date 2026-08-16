@@ -22,14 +22,16 @@ struct SportGoalOnboardingView: View {
                 header
                 gallery
                 dots
-                SomaButton(title: slide == slideCount - 1 ? "Pick a goal" : "Next", size: .lg, variant: .primary) {
+                SomaButton(title: LocalizedStringKey(slide == slideCount - 1
+                    ? String(localized: "sportGoalOnboarding.cta.pickGoal", defaultValue: "Pick a goal", comment: "Sport-goal onboarding gallery: primary CTA on the last slide, opens the sport picker")
+                    : String(localized: "sportGoalOnboarding.cta.next", defaultValue: "Next", comment: "Sport-goal onboarding gallery: primary CTA advancing to the next slide")), size: .lg, variant: .primary) {
                     if slide == slideCount - 1 {
                         onPickGoal()
                     } else {
                         withAnimation(.easeOut(duration: 0.38)) { slide += 1 }
                     }
                 }
-                Button("Skip — I'll find it later") { onClose() }
+                Button(String(localized: "sportGoalOnboarding.skip", defaultValue: "Skip — I'll find it later", comment: "Sport-goal onboarding gallery: button to dismiss without picking a goal yet")) { onClose() }
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(SomaTokens.ink3)
                     .buttonStyle(.plain)
@@ -44,14 +46,14 @@ struct SportGoalOnboardingView: View {
 
     private var header: some View {
         HStack(spacing: 7) {
-            Text("NEW")
+            Text(String(localized: "sportGoalOnboarding.newBadge", defaultValue: "NEW", comment: "Sport-goal onboarding gallery: small uppercase 'NEW' badge"))
                 .font(.system(size: 10, weight: .bold))
                 .tracking(0.6)
                 .foregroundStyle(.white)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(SomaTokens.accent))
-            Text("SPORT GOALS")
+            Text(String(localized: "sportGoalOnboarding.header", defaultValue: "SPORT GOALS", comment: "Sport-goal onboarding gallery: uppercase header eyebrow"))
                 .font(.system(size: 12, weight: .bold))
                 .tracking(0.6)
                 .foregroundStyle(SomaTokens.ink4)
@@ -72,21 +74,21 @@ struct SportGoalOnboardingView: View {
     private var gallery: some View {
         TabView(selection: $slide) {
             slideView(vignette: whereToFindVignette,
-                      title: "Where to find it",
-                      sub: "Start from this Home card — or anytime via Profile → Training → My goal. The beta switch lives in Account.",
+                      title: LocalizedStringKey(String(localized: "sportGoalOnboarding.slide1.title", defaultValue: "Where to find it", comment: "Sport-goal onboarding gallery slide 1 title")),
+                      sub: LocalizedStringKey(String(localized: "sportGoalOnboarding.slide1.sub", defaultValue: "Start from this Home card — or anytime via Profile → Training → My goal. The beta switch lives in Account.", comment: "Sport-goal onboarding gallery slide 1 subtitle")),
                       subIsBold: true)
                 .tag(0)
             slideView(vignette: flowVignette,
-                      title: "Sport first, then a goal in it",
-                      sub: "Named, measurable presets like \"Jump higher\" — or your own custom goal from a coach. One at a time.")
+                      title: LocalizedStringKey(String(localized: "sportGoalOnboarding.slide2.title", defaultValue: "Sport first, then a goal in it", comment: "Sport-goal onboarding gallery slide 2 title")),
+                      sub: LocalizedStringKey(String(localized: "sportGoalOnboarding.slide2.sub", defaultValue: "Named, measurable presets like \"Jump higher\" — or your own custom goal from a coach. One at a time.", comment: "Sport-goal onboarding gallery slide 2 subtitle")))
                 .tag(1)
             slideView(vignette: targetVignette,
-                      title: "Get an honest target — and train it",
-                      sub: "A real range, never a promise. A 10–20 min goal block joins your daily plan, matched to readiness.")
+                      title: LocalizedStringKey(String(localized: "sportGoalOnboarding.slide3.title", defaultValue: "Get an honest target — and train it", comment: "Sport-goal onboarding gallery slide 3 title")),
+                      sub: LocalizedStringKey(String(localized: "sportGoalOnboarding.slide3.sub", defaultValue: "A real range, never a promise. A 10–20 min goal block joins your daily plan, matched to readiness.", comment: "Sport-goal onboarding gallery slide 3 subtitle")))
                 .tag(2)
             slideView(vignette: coachVignette,
-                      title: "Or bring your coach's task",
-                      sub: "Attach the assignment as photo or text, do the work in Soma, show your coach the progress.")
+                      title: LocalizedStringKey(String(localized: "sportGoalOnboarding.slide4.title", defaultValue: "Or bring your coach's task", comment: "Sport-goal onboarding gallery slide 4 title")),
+                      sub: LocalizedStringKey(String(localized: "sportGoalOnboarding.slide4.sub", defaultValue: "Attach the assignment as photo or text, do the work in Soma, show your coach the progress.", comment: "Sport-goal onboarding gallery slide 4 subtitle")))
                 .tag(3)
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -138,9 +140,9 @@ struct SportGoalOnboardingView: View {
 
     private var whereToFindVignette: some View {
         VStack(spacing: 8) {
-            pathRow(icon: "target", accent: true, text: "Home → Train for your sport")
-            pathRow(icon: "person", accent: false, text: "Profile → Training → My goal → Pick a goal")
-            pathRow(icon: "gearshape", accent: false, text: "Account → Sport goals (beta)", trailingToggle: true)
+            pathRow(icon: "target", accent: true, text: LocalizedStringKey(String(localized: "sportGoalOnboarding.path.home", defaultValue: "Home → Train for your sport", comment: "Sport-goal onboarding gallery: path row showing where to find the feature from Home")))
+            pathRow(icon: "person", accent: false, text: LocalizedStringKey(String(localized: "sportGoalOnboarding.path.profile", defaultValue: "Profile → Training → My goal → Pick a goal", comment: "Sport-goal onboarding gallery: path row showing where to find the feature from Profile")))
+            pathRow(icon: "gearshape", accent: false, text: LocalizedStringKey(String(localized: "sportGoalOnboarding.path.account", defaultValue: "Account → Sport goals (beta)", comment: "Sport-goal onboarding gallery: path row showing where the beta toggle lives")), trailingToggle: true)
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SomaTokens.surface3))
@@ -191,11 +193,11 @@ struct SportGoalOnboardingView: View {
     private var flowVignette: some View {
         VStack(spacing: 7) {
             miniRow(icon: "figure.volleyball", plate: SomaTokens.accentSoft, iconColor: SomaTokens.accent,
-                    text: "Volleyball", badge: nil, indented: false)
+                    text: LocalizedStringKey(String(localized: "sportGoalOnboarding.flow.volleyball", defaultValue: "Volleyball", comment: "Sport-goal onboarding gallery: example sport name in the flow illustration")), badge: nil, indented: false)
             miniRow(icon: "arrow.up", plate: SomaTokens.accentSoft, iconColor: SomaTokens.accent,
-                    text: "Jump higher", badge: ("sportGoal.kindBadge.metric", true), indented: true)
+                    text: LocalizedStringKey(String(localized: "sportGoalOnboarding.flow.jumpHigher", defaultValue: "Jump higher", comment: "Sport-goal onboarding gallery: example preset goal name in the flow illustration")), badge: ("sportGoal.kindBadge.metric", true), indented: true)
             miniRow(icon: "list.clipboard", plate: SomaTokens.heartSoft, iconColor: SomaTokens.heart,
-                    text: "Coach's task", badge: ("sportGoal.kindBadge.custom", false), indented: true)
+                    text: LocalizedStringKey(String(localized: "sportGoalOnboarding.flow.coachTask", defaultValue: "Coach's task", comment: "Sport-goal onboarding gallery: example custom goal name in the flow illustration")), badge: ("sportGoal.kindBadge.custom", false), indented: true)
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SomaTokens.surface3))
@@ -244,15 +246,15 @@ struct SportGoalOnboardingView: View {
     private var targetVignette: some View {
         VStack(spacing: 6) {
             VStack(spacing: 2) {
-                Text("+3–6 cm")
+                Text(String(localized: "sportGoalOnboarding.target.range", defaultValue: "+3–6 cm", comment: "Sport-goal onboarding gallery: example evidence-band target range"))
                     .font(SomaType.sheetTitle)
-                Text("in 10–12 weeks — an honest range")
+                Text(String(localized: "sportGoalOnboarding.target.horizon", defaultValue: "in 10–12 weeks — an honest range", comment: "Sport-goal onboarding gallery: example target horizon caption"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(SomaTokens.ink4)
             }
             OnboardingTrendGraphic()
                 .frame(height: 58)
-            Text("41 → 44 cm · week 6")
+            Text(String(localized: "sportGoalOnboarding.target.trend", defaultValue: "41 → 44 cm · week 6", comment: "Sport-goal onboarding gallery: example progress trend caption"))
                 .font(.system(size: 11))
                 .foregroundStyle(SomaTokens.ink4)
         }
@@ -275,9 +277,9 @@ struct SportGoalOnboardingView: View {
                         .foregroundStyle(SomaTokens.heart)
                 )
             VStack(alignment: .leading, spacing: 2) {
-                Text("Coach's task · photo attached")
+                Text(String(localized: "sportGoalOnboarding.coach.title", defaultValue: "Coach's task · photo attached", comment: "Sport-goal onboarding gallery slide 4: coach's-task illustration title"))
                     .font(.system(size: 13.5, weight: .semibold))
-                Text("Sessions & measurements export as one card")
+                Text(String(localized: "sportGoalOnboarding.coach.sub", defaultValue: "Sessions & measurements export as one card", comment: "Sport-goal onboarding gallery slide 4: coach's-task illustration subtitle"))
                     .font(.system(size: 11.5))
                     .foregroundStyle(SomaTokens.ink4)
             }

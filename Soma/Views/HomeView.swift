@@ -571,7 +571,7 @@ struct HomeView: View {
                     HStack(spacing: 6) {
                         ProgressRing(fraction: Double(checklistDone) / Double(checklistTotal))
                             .frame(width: 14, height: 14)
-                        Text("\(checklistDone)/\(checklistTotal)")
+                        Text(String(localized: "home.greetingRow.checklistProgress", defaultValue: "\(checklistDone)/\(checklistTotal)", comment: "Home: greeting row ring-pill showing checklist items done out of total, e.g. '3/5'"))
                             .font(.system(size: 12, weight: .bold))
                     }
                     .foregroundStyle(SomaTokens.accent)
@@ -676,11 +676,11 @@ struct HomeView: View {
                     .padding(20)
             }
             .somaSheetBackground()
-            .navigationTitle("Today's checklist")
+            .navigationTitle(String(localized: "home.checklist.sheetTitle", defaultValue: "Today's checklist", comment: "Home: navigation title for the checklist sheet"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showChecklistSheet = false }
+                    Button(String(localized: "home.checklist.doneButton", defaultValue: "Done", comment: "Home: button that dismisses the checklist sheet")) { showChecklistSheet = false }
                 }
             }
         }
@@ -761,7 +761,7 @@ struct HomeView: View {
                     // without this, a zero-signal "moderate" reads exactly
                     // like a real one until they tap through to Detail.
                     if recommendation.reason == .insufficientData {
-                        Text("Building your baseline")
+                        Text(String(localized: "home.readiness.buildingBaseline", defaultValue: "Building your baseline", comment: "Home: badge shown on the readiness card while there isn't enough data yet for a real reading"))
                             .font(.caption.bold())
                             .foregroundStyle(.orange)
                     }
@@ -774,7 +774,7 @@ struct HomeView: View {
                 VStack(alignment: .trailing, spacing: 8) {
                     HStack(spacing: 6) {
                         readinessRefreshButton
-                        Text("TODAY")
+                        Text(String(localized: "home.readiness.todayBadge", defaultValue: "TODAY", comment: "Home: small all-caps badge on the readiness card marking it as today's reading"))
                             .font(.system(size: 10.5, weight: .bold))
                             .tracking(0.5)
                             .foregroundStyle(SomaTokens.accent)
@@ -821,7 +821,7 @@ struct HomeView: View {
             if todaysWorkoutLog != nil {
                 // Today's session is already logged -- reviewing it is the
                 // action now; the detail sheet shows the completed state.
-                SomaButton(title: "Check workout details", size: .lg, variant: .secondary) {
+                SomaButton(title: LocalizedStringKey(String(localized: "home.readiness.checkWorkoutDetailsButton", defaultValue: "Check workout details", comment: "Home: readiness card CTA once today's workout is already logged")), size: .lg, variant: .secondary) {
                     openTodaysWorkoutDetail()
                 }
             } else {
@@ -829,7 +829,7 @@ struct HomeView: View {
                 // openTodaysWorkoutDetail() branches on todaysWorkoutLog
                 // itself, so both buttons can share one implementation
                 // instead of this one re-inlining the nil-case directly.
-                SomaButton(title: "Start workout", size: .lg, variant: .primary) {
+                SomaButton(title: LocalizedStringKey(String(localized: "home.readiness.startWorkoutButton", defaultValue: "Start workout", comment: "Home: readiness card primary CTA when nothing is logged yet")), size: .lg, variant: .primary) {
                     openTodaysWorkoutDetail()
                 }
             }
@@ -923,16 +923,16 @@ struct HomeView: View {
                 Button {
                     showRestDayOptions = true
                 } label: {
-                    Text("Not feeling it today?")
+                    Text(String(localized: "home.restDay.prompt", defaultValue: "Not feeling it today?", comment: "Home: link that opens the rest-day/active-recovery request options"))
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(SomaTokens.accent)
                 }
                 .buttonStyle(.plain)
                 .disabled(isSettingRestDayRequest)
-                .confirmationDialog("Request a different day", isPresented: $showRestDayOptions, titleVisibility: .visible) {
-                    Button("Rest day") { Task { await setRestDayRequest(.rest) } }
-                    Button("Active recovery") { Task { await setRestDayRequest(.light) } }
-                    Button("Cancel", role: .cancel) {}
+                .confirmationDialog(String(localized: "home.restDay.dialogTitle", defaultValue: "Request a different day", comment: "Home: title of the confirmation dialog for requesting a rest or active-recovery day"), isPresented: $showRestDayOptions, titleVisibility: .visible) {
+                    Button(String(localized: "home.restDay.restDayOption", defaultValue: "Rest day", comment: "Home: rest-day request dialog option")) { Task { await setRestDayRequest(.rest) } }
+                    Button(String(localized: "home.restDay.activeRecoveryOption", defaultValue: "Active recovery", comment: "Home: rest-day request dialog option")) { Task { await setRestDayRequest(.light) } }
+                    Button(String(localized: "home.restDay.cancelOption", defaultValue: "Cancel", comment: "Home: rest-day request dialog cancel option"), role: .cancel) {}
                 }
             }
         }
@@ -1057,7 +1057,7 @@ struct HomeView: View {
                     Image(systemName: "face.smiling")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(SomaTokens.accent)
-                    Text("Mood")
+                    Text(String(localized: "home.widget.mood.eyebrow", defaultValue: "Mood", comment: "Home: mood widget tile eyebrow label"))
                         .font(.system(size: 10.5, weight: .bold))
                         .tracking(0.6)
                         .foregroundStyle(SomaTokens.ink4)
@@ -1080,7 +1080,7 @@ struct HomeView: View {
                     Image(systemName: "face.smiling")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(SomaTokens.accent)
-                    Text("Mood")
+                    Text(String(localized: "home.widget.mood.eyebrow", defaultValue: "Mood", comment: "Home: mood widget tile eyebrow label"))
                         .font(.system(size: 10.5, weight: .bold))
                         .tracking(0.6)
                         .foregroundStyle(SomaTokens.ink4)
@@ -1263,7 +1263,7 @@ struct HomeView: View {
                 Image(systemName: "flame.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(currentStreak > 0 ? SomaTokens.accent : SomaTokens.ink4)
-                Text("Streak")
+                Text(String(localized: "home.widget.streak.eyebrow", defaultValue: "Streak", comment: "Home: streak widget tile eyebrow label"))
                     .font(.system(size: 10.5, weight: .bold))
                     .tracking(0.6)
                     .foregroundStyle(SomaTokens.ink4)
@@ -1271,15 +1271,15 @@ struct HomeView: View {
             }
             Text(currentStreak > 0
                 ? String(localized: "profile.header.streakDays", defaultValue: "\(currentStreak)-day streak", comment: "Profile header status line: current workout streak length in days")
-                : String(localized: "No active streak", defaultValue: "No active streak", comment: "Streak widget headline when there is no current streak"))
+                : String(localized: "home.widget.streak.inactiveHeadline", defaultValue: "No active streak", comment: "Streak widget headline when there is no current streak"))
                 .font(currentStreak > 0 ? Theme.display : .system(size: 14.5, weight: .semibold))
                 .fontWidth(currentStreak > 0 ? .condensed : nil)
                 .padding(.top, 3)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Text(currentStreak > 0
-                ? String(localized: "Keep showing up -- consistency compounds.", defaultValue: "Keep showing up -- consistency compounds.", comment: "Streak widget subtitle when a streak is active")
-                : String(localized: "Log a workout today to start one.", defaultValue: "Log a workout today to start one.", comment: "Streak widget subtitle when there is no current streak"))
+                ? String(localized: "home.widget.streak.activeSubtitle", defaultValue: "Keep showing up -- consistency compounds.", comment: "Streak widget subtitle when a streak is active")
+                : String(localized: "home.widget.streak.inactiveSubtitle", defaultValue: "Log a workout today to start one.", comment: "Streak widget subtitle when there is no current streak"))
                 .font(.system(size: 11.5))
                 .foregroundStyle(SomaTokens.ink5)
                 .padding(.top, 2)
@@ -1309,7 +1309,7 @@ struct HomeView: View {
                 Image(systemName: "drop.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(waterGoalReached ? SomaTokens.success : SomaTokens.accent)
-                Text("Water")
+                Text(String(localized: "home.widget.water.eyebrow", defaultValue: "Water", comment: "Home: water widget tile eyebrow label"))
                     .font(.system(size: 10.5, weight: .bold))
                     .tracking(0.6)
                     .foregroundStyle(SomaTokens.ink4)
@@ -1324,7 +1324,7 @@ struct HomeView: View {
                 Text("\(waterGlassesToday)")
                     .font(Theme.display)
                     .fontWidth(.condensed)
-                Text("/ 8")
+                Text(String(localized: "home.widget.water.goalSuffix", defaultValue: "/ 8", comment: "Home: water widget fragment shown after the glass count, denoting the daily goal of 8 glasses"))
                     .font(.system(size: 13))
                     .foregroundStyle(SomaTokens.ink4)
             }
@@ -1371,7 +1371,7 @@ struct HomeView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("\(waterGlassesToday) of 8 glasses"))
+        .accessibilityLabel(Text(String(localized: "home.widget.water.accessibilityCount", defaultValue: "\(waterGlassesToday) of 8 glasses", comment: "Home: VoiceOver summary of the water droplet row")))
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: waterGlassesToday = min(waterGlassesToday + 1, 8)
@@ -1399,7 +1399,7 @@ struct HomeView: View {
             .buttonStyle(.plain)
             .disabled(waterGlassesToday == 0)
             .opacity(waterGlassesToday == 0 ? 0.35 : 1)
-            .accessibilityLabel(Text("Remove a glass of water"))
+            .accessibilityLabel(Text(String(localized: "home.widget.water.removeGlassAccessibility", defaultValue: "Remove a glass of water", comment: "Home: VoiceOver label for the water widget's minus button")))
 
             Spacer(minLength: 0)
 
@@ -1411,7 +1411,7 @@ struct HomeView: View {
                 Button {
                     cycleWaterGlassSize()
                 } label: {
-                    Text("\(waterGlassSizeML) ml")
+                    Text(String(localized: "home.widget.water.glassSizeChip", defaultValue: "\(waterGlassSizeML) ml", comment: "Home: water widget chip showing the current glass size, e.g. '250 ml'"))
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(SomaTokens.accent)
                         .lineLimit(1)
@@ -1421,7 +1421,7 @@ struct HomeView: View {
                         .background(Capsule().fill(SomaTokens.accentSoft10))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(Text("Glass size, \(waterGlassSizeML) milliliters. Double tap to change."))
+                .accessibilityLabel(Text(String(localized: "home.widget.water.glassSizeAccessibility", defaultValue: "Glass size, \(waterGlassSizeML) milliliters. Double tap to change.", comment: "Home: VoiceOver label for the water widget's glass-size chip")))
             }
 
             Spacer(minLength: 0)
@@ -1437,7 +1437,7 @@ struct HomeView: View {
                     .glassLens()
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text("Add a glass of water"))
+            .accessibilityLabel(Text(String(localized: "home.widget.water.addGlassAccessibility", defaultValue: "Add a glass of water", comment: "Home: VoiceOver label for the water widget's plus button")))
         }
     }
 
@@ -1447,7 +1447,7 @@ struct HomeView: View {
             Image(systemName: "moon.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SomaTokens.accent)
-            Text("Sleep")
+            Text(String(localized: "home.widget.sleep.eyebrow", defaultValue: "Sleep", comment: "Home: sleep widget tile eyebrow label"))
                 .font(.system(size: 10.5, weight: .bold))
                 .tracking(0.6)
                 .foregroundStyle(SomaTokens.ink4)
@@ -1518,7 +1518,7 @@ struct HomeView: View {
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                                     .padding(.horizontal, 8)
-                                    .padding(.vertical, 6)
+                                    .padding(.vertical, 4)
                                     .frame(maxWidth: .infinity)
                                     .glassLens(cornerRadius: 999)
                             }
@@ -1714,7 +1714,7 @@ struct HomeView: View {
             Button {
                 trainingSource = .somasPick
             } label: {
-                Text("Soma's pick")
+                Text(String(localized: "home.trainingSource.somasPick", defaultValue: "Soma's pick", comment: "Home: training-source toggle option for the AI-generated plan"))
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(trainingSource == .somasPick ? SomaTokens.accent : SomaTokens.ink4)
                     .frame(maxWidth: .infinity)
@@ -1727,7 +1727,7 @@ struct HomeView: View {
             Button {
                 trainingSource = .custom
             } label: {
-                Text("Custom training")
+                Text(String(localized: "home.trainingSource.custom", defaultValue: "Custom training", comment: "Home: training-source toggle option for picking a sport type directly"))
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(trainingSource == .custom ? SomaTokens.accent : SomaTokens.ink4)
                     .frame(maxWidth: .infinity)
@@ -1764,7 +1764,7 @@ struct HomeView: View {
                             .foregroundStyle(SomaTokens.accent)
                     }
                 } else {
-                    Text("CUSTOM TRAINING")
+                    Text(String(localized: "home.customTraining.eyebrow", defaultValue: "CUSTOM TRAINING", comment: "Home: custom-training card fallback eyebrow tag before a sport type is picked"))
                         .font(.system(size: 11, weight: .bold))
                         .tracking(0.7)
                         .foregroundStyle(SomaTokens.accent)
@@ -1773,18 +1773,18 @@ struct HomeView: View {
                 Button {
                     showCustomTrainingPicker = true
                 } label: {
-                    Text("Change type")
+                    Text(String(localized: "home.customTraining.changeTypeButton", defaultValue: "Change type", comment: "Home: custom-training card button that opens the sport-type picker"))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(SomaTokens.ink4)
                 }
                 .buttonStyle(.plain)
             }
-            Text(selectedCustomSport?.name ?? "Pick a sport type")
+            Text(selectedCustomSport?.name ?? String(localized: "home.customTraining.pickSportTypeFallback", defaultValue: "Pick a sport type", comment: "Home: custom-training card headline before a sport type is picked"))
                 .font(Theme.display)
-            Text("Custom training by sport type is coming soon — Soma will build sport-specific sessions here. For now, Soma's pick still adapts to today's readiness.")
+            Text(String(localized: "home.customTraining.comingSoonBody", defaultValue: "Custom training by sport type is coming soon — Soma will build sport-specific sessions here. For now, Soma's pick still adapts to today's readiness.", comment: "Home: custom-training card body explaining the feature isn't built yet"))
                 .font(.system(size: 13.5))
                 .foregroundStyle(SomaTokens.ink3)
-            SomaButton(title: "Back to Soma's pick", size: .md, variant: .secondary, isBlock: false) {
+            SomaButton(title: LocalizedStringKey(String(localized: "home.customTraining.backToSomasPickButton", defaultValue: "Back to Soma's pick", comment: "Home: custom-training card button that switches back to the AI-generated plan")), size: .md, variant: .secondary, isBlock: false) {
                 trainingSource = .somasPick
             }
         }
@@ -1797,7 +1797,7 @@ struct HomeView: View {
     private var dashboardDockAction: DashboardDockAction {
         DashboardDockAction(
             id: "dashboard", assetImage: "soma.dock.dashboard", style: .gel,
-            label: "Dashboard",
+            label: LocalizedStringKey(String(localized: "home.dock.dashboard.label", defaultValue: "Dashboard", comment: "Home: dock/More-sheet visible label for the health dashboard icon")),
             accessibilityLabel: String(localized: "home.dock.dashboard", defaultValue: "Health dashboard", comment: "Home: floating dock icon that opens the health dashboard's overview section"),
             action: {
                 AnalyticsManager.shared.featureUsed(name: "health_dashboard")
@@ -1811,7 +1811,7 @@ struct HomeView: View {
     private var logWorkoutDockAction: DashboardDockAction {
         DashboardDockAction(
             id: "logWorkout", assetImage: "soma.dock.log",
-            label: "Log workout",
+            label: LocalizedStringKey(String(localized: "home.dock.logWorkout.label", defaultValue: "Log workout", comment: "Home: dock/More-sheet visible label for the log-workout icon")),
             accessibilityLabel: String(localized: "home.dock.logWorkout", defaultValue: "Log workout", comment: "Home: floating dock icon that opens the manual workout log form"),
             action: { showLogManualWorkout = true }
         )
@@ -1823,12 +1823,12 @@ struct HomeView: View {
     private var configurableDockActions: [DashboardDockAction] {
         [
             DashboardDockAction(
-                id: "scanGym", assetImage: "soma.dock.scan", label: "Scan gym",
+                id: "scanGym", assetImage: "soma.dock.scan", label: LocalizedStringKey(String(localized: "home.dock.scanGym.label", defaultValue: "Scan gym", comment: "Home: dock/More-sheet visible label for the scan-gym icon")),
                 accessibilityLabel: String(localized: "home.dock.scanGym", defaultValue: "Scan the gym", comment: "Home: floating dock icon that opens the gym-photo workout flow"),
                 action: performScanGymAction
             ),
             DashboardDockAction(
-                id: "activity", assetImage: "soma.dock.activity", label: "Activity",
+                id: "activity", assetImage: "soma.dock.activity", label: LocalizedStringKey(String(localized: "home.dock.activity.label", defaultValue: "Activity", comment: "Home: dock/More-sheet visible label for the activity icon")),
                 accessibilityLabel: String(localized: "home.dock.activity", defaultValue: "Activity", comment: "Home: floating dock icon that opens the health dashboard's activity section"),
                 action: {
                     AnalyticsManager.shared.featureUsed(name: "health_dashboard")
@@ -1837,7 +1837,7 @@ struct HomeView: View {
                 }
             ),
             DashboardDockAction(
-                id: "goals", assetImage: "soma.dock.goal", label: "Goals",
+                id: "goals", assetImage: "soma.dock.goal", label: LocalizedStringKey(String(localized: "home.dock.goals.label", defaultValue: "Goals", comment: "Home: dock/More-sheet visible label for the sport goal icon")),
                 accessibilityLabel: String(localized: "home.dock.goals", defaultValue: "Sport goal", comment: "Home: floating dock icon that opens the sport goal flow"),
                 // Stable hook for XCUITest (see UITests/CASES.md) -- same
                 // reasoning as "dock-more-button"/"profile-button": the old
@@ -1857,7 +1857,7 @@ struct HomeView: View {
     private var overflowDockActions: [DashboardDockAction] {
         [
             DashboardDockAction(
-                id: "nutrition", assetImage: "soma.dock.nutrition", label: "Nutrition",
+                id: "nutrition", assetImage: "soma.dock.nutrition", label: LocalizedStringKey(String(localized: "home.dock.nutrition.label", defaultValue: "Nutrition", comment: "Home: dock/More-sheet visible label for the nutrition icon")),
                 accessibilityLabel: String(localized: "home.dock.nutrition", defaultValue: "Nutrition", comment: "Home: More-sheet icon that opens today's nutrition"),
                 action: {
                     AnalyticsManager.shared.featureUsed(name: "nutrition_home_card")
@@ -1865,7 +1865,7 @@ struct HomeView: View {
                 }
             ),
             DashboardDockAction(
-                id: "photos", systemImage: "photo.on.rectangle.angled", label: "Photos",
+                id: "photos", systemImage: "photo.on.rectangle.angled", label: LocalizedStringKey(String(localized: "home.dock.photos.label", defaultValue: "Photos", comment: "Home: dock/More-sheet visible label for the goal photo progress icon")),
                 accessibilityLabel: String(localized: "home.dock.photos", defaultValue: "Goal photo progress", comment: "Home: More-sheet icon that opens goal photo progress"),
                 action: {
                     AnalyticsManager.shared.featureUsed(name: "goal_progress_home_card")
@@ -1873,12 +1873,12 @@ struct HomeView: View {
                 }
             ),
             DashboardDockAction(
-                id: "widgets", systemImage: "square.grid.2x2.fill", label: "Widgets",
+                id: "widgets", systemImage: "square.grid.2x2.fill", label: LocalizedStringKey(String(localized: "home.dock.widgets.label", defaultValue: "Widgets", comment: "Home: dock/More-sheet visible label for the edit-widgets icon")),
                 accessibilityLabel: String(localized: "home.dock.widgets", defaultValue: "Edit widgets", comment: "Home: More-sheet icon that opens the edit-widgets sheet"),
                 action: { showEditWidgets = true }
             ),
             DashboardDockAction(
-                id: "profile", systemImage: "person.crop.circle.fill", label: "Profile",
+                id: "profile", systemImage: "person.crop.circle.fill", label: LocalizedStringKey(String(localized: "home.dock.profile.label", defaultValue: "Profile", comment: "Home: dock/More-sheet visible label for the profile icon")),
                 accessibilityLabel: String(localized: "home.dock.profile", defaultValue: "Profile", comment: "Home: More-sheet icon that opens the profile screen"),
                 // Stable hook for XCUITest (see UITests/CASES.md) -- Profile
                 // used to be a persistent top-row gear icon; it's now only
@@ -1894,7 +1894,7 @@ struct HomeView: View {
     private var moreDockAction: DashboardDockAction {
         DashboardDockAction(
             id: "more", assetImage: "soma.dock.more",
-            label: "More",
+            label: LocalizedStringKey(String(localized: "home.dock.more.label", defaultValue: "More", comment: "Home: dock/More-sheet visible label for the more-actions icon")),
             accessibilityLabel: String(localized: "home.dock.more", defaultValue: "More actions", comment: "Home: floating dock icon that opens the all-actions sheet"),
             accessibilityIdentifier: "dock-more-button",
             action: { showMoreActions = true }
@@ -1925,8 +1925,8 @@ struct HomeView: View {
                 if hasGoalBodyPhoto && hasCurrentBodyPhoto {
                     scanRowBody(
                         plate: SomaTokens.accentSoft, icon: "photo.on.rectangle.angled", iconColor: SomaTokens.accent,
-                        title: "Your progress",
-                        subtitle: "See how you're tracking toward your goal photo"
+                        title: LocalizedStringKey(String(localized: "home.goalProgress.yourProgress.title", defaultValue: "Your progress", comment: "Home: goal-progress row title once both goal and current photos exist")),
+                        subtitle: LocalizedStringKey(String(localized: "home.goalProgress.yourProgress.subtitle", defaultValue: "See how you're tracking toward your goal photo", comment: "Home: goal-progress row subtitle once both goal and current photos exist"))
                     ) {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 13, weight: .semibold))
@@ -1935,8 +1935,8 @@ struct HomeView: View {
                 } else {
                     scanRowBody(
                         plate: SomaTokens.accentSoft, icon: "camera.fill", iconColor: SomaTokens.accent,
-                        title: "Add your goal photo",
-                        subtitle: "Helps point your plan and nutrition in the right direction"
+                        title: LocalizedStringKey(String(localized: "home.goalProgress.addGoalPhoto.title", defaultValue: "Add your goal photo", comment: "Home: goal-progress row title before a goal photo is uploaded")),
+                        subtitle: LocalizedStringKey(String(localized: "home.goalProgress.addGoalPhoto.subtitle", defaultValue: "Helps point your plan and nutrition in the right direction", comment: "Home: goal-progress row subtitle before a goal photo is uploaded"))
                     ) {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 13, weight: .semibold))
@@ -2035,13 +2035,13 @@ struct HomeView: View {
             CardView {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Today's AI-generated workout")
+                        Text(String(localized: "home.aiPlanCard.eyebrow", defaultValue: "Today's AI-generated workout", comment: "Home: eyebrow label over today's AI-generated workout card"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Text(aiPlan.selectedTitle)
                             .font(.body.bold())
                         if aiPlan.source == "gym_photo" {
-                            Text("Generated with your gym picture")
+                            Text(String(localized: "home.aiPlanCard.gymPhotoNote", defaultValue: "Generated with your gym picture", comment: "Home: note shown on the AI-generated workout card when it was created from a gym photo scan"))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -2061,7 +2061,7 @@ struct HomeView: View {
     /// only be read on-device while Oura/Whoop are read server-side.
     private var timelineCard: some View {
         CardView {
-            Text("Today's timeline")
+            Text(String(localized: "home.timeline.title", defaultValue: "Today's timeline", comment: "Home: title for today's activity timeline card"))
                 .font(.body.bold())
             ForEach(timelineEntries) { entry in
                 HStack(alignment: .top) {
@@ -2088,9 +2088,9 @@ struct HomeView: View {
 
     private var needsDataCard: some View {
         CardView {
-            Text("Soma needs today's data")
+            Text(String(localized: "home.needsData.title", defaultValue: "Soma needs today's data", comment: "Home: title shown when there's no recommendation yet to display"))
                 .font(.body.bold())
-            Text("Pull to refresh, or check now.")
+            Text(String(localized: "home.needsData.subtitle", defaultValue: "Pull to refresh, or check now.", comment: "Home: subtitle shown when there's no recommendation yet to display"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -2100,7 +2100,7 @@ struct HomeView: View {
                     .foregroundStyle(.red)
             }
 
-            PillButton(title: "Check now", isEnabled: !isLoading) {
+            PillButton(title: LocalizedStringKey(String(localized: "home.needsData.checkNowButton", defaultValue: "Check now", comment: "Home: button that manually fetches today's recommendation")), isEnabled: !isLoading) {
                 Task { await checkNow() }
             }
         }
@@ -2358,7 +2358,11 @@ struct HomeView: View {
         else { return }
 
         let endedAt = Calendar.current.date(byAdding: .minute, value: entry.durationMinutes, to: entry.startTime) ?? entry.startTime
-        let caloriesNote = entry.calories.map { " -- \($0) kcal burned" } ?? ""
+        // Two full sentences rather than a fragment-translating a trailing
+        // optional clause -- same posture as the timeline entry text above.
+        let feedback = entry.calories.map { calories in
+            String(localized: "home.autoLog.feedbackWithCalories", defaultValue: "Detected automatically from \(entry.sourceDisplayName) -- \(calories) kcal burned.", comment: "Home: auto-generated workout-log note when a device-detected session is logged automatically, including calories burned")
+        } ?? String(localized: "home.autoLog.feedbackNoCalories", defaultValue: "Detected automatically from \(entry.sourceDisplayName).", comment: "Home: auto-generated workout-log note when a device-detected session is logged automatically, no calories reported")
 
         do {
             try await SupabaseClient.shared.logWorkout(
@@ -2366,7 +2370,7 @@ struct HomeView: View {
                 title: entry.title,
                 bodyPart: "full_body",
                 category: entry.inferredCategory,
-                feedback: "Detected automatically from \(entry.sourceDisplayName)\(caloriesNote).",
+                feedback: feedback,
                 startedAt: entry.startTime,
                 endedAt: endedAt,
                 source: "device_detected"

@@ -18,6 +18,14 @@ final class NotificationManager {
         return settings.authorizationStatus == .authorized
     }
 
+    /// True once the user has already answered the system prompt with "Don't
+    /// Allow" -- iOS never re-shows that prompt after a first denial, so
+    /// callers need this to route to Settings instead of re-requesting.
+    func isDenied() async -> Bool {
+        let settings = await center.notificationSettings()
+        return settings.authorizationStatus == .denied
+    }
+
     /// Fires immediately (nil trigger) with the day's fixed category/message.
     func scheduleImmediateNotification(category: RecommendationCategory, message: String) async {
         let content = UNMutableNotificationContent()

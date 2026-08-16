@@ -19,8 +19,8 @@ struct SomaDisclosure<Content: View, Accessory: View>: View {
     @State private var isOpen = false
 
     init(
-        closedLabel: LocalizedStringKey = "Why this?",
-        openLabel: LocalizedStringKey = "Hide details",
+        closedLabel: LocalizedStringKey = LocalizedStringKey(String(localized: "somaDisclosure.defaultClosedLabel", defaultValue: "Why this?", comment: "Default disclosure trigger label when a caller doesn't provide its own")),
+        openLabel: LocalizedStringKey = LocalizedStringKey(String(localized: "somaDisclosure.defaultOpenLabel", defaultValue: "Hide details", comment: "Default disclosure trigger label (open state) when a caller doesn't provide its own")),
         alignment: HorizontalAlignment = .leading,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder triggerAccessory: @escaping () -> Accessory = { EmptyView() }

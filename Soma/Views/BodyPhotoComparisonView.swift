@@ -58,22 +58,22 @@ struct BodyPhotoComparisonView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                 HStack {
-                    Text("Goal")
+                    Text(String(localized: "bodyPhotoComparison.goalLabel", defaultValue: "Goal", comment: "Body photo comparison: label under the goal photo"))
                         .font(.caption.bold())
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("Current")
+                    Text(String(localized: "bodyPhotoComparison.currentLabel", defaultValue: "Current", comment: "Body photo comparison: label under the current photo"))
                         .font(.caption.bold())
                         .foregroundStyle(.secondary)
                 }
             }
             .padding(20)
             .somaBackground()
-            .navigationTitle("Goal vs. Current")
+            .navigationTitle(String(localized: "bodyPhotoComparison.navigationTitle", defaultValue: "Goal vs. Current", comment: "Body photo comparison: navigation title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button(String(localized: "bodyPhotoComparison.close", defaultValue: "Close", comment: "Body photo comparison: close button in the toolbar")) { dismiss() }
                 }
             }
         }

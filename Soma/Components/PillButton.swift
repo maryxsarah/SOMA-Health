@@ -26,7 +26,7 @@ struct PillButton: View {
             Button(action: action) {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark")
-                    Text("Connected")
+                    Text(String(localized: "pillButton.connected", defaultValue: "Connected", comment: "Pill button label shown in the disabled 'connected' state"))
                         .font(.body.bold())
                 }
                 .lineLimit(1)

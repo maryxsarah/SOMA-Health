@@ -123,10 +123,10 @@ struct RecommendationDetailView: View {
                 CardView {
                     HStack(spacing: 9) {
                         sectionIcon("sparkles")
-                        Text("AI-generated workout")
+                        Text(String(localized: "recommendationDetail.aiWorkoutCard.title", defaultValue: "AI-generated workout", comment: "Title of the AI-generated-workout card"))
                             .font(.body.bold())
                     }
-                    Text("Exact exercises, sets, weights, and how to do each one — built around the workout you picked above.")
+                    Text(String(localized: "recommendationDetail.aiWorkoutCard.subtitle", defaultValue: "Exact exercises, sets, weights, and how to do each one — built around the workout you picked above.", comment: "Subtitle explaining what the AI-generated-workout card provides"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -148,7 +148,7 @@ struct RecommendationDetailView: View {
                         // (see `pickCard`) and this one takes over instead.
                         if !isCompletedToday {
                             HStack {
-                                Text("YOUR WORKOUT")
+                                Text(String(localized: "recommendationDetail.yourWorkoutEyebrow", defaultValue: "YOUR WORKOUT", comment: "All-caps eyebrow label over the AI-generated plan once one exists"))
                                     .font(SomaType.eyebrow)
                                     .tracking(0.7)
                                     .foregroundStyle(SomaTokens.accent)
@@ -163,7 +163,7 @@ struct RecommendationDetailView: View {
                                             Image(systemName: "arrow.triangle.2.circlepath")
                                                 .font(.system(size: 12, weight: .semibold))
                                         }
-                                        Text("Regenerate")
+                                        Text(String(localized: "recommendationDetail.regenerateButton", defaultValue: "Regenerate", comment: "Button that regenerates the AI workout plan for the current pick"))
                                             .font(.system(size: 12.5, weight: .semibold))
                                     }
                                     .foregroundStyle(SomaTokens.accent)
@@ -193,7 +193,7 @@ struct RecommendationDetailView: View {
                                     .foregroundStyle(.white)
                                     .frame(width: 28, height: 28)
                                     .background(Circle().fill(Color.yellow.gradient))
-                                Text("Workout completed today")
+                                Text(String(localized: "recommendationDetail.completedBadge", defaultValue: "Workout completed today", comment: "Badge shown once today's workout has been marked complete"))
                                     .font(.system(size: 13.5, weight: .bold))
                                     .foregroundStyle(.orange)
                                 Spacer(minLength: 0)
@@ -206,18 +206,18 @@ struct RecommendationDetailView: View {
                             if isFetchingAddons {
                                 HStack {
                                     ProgressView()
-                                    Text("Thinking of ideas for next time…")
+                                    Text(String(localized: "recommendationDetail.addonSuggestions.loading", defaultValue: "Thinking of ideas for next time…", comment: "Loading state while follow-up workout ideas are being fetched"))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                                 .padding(.top, 6)
                             } else if !addonSuggestions.isEmpty {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("Ideas for next time, based on your feedback")
+                                    Text(String(localized: "recommendationDetail.addonSuggestions.title", defaultValue: "Ideas for next time, based on your feedback", comment: "Header above the list of follow-up workout ideas"))
                                         .font(.caption.bold())
                                         .foregroundStyle(.secondary)
                                     ForEach(addonSuggestions, id: \.self) { suggestion in
-                                        Text("• \(suggestion)")
+                                        Text(String(localized: "recommendationDetail.addonSuggestions.bullet", defaultValue: "• \(suggestion)", comment: "One bulleted follow-up workout idea; placeholder is the server-provided suggestion text"))
                                             .font(.caption)
                                     }
                                 }
@@ -233,7 +233,7 @@ struct RecommendationDetailView: View {
                             }
 
                             if addedToPlan {
-                                Label("Added to today's plan", systemImage: "checkmark.circle.fill")
+                                Label(String(localized: "recommendationDetail.addedToPlanBadge", defaultValue: "Added to today's plan", comment: "Badge confirming the AI plan was added to today's plan"), systemImage: "checkmark.circle.fill")
                                     .font(.caption.bold())
                                     .foregroundStyle(.green)
                                     .padding(.top, 4)
@@ -250,7 +250,7 @@ struct RecommendationDetailView: View {
                             // makes the field scroll its own text once full,
                             // which fights the outer ScrollView's drag when
                             // you touch down over the text itself.
-                            TextField("Feedback for next time (optional)", text: $feedbackText, axis: .vertical)
+                            TextField(String(localized: "recommendationDetail.feedbackField.placeholder", defaultValue: "Feedback for next time (optional)", comment: "Placeholder for the optional post-workout feedback text field"), text: $feedbackText, axis: .vertical)
                                 .textFieldStyle(.roundedBorder)
                                 .lineLimit(2...)
                                 .padding(.top, 8)
@@ -271,7 +271,7 @@ struct RecommendationDetailView: View {
                         // See the feedback field above -- no upper bound,
                         // same reason (avoids the internal-scroll-vs-outer-
                         // ScrollView drag conflict).
-                        TextField("Anything Soma should know for today's workout? (optional)", text: $preGenerationNotes, axis: .vertical)
+                        TextField(String(localized: "recommendationDetail.preGenNotes.placeholder", defaultValue: "Anything Soma should know for today's workout? (optional)", comment: "Placeholder for the optional pre-generation notes text field"), text: $preGenerationNotes, axis: .vertical)
                             .textFieldStyle(.roundedBorder)
                             .lineLimit(2...)
                             .padding(.top, 4)
@@ -280,7 +280,7 @@ struct RecommendationDetailView: View {
 
                 if !openInjuryCheckins.isEmpty {
                     CardView {
-                        Text("Injury check-in")
+                        Text(String(localized: "recommendationDetail.injuryCheckin.title", defaultValue: "Injury check-in", comment: "Title of the injury check-in card"))
                             .font(.body.bold())
                         ForEach(openInjuryCheckins) { state in
                             injuryCheckinRow(state)
@@ -298,7 +298,7 @@ struct RecommendationDetailView: View {
                     HStack(alignment: .top, spacing: 12) {
                         sectionIcon("moon.fill")
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Look out for tomorrow")
+                            Text(String(localized: "recommendationDetail.tomorrowCard.title", defaultValue: "Look out for tomorrow", comment: "Title of the tomorrow's-tip card"))
                                 .font(.body.bold())
                             Text(personalizedTomorrowTip)
                                 .font(.subheadline)
@@ -330,7 +330,7 @@ struct RecommendationDetailView: View {
             }
             .buttonStyle(.plain)
             Spacer()
-            Text("TODAY")
+            Text(String(localized: "recommendationDetail.topNav.eyebrow", defaultValue: "TODAY", comment: "All-caps eyebrow label in the top navigation row"))
                 .font(.system(size: 11, weight: .bold))
                 .tracking(0.8)
                 .foregroundStyle(SomaTokens.ink4)
@@ -442,7 +442,7 @@ struct RecommendationDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                         if let preCapCategory = recommendation.preCapCategory, preCapCategory != recommendation.category {
-                            Button("Give me a standard workout anyway") {
+                            Button(String(localized: "recommendationDetail.overrideCapButton", defaultValue: "Give me a standard workout anyway", comment: "Button offered when a consecutive-days cap forced a lighter day, letting the user override back to the pre-cap category")) {
                                 overrideCategory = preCapCategory
                             }
                             .font(.caption.bold())
@@ -451,20 +451,20 @@ struct RecommendationDetailView: View {
                     }
                     if let overrideCategory, recommendation.consecutiveDaysCapApplied {
                         HStack(spacing: 4) {
-                            Text("Showing \(overrideCategory.displayTitle) workouts instead.")
+                            Text(String(localized: "recommendationDetail.overrideActive.message", defaultValue: "Showing \(overrideCategory.displayTitle) workouts instead.", comment: "Shown after the user overrides a consecutive-days cap back to a standard workout. Placeholder is the workout category's display title (e.g. 'Moderate')."))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Button("Undo") { self.overrideCategory = nil }
+                            Button(String(localized: "recommendationDetail.overrideActive.undoButton", defaultValue: "Undo", comment: "Button that reverts the standard-workout override back to the original capped recommendation")) { self.overrideCategory = nil }
                                 .font(.caption.bold())
                         }
                     }
                     if recommendation.injuryProtocolCapApplied {
-                        Text("Note: today's intensity was capped to light because of an active severe-injury recovery protocol, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.injuryProtocolSevere", defaultValue: "Note: today's intensity was capped to light because of an active severe-injury recovery protocol, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was capped to light due to an active severe-injury recovery protocol"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.injuryProtocolModerateCapApplied {
-                        Text("Note: today's intensity was capped to moderate because of an active injury recovery protocol, even though recovery looked strong enough for push hard.")
+                        Text(String(localized: "recommendationDetail.cap.injuryProtocolModerate", defaultValue: "Note: today's intensity was capped to moderate because of an active injury recovery protocol, even though recovery looked strong enough for push hard.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was capped to moderate due to an active injury recovery protocol"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -541,7 +541,7 @@ struct RecommendationDetailView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "antenna.radiowaves.left.and.right")
                         .font(.system(size: 10, weight: .semibold))
-                    Text("Connect a device to track steps")
+                    Text(String(localized: "recommendationDetail.stepPill.noDevice", defaultValue: "Connect a device to track steps", comment: "Step-tracker pill, shown when no health/fitness device is connected"))
                         .font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundStyle(SomaTokens.ink3)
@@ -551,7 +551,7 @@ struct RecommendationDetailView: View {
             } else {
                 // A device is connected but reported no steps (yet) --
                 // state the target plainly rather than fabricating a count.
-                Text("Target \(target.formatted()) steps")
+                Text(String(localized: "recommendationDetail.stepPill.targetOnly", defaultValue: "Target \(target.formatted()) steps", comment: "Step-tracker pill, shown when a device is connected but has reported no steps yet. Placeholder is the formatted step target count."))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(SomaTokens.accentDeep)
                     .padding(.horizontal, 10)
@@ -580,7 +580,7 @@ struct RecommendationDetailView: View {
     private var pickCard: some View {
         CardView {
             HStack {
-                Text("SOMA'S PICK")
+                Text(String(localized: "recommendationDetail.pickCard.eyebrow", defaultValue: "SOMA'S PICK", comment: "All-caps eyebrow label on the pick card"))
                     .font(.system(size: 10.5, weight: .bold))
                     .tracking(0.5)
                     .foregroundStyle(SomaTokens.accent)
@@ -593,7 +593,7 @@ struct RecommendationDetailView: View {
                         shuffleSeed += 1
                         selectTopSuggestion()
                     } label: {
-                        Label("Try another", systemImage: "arrow.triangle.2.circlepath")
+                        Label(String(localized: "recommendationDetail.tryAnotherButton", defaultValue: "Try another", comment: "Button that reshuffles the pick card's suggested workout"), systemImage: "arrow.triangle.2.circlepath")
                             .font(.system(size: 12.5, weight: .semibold))
                             .foregroundStyle(SomaTokens.accent)
                     }
@@ -610,9 +610,9 @@ struct RecommendationDetailView: View {
                 .foregroundStyle(SomaTokens.ink3)
 
             HStack(spacing: 8) {
-                pickTile(label: "Duration", value: pickDurationText)
-                pickTile(label: "Effort", value: effectiveCategory.displayTitle)
-                pickTile(label: "Exercises", value: pickExerciseCountText)
+                pickTile(label: LocalizedStringKey(String(localized: "recommendationDetail.pickTile.duration", defaultValue: "Duration", comment: "Label under the workout duration value on the pick card")), value: pickDurationText)
+                pickTile(label: LocalizedStringKey(String(localized: "recommendationDetail.pickTile.effort", defaultValue: "Effort", comment: "Label under the workout effort/intensity value on the pick card")), value: effectiveCategory.displayTitle)
+                pickTile(label: LocalizedStringKey(String(localized: "recommendationDetail.pickTile.exercises", defaultValue: "Exercises", comment: "Label under the exercise count value on the pick card")), value: pickExerciseCountText)
             }
 
             HStack(alignment: .top, spacing: 8) {
@@ -680,7 +680,7 @@ struct RecommendationDetailView: View {
     private var alternativesCard: some View {
         CardView {
             HStack {
-                Text("Workouts that fit today")
+                Text(String(localized: "recommendationDetail.alternativesCard.title", defaultValue: "Workouts that fit today", comment: "Title of the card listing alternative workout suggestions for today"))
                     .font(.body.bold())
                 Spacer()
                 Text("\(visibleSuggestions.count)")
@@ -705,7 +705,7 @@ struct RecommendationDetailView: View {
                                 // above, at full emphasis; repeating that
                                 // emphasis here would just be visual noise.
                                 .foregroundStyle(isSelected ? SomaTokens.ink4 : SomaTokens.ink)
-                            Text("\(suggestion.bodyPart.displayName) · \(suggestion.equipment.displayName)")
+                            Text(String(localized: "recommendationDetail.alternativeRow.subtitle", defaultValue: "\(suggestion.bodyPart.displayName) · \(suggestion.equipment.displayName)", comment: "Subtitle under an alternative workout suggestion's title, joining its body part and equipment. Both placeholders are already-localized display names."))
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(SomaTokens.ink4)
                         }
@@ -760,15 +760,15 @@ struct RecommendationDetailView: View {
         if !isCompletedToday {
             VStack(spacing: 9) {
                 if aiPlan == nil {
-                    SomaButton(title: "Start workout", size: .lg, variant: .primary, isEnabled: selectedTitle != nil && !isLoadingAIPlan) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "recommendationDetail.startWorkoutButton", defaultValue: "Start workout", comment: "Primary bottom-bar CTA that generates the AI workout plan")), size: .lg, variant: .primary, isEnabled: selectedTitle != nil && !isLoadingAIPlan) {
                         Task { await loadAIPlan() }
                     }
                 } else {
-                    SomaButton(title: "Complete workout", size: .lg, variant: .primary, isEnabled: !isMarkingComplete) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "recommendationDetail.completeWorkoutButton", defaultValue: "Complete workout", comment: "Primary bottom-bar CTA that marks today's workout as done")), size: .lg, variant: .primary, isEnabled: !isMarkingComplete) {
                         Task { await markWorkoutComplete() }
                     }
                     if !addedToPlan {
-                        SomaButton(title: "Add to today's plan", size: .md, variant: .secondary, isEnabled: !isAddingToPlan) {
+                        SomaButton(title: LocalizedStringKey(String(localized: "recommendationDetail.addToPlanButton", defaultValue: "Add to today's plan", comment: "Secondary bottom-bar CTA that confirms the AI plan into today's plan")), size: .md, variant: .secondary, isEnabled: !isAddingToPlan) {
                             Task { await addToTodaysPlan() }
                         }
                     }
@@ -1117,7 +1117,7 @@ struct RecommendationDetailView: View {
     private func injuryCheckinRow(_ state: InjuryRecoveryState) -> some View {
         let tag = InjuryTag(rawValue: state.injuryTag)
         return VStack(alignment: .leading, spacing: 6) {
-            Text("How's your \(tag?.displayName.lowercased() ?? state.injuryTag) feeling today?")
+            Text(String(localized: "recommendationDetail.injuryCheckin.question", defaultValue: "How's your \(tag?.displayName.lowercased() ?? state.injuryTag) feeling today?", comment: "Injury check-in question. Placeholder is the lowercased injury tag display name."))
                 .font(.subheadline)
             HStack(spacing: 10) {
                 ForEach([InjuryCheckinResponse.better, .same, .worse], id: \.self) { response in

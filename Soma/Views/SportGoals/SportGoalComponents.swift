@@ -147,13 +147,23 @@ struct ScheduleFrequencyPicker: View {
     @Binding var scheduleRule: GoalScheduleRule?
     @Binding var scheduleDays: Set<Int>
     @Binding var courtDays: Set<Int>
-    @State private var showFrequencySheet = false
+    /// Owned by the parent screen, like every other field here -- this is
+    /// itself the fix for a real bug: the "Custom…" sheet silently failed
+    /// to present when this picker sits inside a conditionally-rendered
+    /// branch (`if hasBaseline { ... }` in GoalStartView) -- a `.sheet`
+    /// modifier attached to a view inside an `if` branch is unreliable in
+    /// SwiftUI even once its underlying `isPresented` binding is provably
+    /// correct (confirmed: hoisting this from local `@State` to a `@Binding`
+    /// alone did NOT fix it, and it was never a race with the async `.task`
+    /// either -- the actual fix is presenting from a stable, unconditional
+    /// ancestor; see `ScheduleRulesSheet` below and its two call sites).
+    @Binding var showFrequencySheet: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             FlowLayout {
                 ForEach([2, 3, 4], id: \.self) { count in
-                    SomaChip(title: "\(count)× a week", isSelected: scheduleRule == nil && frequencyPerWeek == count) {
+                    SomaChip(title: LocalizedStringKey(String(localized: "sportGoal.schedule.timesPerWeek", defaultValue: "\(count)× a week", comment: "Schedule frequency chip label: a plain weekly session count, e.g. '3× a week'")), isSelected: scheduleRule == nil && frequencyPerWeek == count) {
                         scheduleRule = nil
                         frequencyPerWeek = count
                     }
@@ -162,22 +172,21 @@ struct ScheduleFrequencyPicker: View {
                     showFrequencySheet = true
                 }
             }
-            Text("Sessions still defer to your readiness for placement — low days shift, the workout itself is never rewritten.")
+            Text(String(localized: "sportGoal.scheduleFrequency.readinessNote", defaultValue: "Sessions still defer to your readiness for placement — low days shift, the workout itself is never rewritten.", comment: "Schedule frequency picker: reassuring note that low-readiness days still shift placement"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .sheet(isPresented: $showFrequencySheet) {
-            frequencySheet
-        }
     }
+
+    private static let customLabel = String(localized: "sportGoal.schedule.customLabel", defaultValue: "Custom…", comment: "Default label for the schedule frequency chip before a custom rule is chosen")
 
     private var customChipTitle: String {
         switch scheduleRule {
-        case .weekdays: scheduleDays.isEmpty ? "Custom…" : Self.weekdaysLabel(scheduleDays)
-        case .everyOtherDay: "Every other day"
-        case .beforeCourtDays: "Before court days"
-        case .readiness: "When readiness allows"
-        case .unknown, nil: "Custom…"
+        case .weekdays: scheduleDays.isEmpty ? Self.customLabel : Self.weekdaysLabel(scheduleDays)
+        case .everyOtherDay: String(localized: "sportGoal.scheduleRule.everyOtherDay.title", defaultValue: "Every other day", comment: "Schedule rule: alternating training day / rest day pattern")
+        case .beforeCourtDays: String(localized: "sportGoal.scheduleRule.beforeCourtDays.title", defaultValue: "Before court days", comment: "Schedule rule: sessions are placed the day before the user's court/match days")
+        case .readiness: String(localized: "sportGoal.scheduleRule.whenReadinessAllows.title", defaultValue: "When readiness allows", comment: "Schedule rule: app places sessions on the user's better-readiness days rather than fixed days")
+        case .unknown, nil: Self.customLabel
         }
     }
 
@@ -189,9 +198,39 @@ struct ScheduleFrequencyPicker: View {
             .joined(separator: " · ")
     }
 
+    /// Pure, so create()/submit logic in either caller can compute the
+    /// actual session count without needing a live picker instance.
+    static func effectiveFrequency(
+        frequencyPerWeek: Int,
+        scheduleRule: GoalScheduleRule?,
+        scheduleDays: Set<Int>,
+        courtDays: Set<Int>
+    ) -> Int {
+        switch scheduleRule {
+        case .weekdays where !scheduleDays.isEmpty: scheduleDays.count
+        case .everyOtherDay: 3
+        case .beforeCourtDays where !courtDays.isEmpty: courtDays.count
+        default: frequencyPerWeek
+        }
+    }
+}
+
+/// The "Custom…" chip's rule picker -- split out from `ScheduleFrequencyPicker`
+/// so callers can `.sheet(isPresented:)` it from their own stable root instead
+/// of from wherever the picker itself happens to live. Presenting a `.sheet`
+/// from a view inside a conditionally-rendered (`if`) branch is unreliable in
+/// SwiftUI; both `GoalStartView` (schedule sits behind `if hasBaseline`) and
+/// `CustomGoalFormView` (schedule is unconditional, but kept consistent) now
+/// attach this at their own top level.
+struct ScheduleRulesSheet: View {
+    @Binding var scheduleRule: GoalScheduleRule?
+    @Binding var scheduleDays: Set<Int>
+    @Binding var courtDays: Set<Int>
+    @Environment(\.dismiss) private var dismiss
+
     /// "Before court days" reveals a static court-days mini-picker inline;
     /// no calendar integration.
-    private var frequencySheet: some View {
+    var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
@@ -213,7 +252,7 @@ struct ScheduleFrequencyPicker: View {
                             icon: "figure.tennis")
                     if scheduleRule == .beforeCourtDays {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("My court days")
+                            Text(String(localized: "sportGoal.scheduleRule.myCourtDays", defaultValue: "My court days", comment: "Label above the court-days mini weekday picker in the schedule-rules sheet"))
                                 .font(.caption.bold())
                                 .foregroundStyle(.secondary)
                             WeekdayMiniPicker(selected: $courtDays)
@@ -228,11 +267,11 @@ struct ScheduleFrequencyPicker: View {
                 .padding(20)
             }
             .somaBackground()
-            .navigationTitle("Frequency")
+            .navigationTitle(String(localized: "sportGoal.scheduleRulesSheet.title", defaultValue: "Frequency", comment: "Navigation title for the schedule-rules sheet"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showFrequencySheet = false }
+                    Button(String(localized: "sportGoal.scheduleRulesSheet.done", defaultValue: "Done", comment: "Button closing the schedule-rules sheet")) { dismiss() }
                 }
             }
         }
@@ -242,22 +281,6 @@ struct ScheduleFrequencyPicker: View {
     private func ruleRow(_ rule: GoalScheduleRule, title: String, subtitle: String, icon: String) -> some View {
         SurveyOptionRow(title: title, subtitle: subtitle, systemImageName: icon, isSelected: scheduleRule == rule) {
             scheduleRule = rule
-        }
-    }
-
-    /// Pure, so create()/submit logic in either caller can compute the
-    /// actual session count without needing a live picker instance.
-    static func effectiveFrequency(
-        frequencyPerWeek: Int,
-        scheduleRule: GoalScheduleRule?,
-        scheduleDays: Set<Int>,
-        courtDays: Set<Int>
-    ) -> Int {
-        switch scheduleRule {
-        case .weekdays where !scheduleDays.isEmpty: scheduleDays.count
-        case .everyOtherDay: 3
-        case .beforeCourtDays where !courtDays.isEmpty: courtDays.count
-        default: frequencyPerWeek
         }
     }
 }
@@ -273,7 +296,7 @@ struct GoalConflictWarningView: View {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(SomaTokens.warn)
-                Text("Worth a look before you start")
+                Text(String(localized: "sportGoal.conflictWarning.title", defaultValue: "Worth a look before you start", comment: "Safety-conflict warning card title"))
                     .font(.system(size: 13.5, weight: .bold))
                     .foregroundStyle(SomaTokens.warn)
             }
@@ -283,12 +306,12 @@ struct GoalConflictWarningView: View {
                     .foregroundStyle(SomaTokens.ink2)
             }
             if conflicts.contains(where: \.isPregnancyRelated) {
-                Text("Please discuss this plan with your care provider before continuing.")
+                Text(String(localized: "sportGoal.conflictWarning.pregnancyNote", defaultValue: "Please discuss this plan with your care provider before continuing.", comment: "Safety-conflict warning: extra note shown when a pregnancy-related conflict is present"))
                     .font(.system(size: 13))
                     .foregroundStyle(SomaTokens.ink2)
             }
             Button(action: onAcknowledge) {
-                Text("My coach knows my situation — continue")
+                Text(String(localized: "sportGoal.conflictWarning.acknowledge", defaultValue: "My coach knows my situation — continue", comment: "Button acknowledging a safety conflict and proceeding anyway"))
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(SomaTokens.warn)
                     .frame(maxWidth: .infinity)
