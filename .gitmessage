@@ -1,0 +1,22 @@
+# type(scope): subject   (<=72 chars, imperative mood, no trailing period)
+#
+# type must be one of: feat fix refactor test docs chore perf build ci
+# scope is optional -- the area touched, e.g. profile, workouts, migrations,
+# healthkit, sport-goals.
+#
+# --- Body (optional) ---
+# Explain *why*, not just what the diff already shows. Wrap around 72 cols.
+#
+# --- Footer (optional) ---
+# Breaking-change notes, issue references, Co-Authored-By trailers.
+#
+# --- Examples ---
+#   feat(sport-goals): add re-test flow to GoalHubView
+#   fix(healthkit): stop double-counting overlapping sleep sources
+#   docs: add deployment runbook
+#   chore(migrations): re-apply two shadowed migrations
+#   refactor(supabase-client): split into per-domain extensions
+#
+# Enforced by .git/hooks/commit-msg -- run scripts/install-hooks.sh once per
+# clone to install it. Bypass for one commit (use sparingly):
+#   git commit --no-verify
