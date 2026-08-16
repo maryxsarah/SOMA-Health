@@ -70683,55 +70683,55 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Woche %@ von %@–%@"
+            "value" : "Woche %lld von %lld–%lld"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "week %@ of %@–%@"
+            "value" : "week %lld of %lld–%lld"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "semana %@ de %@–%@"
+            "value" : "semana %lld de %lld–%lld"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "semaine %@ sur %@–%@"
+            "value" : "semaine %lld sur %lld–%lld"
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@-րդ շաբաթ %@–%@-ից"
+            "value" : "%lld-րդ շաբաթ %lld–%lld-ից"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "settimana %@ di %@–%@"
+            "value" : "settimana %lld di %lld–%lld"
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@-ე კვირა %@–%@-დან"
+            "value" : "%lld-ე კვირა %lld–%lld-დან"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "неделя %@ из %@–%@"
+            "value" : "неделя %lld из %lld–%lld"
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "недеља %@ од %@–%@"
+            "value" : "недеља %lld од %lld–%lld"
           }
         }
       }
@@ -83523,6 +83523,119 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Изабери шта се приказује на почетном екрану."
+          }
+        }
+      }
+    },
+    "profile.quietHours.title" : {
+      "comment" : "Settings row/sheet title for the notification quiet-hours editor",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ruhezeiten"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quiet hours"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Horas silenciosas"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Heures de silence"
+          }
+        },
+        "hy" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Հանգիստ ժամեր"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ore silenziose"
+          }
+        },
+        "ka" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "წყნარი საათები"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Тихие часы"
+          }
+        },
+        "sr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Тихи сати"
+          }
+        }
+      }
+    },
+    "NOTIFICATIONS" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BENACHRICHTIGUNGEN"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOTIFICACIONES"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOTIFICATIONS"
+          }
+        },
+        "hy" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ԾԱՆՈՒՑՈՒՄՆԵՐ"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NOTIFICHE"
+          }
+        },
+        "ka" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "შეტყობინებები"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "УВЕДОМЛЕНИЯ"
+          }
+        },
+        "sr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ОБАВЕШТЕЊА"
           }
         }
       }

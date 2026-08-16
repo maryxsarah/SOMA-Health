@@ -63,6 +63,58 @@ final class NotificationManager {
         }
     }
 
+    // MARK: - Quiet hours
+    //
+    // Off by default so nobody's existing schedule silently changes until
+    // they opt in via Settings (ProfileView's Account > Notifications row).
+    // Stored as minute-of-day (0-1439), not Date -- only the clock time
+    // matters, never a specific calendar day.
+
+    private let quietHoursEnabledKey = "com.soma.app.quietHoursEnabled"
+    private let quietHoursStartMinuteKey = "com.soma.app.quietHoursStartMinute"
+    private let quietHoursEndMinuteKey = "com.soma.app.quietHoursEndMinute"
+    private static let defaultQuietHoursStartMinute = 22 * 60
+    private static let defaultQuietHoursEndMinute = 7 * 60
+
+    var isQuietHoursEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: quietHoursEnabledKey) }
+        set { UserDefaults.standard.set(newValue, forKey: quietHoursEnabledKey) }
+    }
+
+    var quietHoursStartMinute: Int {
+        get { UserDefaults.standard.object(forKey: quietHoursStartMinuteKey) as? Int ?? Self.defaultQuietHoursStartMinute }
+        set { UserDefaults.standard.set(newValue, forKey: quietHoursStartMinuteKey) }
+    }
+
+    var quietHoursEndMinute: Int {
+        get { UserDefaults.standard.object(forKey: quietHoursEndMinuteKey) as? Int ?? Self.defaultQuietHoursEndMinute }
+        set { UserDefaults.standard.set(newValue, forKey: quietHoursEndMinuteKey) }
+    }
+
+    /// Pushes `date` forward to the end of quiet hours if it falls inside
+    /// the user's configured window; a no-op if quiet hours are off or the
+    /// time falls outside them. Uses Calendar.nextDate rather than manual
+    /// wraparound arithmetic so an overnight window (e.g. 22:00-07:00)
+    /// behaves the same as a same-day one.
+    private func adjustedForQuietHours(_ date: Date) -> Date {
+        guard isQuietHoursEnabled else { return date }
+        let start = quietHoursStartMinute
+        let end = quietHoursEndMinute
+        guard start != end else { return date }
+
+        let calendar = Calendar.current
+        let minuteOfDay = calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
+        let inQuietHours = start < end
+            ? (minuteOfDay >= start && minuteOfDay < end)
+            : (minuteOfDay >= start || minuteOfDay < end)
+        guard inQuietHours else { return date }
+
+        var endComponents = DateComponents()
+        endComponents.hour = end / 60
+        endComponents.minute = end % 60
+        return calendar.nextDate(after: date, matching: endComponents, matchingPolicy: .nextTimePreservingSmallerComponents) ?? date
+    }
+
     // MARK: - Daily engagement notifications (movement / evening workout / progress)
     //
     // Three touchpoints beyond the existing morning recommendation, all
@@ -75,14 +127,27 @@ final class NotificationManager {
     //
     // Content is either genuinely fixed-safe (movement: true regardless of
     // what the user has actually done) or computed from real data at
-    // schedule time (progress check-in's workout count) -- never a guess
-    // about live state a local notification has no way to check at the
-    // moment it actually fires.
+    // schedule time (progress check-in's workout count, streak-aware
+    // copy) -- never a guess about live state a local notification has no
+    // way to check at the moment it actually fires.
 
     private static let middayMovementHour = 13
     private static let eveningWorkoutHour = 18
     private static let eveningWorkoutMinute = 30
     private static let progressCheckInHour = 20
+    /// Duolingo's own published reasoning: 23.5h after the last logged
+    /// activity consistently outperforms a fixed reminder clock time --
+    /// see docs/notifications-plan.md. Used only by the event-driven path
+    /// (scheduleStreakProtectionReminder); the once-a-day catch-up
+    /// fallback below has no precise "last logged at" timestamp to anchor
+    /// to, so it keeps the fixed evening hour.
+    private static let streakReminderInterval: TimeInterval = 23.5 * 3600
+    /// Wide enough to detect every StreakMilestone tier (up to 365 days)
+    /// -- the in-app streak display elsewhere in the app intentionally
+    /// stays on a shorter/cheaper fetch window (see docs/widgetkit-plan.md),
+    /// but a milestone celebration needs the real number to ever fire for
+    /// the longer tiers.
+    private static let streakLookbackDays = 400
 
     /// Orchestrates all three -- the single call site both BackgroundTask-
     /// Manager's daily refresh and NotificationEnablementView's "enable"
@@ -93,6 +158,7 @@ final class NotificationManager {
     func scheduleTodaysEngagementNotifications() async {
         let date = todayKey()
         async let workoutsThisWeek = (try? SupabaseClient.shared.fetchRecentWorkoutLogDates(days: 7))?.count ?? 0
+        async let streak = (try? SupabaseClient.shared.fetchRecentWorkoutLogDates(days: Self.streakLookbackDays)).map(ProfileStore.streak(from:)) ?? 0
         async let dayNumber: Int? = {
             guard let userId = SupabaseClient.shared.currentUserID,
                   let profile = try? await SupabaseClient.shared.fetchProfile(id: userId),
@@ -106,35 +172,74 @@ final class NotificationManager {
             return progress.daysElapsed + 1
         }()
 
-        await scheduleMiddayMovementNudge(for: date)
-        await scheduleEveningWorkoutReminder(for: date)
+        let resolvedStreak = await streak
+        await scheduleMiddayMovementNudge(for: date, streak: resolvedStreak)
+        await scheduleEveningWorkoutReminder(for: date, streak: resolvedStreak)
         await scheduleProgressCheckIn(for: date, dayNumber: await dayNumber, workoutsThisWeek: await workoutsThisWeek)
     }
 
-    /// Generic, always-appropriate copy -- there's no way to check live
-    /// step/movement data at the moment this actually fires, so it never
-    /// claims to know whether the user has moved today.
-    private func scheduleMiddayMovementNudge(for date: String) async {
+    /// Generic movement copy when there's no active streak to reference;
+    /// streak-aware copy otherwise. Either way there's no way to check
+    /// live step/movement data at the moment this actually fires, so it
+    /// never claims to know whether the user has moved today.
+    private func scheduleMiddayMovementNudge(for date: String, streak: Int) async {
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "notification.middayMovement.title", defaultValue: "Stay moving", comment: "Push notification title nudging the user to move during the day")
-        content.body = String(localized: "notification.middayMovement.body", defaultValue: "Even a short walk supports today's recovery and tomorrow's readiness.", comment: "Push notification body nudging the user to move during the day")
         content.sound = .default
+        if streak > 0 {
+            content.title = String(localized: "notification.middayMovement.streakTitle", defaultValue: "Keep it going", comment: "Push notification title nudging the user to move, shown when they have an active workout streak")
+            content.body = String(localized: "notification.middayMovement.streakBody", defaultValue: "A short walk keeps your \(streak)-day streak's momentum going.", comment: "Push notification body nudging the user to move, referencing their active streak length")
+        } else {
+            content.title = String(localized: "notification.middayMovement.title", defaultValue: "Stay moving", comment: "Push notification title nudging the user to move during the day")
+            content.body = String(localized: "notification.middayMovement.body", defaultValue: "Even a short walk supports today's recovery and tomorrow's readiness.", comment: "Push notification body nudging the user to move during the day")
+        }
         await scheduleToday(hour: Self.middayMovementHour, minute: 0, identifier: "midday-movement-\(date)", content: content)
     }
 
-    /// Cancelled the moment today's workout is actually logged -- see
+    /// Once-a-day catch-up fallback for the evening reminder -- covers
+    /// days the event-driven path (scheduleStreakProtectionReminder) never
+    /// got to run (e.g. no workout logged in a while, so nothing re-armed
+    /// tomorrow's reminder). Fixed evening hour, since there's no precise
+    /// "last logged at" timestamp available here to anchor to. Cancelled
+    /// the moment today's workout is actually logged -- see
     /// cancelEveningWorkoutReminder, called from RecommendationDetailView's
-    /// markWorkoutComplete. If it's never logged, this fires as a genuine
-    /// reminder; if it is, the pending request is removed before it can.
-    private func scheduleEveningWorkoutReminder(for date: String) async {
-        let content = UNMutableNotificationContent()
-        content.title = String(localized: "notification.eveningWorkout.title", defaultValue: "Still time today", comment: "Push notification title reminding the user their workout is still open in the evening")
-        content.body = String(localized: "notification.eveningWorkout.body", defaultValue: "Your workout is ready whenever you are -- log it when you're done to keep your streak.", comment: "Push notification body reminding the user their workout is still open in the evening")
-        content.sound = .default
+    /// markWorkoutComplete.
+    private func scheduleEveningWorkoutReminder(for date: String, streak: Int) async {
         await scheduleToday(
             hour: Self.eveningWorkoutHour, minute: Self.eveningWorkoutMinute,
-            identifier: Self.eveningWorkoutReminderIdentifier(for: date), content: content
+            identifier: Self.eveningWorkoutReminderIdentifier(for: date), content: eveningReminderContent(streak: streak)
         )
+    }
+
+    /// Shared copy for the evening reminder in both its forms: this
+    /// once-a-day fallback and scheduleStreakProtectionReminder's
+    /// event-driven one. Framed as protecting something the user already
+    /// has, never as a threat -- a zero streak gets the original generic
+    /// copy instead, so this never nags someone who has nothing to
+    /// protect yet.
+    private func eveningReminderContent(streak: Int) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.sound = .default
+        if streak > 0 {
+            content.title = String(localized: "notification.streakProtection.title", defaultValue: "Protect your streak", comment: "Push notification title reminding the user to protect their active workout streak")
+            content.body = String(localized: "notification.streakProtection.body", defaultValue: "You're on a \(streak)-day streak. Log today's workout to keep it going.", comment: "Push notification body reminding the user to protect their streak, showing the current streak length in days")
+        } else {
+            content.title = String(localized: "notification.eveningWorkout.title", defaultValue: "Still time today", comment: "Push notification title reminding the user their workout is still open in the evening")
+            content.body = String(localized: "notification.eveningWorkout.body", defaultValue: "Your workout is ready whenever you are -- log it when you're done to keep your streak.", comment: "Push notification body reminding the user their workout is still open in the evening")
+        }
+        return content
+    }
+
+    /// Anchored to the exact moment a workout was just logged rather than
+    /// a fixed clock time -- see streakReminderInterval's doc comment.
+    /// Clamped to never fire earlier than the fallback's own evening floor
+    /// on that day, so a very-early workout doesn't produce an
+    /// early-morning ping the next day -- the copy still reads "today."
+    private func scheduleStreakProtectionReminder(afterLogAt logTime: Date, streak: Int) async {
+        let anchor = logTime.addingTimeInterval(Self.streakReminderInterval)
+        let floor = Calendar.current.date(bySettingHour: Self.eveningWorkoutHour, minute: Self.eveningWorkoutMinute, second: 0, of: anchor) ?? anchor
+        let fireDate = max(anchor, floor)
+        let identifier = Self.eveningWorkoutReminderIdentifier(for: dateKey(for: fireDate))
+        await schedule(at: fireDate, identifier: identifier, content: eveningReminderContent(streak: streak))
     }
 
     /// Real numbers, computed once at schedule time -- "Day X" from the
@@ -170,21 +275,77 @@ final class NotificationManager {
         "evening-workout-reminder-\(date)"
     }
 
-    /// Schedules `content` for today at the given local hour/minute.
-    /// Silently skips if that time has already passed today -- never
-    /// fires late/immediately as a substitute (tomorrow's scheduling call
-    /// covers the next occurrence normally). Same identifier overwrites
-    /// any still-pending request from an earlier call this same day
-    /// (Trigger A and Trigger B can both invoke this), so calling it more
-    /// than once per day is always safe.
+    // MARK: - Workout-logged event (streak protection + milestones)
+
+    /// Called right after a workout is logged (RecommendationDetailView's
+    /// markWorkoutComplete, right after cancelEveningWorkoutReminder
+    /// clears today's now-moot pending reminder). Re-fetches the real
+    /// streak -- today's log is in the data now, so this reflects it --
+    /// celebrates a freshly-crossed StreakMilestone tier if any, and
+    /// schedules tomorrow's streak-protection reminder anchored to this
+    /// exact moment rather than waiting for the next daily catch-up.
+    func handleWorkoutLogged(at logTime: Date) async {
+        let dates = (try? await SupabaseClient.shared.fetchRecentWorkoutLogDates(days: Self.streakLookbackDays)) ?? []
+        let streak = ProfileStore.streak(from: dates)
+
+        if let milestone = StreakMilestone(rawValue: streak) {
+            await scheduleMilestoneCelebration(milestone: milestone)
+        }
+        await scheduleStreakProtectionReminder(afterLogAt: logTime, streak: streak)
+    }
+
+    private let lastCelebratedMilestoneKey = "com.soma.app.lastCelebratedMilestoneStreak"
+    private let lastCelebratedMilestoneDateKey = "com.soma.app.lastCelebratedMilestoneDate"
+
+    /// Fires once per (milestone, day) pair -- logging a second workout
+    /// the same day recomputes the identical streak and must not
+    /// re-celebrate it, but genuinely re-reaching the same tier after a
+    /// later streak reset should still celebrate again.
+    private func scheduleMilestoneCelebration(milestone: StreakMilestone) async {
+        let today = todayKey()
+        let defaults = UserDefaults.standard
+        let alreadyCelebratedToday = defaults.string(forKey: lastCelebratedMilestoneDateKey) == today
+            && defaults.integer(forKey: lastCelebratedMilestoneKey) == milestone.rawValue
+        guard !alreadyCelebratedToday else { return }
+        defaults.set(milestone.rawValue, forKey: lastCelebratedMilestoneKey)
+        defaults.set(today, forKey: lastCelebratedMilestoneDateKey)
+
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "notification.milestone.title", defaultValue: "Milestone unlocked", comment: "Push notification title celebrating a newly-reached streak milestone")
+        content.body = String(localized: "notification.milestone.body", defaultValue: "\(milestone.title) streak -- and counting. Keep it up.", comment: "Push notification body celebrating a newly-reached streak milestone, showing the milestone's display title such as '1 Week'")
+        content.sound = .default
+
+        let request = UNNotificationRequest(identifier: "milestone-\(milestone.rawValue)-\(today)", content: content, trigger: nil)
+        await withCheckedContinuation { continuation in
+            center.add(request) { _ in continuation.resume() }
+        }
+    }
+
+    // MARK: - Scheduling primitives
+
+    /// Schedules `content` for today at the given local hour/minute --
+    /// thin wrapper over `schedule(at:identifier:content:)` below.
     private func scheduleToday(hour: Int, minute: Int, identifier: String, content: UNNotificationContent) async {
         var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
         components.hour = hour
         components.minute = minute
-        guard let fireDate = Calendar.current.date(from: components), fireDate > Date() else { return }
+        guard let fireDate = Calendar.current.date(from: components) else { return }
+        await schedule(at: fireDate, identifier: identifier, content: content)
+    }
+
+    /// Schedules `content` for `fireDate`, pushed past the end of quiet
+    /// hours if it would otherwise land inside them. Silently skips if the
+    /// (possibly-adjusted) time has already passed -- never fires late/
+    /// immediately as a substitute (tomorrow's scheduling call covers the
+    /// next occurrence normally). Same identifier overwrites any still-
+    /// pending request from an earlier call, so calling this more than
+    /// once for the same slot is always safe.
+    private func schedule(at fireDate: Date, identifier: String, content: UNNotificationContent) async {
+        let adjusted = adjustedForQuietHours(fireDate)
+        guard adjusted > Date() else { return }
 
         let trigger = UNCalendarNotificationTrigger(
-            dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate),
+            dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: adjusted),
             repeats: false
         )
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
@@ -284,9 +445,13 @@ final class NotificationManager {
     }
 
     private func todayKey() -> String {
+        dateKey(for: Date())
+    }
+
+    private func dateKey(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = .current
-        return formatter.string(from: Date())
+        return formatter.string(from: date)
     }
 }

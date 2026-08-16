@@ -1787,38 +1787,6 @@ final class SupabaseClient {
         try Self.assertSuccess(response, data: data)
     }
 
-    // MARK: - Beta opt-in (self-service beta_optins table, RLS own-row)
-
-    /// Whether the caller has opted into beta features -- own-row select.
-    func fetchBetaOptIn() async throws -> Bool {
-        let path = "rest/v1/beta_optins?select=user_id&limit=1"
-        let request = try await authorizedRequest(path: path, method: "GET")
-        let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
-        struct Row: Decodable { let user_id: String }
-        return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
-    }
-
-    /// Inserts (opt in) or deletes (opt out) the caller's own row -- direct
-    /// RLS write, same trust model as logWorkout.
-    func setBetaOptIn(_ enabled: Bool) async throws {
-        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
-        if enabled {
-            var request = try await authorizedRequest(path: "rest/v1/beta_optins", method: "POST")
-            // ignore-duplicates: re-enabling after a missed response must
-            // not 409 on the already-present pk row.
-            request.setValue("resolution=ignore-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["user_id": userId])
-            let (data, response) = try await urlSession.data(for: request)
-            try Self.assertSuccess(response, data: data)
-        } else {
-            var request = try await authorizedRequest(path: "rest/v1/beta_optins?user_id=eq.\(userId)", method: "DELETE")
-            request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
-            let (data, response) = try await urlSession.data(for: request)
-            try Self.assertSuccess(response, data: data)
-        }
-    }
-
     // MARK: - user_feedback
 
     /// Direct insert via RLS (`user_feedback_insert_own`) -- user-entered

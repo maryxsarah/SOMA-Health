@@ -147,6 +147,40 @@ final class SportGoalJourneyTests: XCTestCase {
                       "A logged goal-block day is a counted session (SGP-D1)")
     }
 
+    // MARK: - J2b · SGP-D1 (other half) — a regular workout day (no
+    // goal_block on today's plan) coexists with an active goal untouched:
+    // no GOAL BLOCK eyebrow, completes like any ordinary workout, the goal
+    // itself is still there afterward.
+
+    func test_SGP_D1_regularDayDoesNotAffectGoal() {
+        let app = launch(scenario: "activeGoalNoBlockToday")
+
+        let cta = app.buttons["Start workout"]
+        XCTAssertTrue(cta.waitForExistence(timeout: 20))
+        _ = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Standing vertical jump'"))
+            .firstMatch.waitForExistence(timeout: 20)
+        cta.tap()
+
+        // Today's plan carries no goal_block -- an active goal must not
+        // force every day into a "goal day".
+        XCTAssertFalse(text(app, containing: "GOAL BLOCK").exists,
+                       "A day with no goal_block must render as an ordinary workout")
+
+        let complete = app.buttons["Complete workout"]
+        XCTAssertTrue(complete.waitForExistence(timeout: 10))
+        complete.tap()
+        XCTAssertTrue(text(app, containing: "logged").waitForExistence(timeout: 10)
+                      || !complete.exists)
+        app.swipeDown(velocity: .fast)
+
+        // The active goal survives a regular day untouched -- still on Home.
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Standing vertical jump"))
+                .firstMatch.waitForExistence(timeout: 15),
+            "A regular, non-goal-block day must not disturb the active goal"
+        )
+    }
+
     // MARK: - J3 · SGP-D2
 
     func test_SGP_D2_missedSessionsSlideEta() {
@@ -311,6 +345,43 @@ final class SportGoalJourneyTests: XCTestCase {
         XCTAssertTrue(text(app, containing: "0 of 16").waitForExistence(timeout: 10))
     }
 
+    // MARK: - J7b · SGP-B4 (regression check) — tapping a frequency chip
+    // actually changes the schedule, not just its own color. Reported as
+    // "chips don't respond to taps" after the Soma Glass redesign; asserts
+    // via the commitment line (driven by the same frequencyPerWeek state)
+    // rather than the chip's own accessibility label, since a chip that's
+    // visually stuck would still report its own static "N× a week" label.
+
+    func test_SGP_B4_frequencyChipChangesSchedule() {
+        let app = launch(scenario: "customCoachFlow")
+
+        openSportGoalFlow(app)
+        XCTAssertTrue(text(app, containing: "What do you train for?").waitForExistence(timeout: 10))
+        app.buttons.matching(NSPredicate(format: "label CONTAINS 'Volleyball'")).firstMatch.tap()
+
+        let customRow = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "coach's task")
+        ).firstMatch
+        XCTAssertTrue(customRow.waitForExistence(timeout: 10))
+        customRow.tap()
+
+        XCTAssertTrue(text(app, containing: "3× a week").waitForExistence(timeout: 10),
+                      "Default frequency (3) should show in the commitment line before any chip is tapped")
+
+        let twoChip = app.buttons.matching(NSPredicate(format: "label CONTAINS '2× a week'")).firstMatch
+        XCTAssertTrue(twoChip.waitForExistence(timeout: 5))
+        twoChip.tap()
+
+        XCTAssertTrue(text(app, containing: "2× a week").waitForExistence(timeout: 5),
+                      "Tapping the 2x a week chip must actually update the schedule")
+        XCTAssertFalse(text(app, containing: "3× a week").exists,
+                       "The stale 3x a week commitment text must be gone once 2x is selected")
+
+        let debugShot = XCTAttachment(screenshot: app.screenshot())
+        debugShot.lifetime = .keepAlways
+        add(debugShot)
+    }
+
     // MARK: - J8 · SGP-D7 — day-5 baseline confirm
 
     func test_SGP_D7_confirmBaselineOnDay5() {
@@ -412,41 +483,6 @@ final class SportGoalJourneyTests: XCTestCase {
         XCTAssertTrue(app.buttons["Pause goal"].waitForExistence(timeout: 15),
                       "Resume restores the active goal in place")
         XCTAssertFalse(text(app, containing: "On hold — not counting").exists)
-    }
-
-    // MARK: - J14 · SGP-A4 — the beta toggle opens the catalog (stub RLS)
-
-    func test_SGP_A4_betaToggleOpensCatalog() {
-        let app = launch(scenario: "betaGate")
-
-        // Catalog is dark: readiness card renders. The dock's Goals icon
-        // is a stable nav anchor either way now (same "always present, the
-        // destination decides" posture as Scan gym) -- opening it must show
-        // the calm unavailable card, never the real sport list.
-        XCTAssertTrue(app.buttons["Start workout"].waitForExistence(timeout: 20))
-        openSportGoalFlow(app)
-        XCTAssertTrue(text(app, containing: "Goals aren't available right now").waitForExistence(timeout: 15),
-                      "Dark catalog must show the calm unavailable card, never the real sport list")
-        dismissSheet(app)
-
-        // Profile → Account → "Sport goals (beta)" toggle. Profile is only
-        // reachable through the dock's "More" sheet now (Soma Glass 3a has
-        // no nav-pill row above the week strip).
-        app.buttons["dock-more-button"].tap()
-        app.buttons["profile-button"].tap()
-        let accountTab = app.buttons["Account"]
-        XCTAssertTrue(accountTab.waitForExistence(timeout: 15))
-        accountTab.tap()
-        XCTAssertTrue(text(app, containing: "Sport goals (beta)").waitForExistence(timeout: 10))
-        let toggle = app.switches.firstMatch
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-        toggle.tap()
-        dismissSheet(app)
-
-        // Closing Profile refetches the catalog — the real sport list opens now.
-        openSportGoalFlow(app)
-        XCTAssertTrue(text(app, containing: "What do you train for?").waitForExistence(timeout: 20),
-                      "Opting in must reveal the real catalog in the same session")
     }
 
     // MARK: - J15 · SGP-B8/B9 — coach-assignment AI assist

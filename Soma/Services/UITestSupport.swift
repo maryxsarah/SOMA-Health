@@ -122,6 +122,9 @@ enum FixtureScenario: String {
     case catalogOpen
     /// J2/J5: active jump goal in week 2 + today's AI plan with a goal block.
     case activeGoalWeek2
+    /// J2b: same active goal, but today's AI plan carries no goal block --
+    /// a regular training day (SGP-D1's other half, client side).
+    case activeGoalNoBlockToday
     /// J3/J13: week 4, ETA slipped +9 days (2 missed + 3 low-readiness).
     case activeGoalWeek4Slipped
     /// J8: day 6, baseline logged, confirm window open.
@@ -136,8 +139,6 @@ enum FixtureScenario: String {
     case customGoalWeek2
     /// J7: catalog open, creating the coach's task from the form.
     case customCoachFlow
-    /// J14: catalog dark until the user flips the beta toggle in Profile.
-    case betaGate
 
     static var current: FixtureScenario {
         ProcessInfo.processInfo.environment["UITEST_SCENARIO"]
@@ -146,7 +147,7 @@ enum FixtureScenario: String {
 
     var hasActiveGoal: Bool {
         switch self {
-        case .catalogOpen, .customCoachFlow, .betaGate: false
+        case .catalogOpen, .customCoachFlow: false
         default: true
         }
     }
@@ -160,9 +161,9 @@ enum FixtureScenario: String {
     /// Days since the goal block started.
     var goalAgeDays: Int {
         switch self {
-        case .catalogOpen, .customCoachFlow, .betaGate: 0
+        case .catalogOpen, .customCoachFlow: 0
         case .activeGoalDay6: 6
-        case .activeGoalWeek2, .customGoalWeek2: 10
+        case .activeGoalWeek2, .activeGoalNoBlockToday, .customGoalWeek2: 10
         case .activeGoalWeek4Slipped: 27
         case .activeGoalDay28, .activeGoalDay28Rest: 28
         case .activeGoalAtEta: 70
@@ -171,7 +172,7 @@ enum FixtureScenario: String {
 
     var promoDismissedAtLaunch: Bool {
         switch self {
-        case .catalogOpen, .customCoachFlow, .betaGate: false
+        case .catalogOpen, .customCoachFlow: false
         default: true
         }
     }
@@ -426,11 +427,11 @@ enum FixtureData {
              "value": value, "measured_at": iso(daysAgo: daysAgo)]
         }
         switch scenario {
-        case .catalogOpen, .customCoachFlow, .betaGate, .customGoalWeek2:
+        case .catalogOpen, .customCoachFlow, .customGoalWeek2:
             return []
         case .activeGoalDay6:
             return [row("m-1", "baseline", 42, daysAgo: 6)]
-        case .activeGoalWeek2:
+        case .activeGoalWeek2, .activeGoalNoBlockToday:
             return [row("m-1", "baseline", 42, daysAgo: 10)]
         case .activeGoalWeek4Slipped:
             return [row("m-1", "baseline", 42, daysAgo: 27),
@@ -538,6 +539,28 @@ enum FixtureData {
         ]]
     }
 
+    /// Same shape as todaysAIPlan, minus the goal_block key -- an ordinary
+    /// day for a user who still has an active goal (SGP-D1's other half).
+    static var todaysAIPlanNoGoalBlock: [[String: Any]] {
+        [[
+            "category": "moderate",
+            "selected_title": "Lower body strength",
+            "added_to_plan": true,
+            "source": "suggestion",
+            "plan": [
+                "focus": "Lower body power",
+                "warm_up": [planExercise],
+                "blocks": [[
+                    "name": "Block 1",
+                    "rounds": 1,
+                    "rest_between_rounds": "90s",
+                    "exercises": [planExercise],
+                ]],
+                "cool_down": [planExercise],
+            ],
+        ]]
+    }
+
     /// Same shape as todaysAIPlan, framed as a coach's verbatim block --
     /// lets the custom-goal "return and do today's session" demo show real
     /// exercises too, not just the preset path.
@@ -606,7 +629,6 @@ final class FixtureURLProtocol: URLProtocol {
     private static var goalStatus = "active"
     private static var goalPauseReason: String?
     private static var requestedCategory: String?
-    private static var betaOptedIn = false
     private static var loggedWorkouts: [[String: Any]] = []
     private static var insertedMeasurements: [[String: Any]] = []
     private static var loggedSleep: [String: Any]?
@@ -704,23 +726,12 @@ final class FixtureURLProtocol: URLProtocol {
                 "user": ["id": "00000000-0000-0000-0000-0000000000fe", "email": requestBody["email"] as? String ?? "demo@example.com"],
             ] as [String: Any], 200)
 
-        // Catalog. betaGate serves it dark until the beta toggle is on --
-        // the same "empty fetch == off" contract the real RLS enforces.
+        // Catalog. Sport goals are live to everyone now (status='live'),
+        // so the fixture always serves it -- no opt-in gate to model.
         case path.hasSuffix("/rest/v1/sports"):
-            let visible = scenario != .betaGate || Self.betaOptedIn
-            return (visible ? FixtureData.sports : [], 200)
+            return (FixtureData.sports, 200)
         case path.hasSuffix("/rest/v1/sport_goals"):
-            let visible = scenario != .betaGate || Self.betaOptedIn
-            return (visible ? FixtureData.sportGoals : [], 200)
-
-        case path.hasSuffix("/rest/v1/beta_optins") && method == "GET":
-            return (Self.betaOptedIn ? [["user_id": "00000000-0000-0000-0000-0000000000ff"]] : [], 200)
-        case path.hasSuffix("/rest/v1/beta_optins") && method == "POST":
-            Self.betaOptedIn = true
-            return ([:] as [String: Any], 201)
-        case path.contains("/rest/v1/beta_optins") && method == "DELETE":
-            Self.betaOptedIn = false
-            return ([:] as [String: Any], 204)
+            return (FixtureData.sportGoals, 200)
 
         // Goal rows
         case path.hasSuffix("/rest/v1/user_goal") && method == "GET":
@@ -805,6 +816,7 @@ final class FixtureURLProtocol: URLProtocol {
             }
             switch scenario {
             case .activeGoalWeek2: return (FixtureData.todaysAIPlan, 200)
+            case .activeGoalNoBlockToday: return (FixtureData.todaysAIPlanNoGoalBlock, 200)
             case .customGoalWeek2: return (FixtureData.customTodaysAIPlan, 200)
             default: return ([], 200)
             }

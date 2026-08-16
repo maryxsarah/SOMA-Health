@@ -764,8 +764,6 @@ final class ProfileStore: ObservableObject {
     // loaded AND sent back live on every save, same as countryCode/cityText.
     @Published var anchorSessionName = ""
     @Published var anchorSessionDays: Set<Int> = []
-    // Beta opt-in -- reflects the user's own beta_optins row.
-    @Published var betaOptIn = false
 
     @Published var isSaving = false
     @Published var errorMessage: String?
@@ -823,6 +821,15 @@ final class ProfileStore: ObservableObject {
     /// Real, queryable local-notification authorization status -- backs
     /// the hub's Account card subtitle. Never guessed/defaulted to "on".
     @Published var notificationsAuthorized = false
+
+    /// Quiet hours -- local device preference (NotificationManager's own
+    /// UserDefaults-backed storage, not a synced UserProfile field), so
+    /// these apply immediately on change rather than waiting for save().
+    /// Date, not raw minute-of-day, purely so the editor sheet can bind a
+    /// wheel-style DatePicker the same way dateOfBirthEditor/wake-time do.
+    @Published var quietHoursEnabled = false
+    @Published var quietHoursStart = Date()
+    @Published var quietHoursEnd = Date()
 
     // Which field editor sheet (if any) is open -- shared across every
     // subpage since only one is ever on screen at a time.
@@ -929,6 +936,25 @@ final class ProfileStore: ObservableObject {
         }
     }
 
+    /// Writes the current quiet-hours fields to NotificationManager
+    /// immediately -- same "no store.save() needed" reasoning as the
+    /// language picker: this is a local device preference, not a synced
+    /// profile field, so there's nothing for the normal save() flow to do.
+    func applyQuietHours() {
+        NotificationManager.shared.isQuietHoursEnabled = quietHoursEnabled
+        NotificationManager.shared.quietHoursStartMinute = Self.minuteOfDay(from: quietHoursStart)
+        NotificationManager.shared.quietHoursEndMinute = Self.minuteOfDay(from: quietHoursEnd)
+    }
+
+    private static func date(fromMinuteOfDay minute: Int) -> Date {
+        Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: Date()) ?? Date()
+    }
+
+    private static func minuteOfDay(from date: Date) -> Int {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+    }
+
     func load(appState: AppState) async {
         guard let userId = SupabaseClient.shared.currentUserID else { return }
         guard let profile = try? await SupabaseClient.shared.fetchProfile(id: userId) else { return }
@@ -969,7 +995,6 @@ final class ProfileStore: ObservableObject {
         preservedJourneyStage = profile.journeyStage
         preservedBlockersNotes = profile.blockersNotes
         dateOfBirthDate = profile.dateOfBirth.flatMap(Self.dobFormatter.date(from:))
-        betaOptIn = (try? await SupabaseClient.shared.fetchBetaOptIn()) ?? false
 
         isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
 
@@ -985,6 +1010,9 @@ final class ProfileStore: ObservableObject {
         todaysSteps = await HealthKitManager.shared.fetchTodaysSteps().map { Int($0) }
         sessionsDoneThisWeek = await Self.workoutsThisWeek()
         notificationsAuthorized = await NotificationManager.shared.isAuthorized()
+        quietHoursEnabled = NotificationManager.shared.isQuietHoursEnabled
+        quietHoursStart = Self.date(fromMinuteOfDay: NotificationManager.shared.quietHoursStartMinute)
+        quietHoursEnd = Self.date(fromMinuteOfDay: NotificationManager.shared.quietHoursEndMinute)
         await loadSportGoalState()
         await loadConnectionStatus(appState: appState)
 
@@ -1102,19 +1130,6 @@ final class ProfileStore: ObservableObject {
                 let reason = error.localizedDescription
                 deviceErrorMessage = String(localized: "profile.device.connectError", defaultValue: "Couldn't connect \(providerName): \(reason)", comment: "Error shown when connecting a wearable device provider fails; includes the provider name and system error text")
             }
-        }
-    }
-
-    func updateBetaOptIn(_ enabled: Bool) async {
-        do {
-            try await SupabaseClient.shared.setBetaOptIn(enabled)
-            errorMessage = nil
-            // Refetch the catalog in both directions: ON surfaces the beta
-            // rows this session, OFF makes every entry point vanish.
-            await loadSportGoalState()
-        } catch {
-            betaOptIn = !enabled
-            errorMessage = String(localized: "profile.betaOptIn.error", defaultValue: "Couldn't update beta access. Try again.", comment: "Error shown when toggling the sport-goals beta opt-in fails")
         }
     }
 
@@ -1486,13 +1501,6 @@ private struct AccountSettingsView: View {
                 }
 
                 groupCard(
-                    eyebrow: "EARLY ACCESS",
-                    footnote: String(localized: "profile.earlyAccess.groupFootnote", defaultValue: "Beta features appear automatically while this is on.", comment: "Footnote under the Early access settings group")
-                ) {
-                    betaOptInRow
-                }
-
-                groupCard(
                     eyebrow: "PLAN",
                     footnote: String(localized: "profile.plan.groupFootnote", defaultValue: "Subscription, referral codes, feedback, and a refresher on how Soma works.", comment: "Footnote under the Plan settings group")
                 ) {
@@ -1511,6 +1519,19 @@ private struct AccountSettingsView: View {
                     groupRow(title: LocalizedStringKey(String(localized: "profile.howSomaWorks.title", defaultValue: "How Soma works", comment: "Row title opening the How Soma Works tour refresher"))) {
                         store.showHowSomaWorks = true
                     }
+                }
+
+                groupCard(
+                    eyebrow: "NOTIFICATIONS",
+                    footnote: String(localized: "profile.notifications.groupFootnote", defaultValue: "Quiet hours delay any notification that would otherwise land inside the window -- nothing is lost, just pushed to when it ends.", comment: "Footnote under the Notifications settings group")
+                ) {
+                    groupRow(
+                        title: LocalizedStringKey(String(localized: "profile.quietHours.title", defaultValue: "Quiet hours", comment: "Settings row/sheet title for the notification quiet-hours editor")),
+                        value: store.quietHoursEnabled
+                            ? String(localized: "profile.quietHours.onValue", defaultValue: "On", comment: "Quiet hours row value when enabled")
+                            : String(localized: "profile.quietHours.offValue", defaultValue: "Off", comment: "Quiet hours row value when disabled"),
+                        isSet: store.quietHoursEnabled
+                    ) { store.activeSheet = .quietHours }
                 }
 
                 if let errorMessage = store.errorMessage {
@@ -1536,30 +1557,6 @@ private struct AccountSettingsView: View {
         }
     }
 
-    /// Toggle row for a `groupCard` -- matches `groupRow`'s 46px/16pt-padding
-    /// convention but swaps the trailing chevron for a Toggle; the "why"
-    /// copy lives in the group's shared footnote instead of an inline
-    /// subtitle. The write happens in the binding's setter, so programmatic
-    /// loads never trigger a write.
-    private var betaOptInRow: some View {
-        HStack(spacing: 8) {
-            Text("Sport goals (beta)")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(SomaTokens.ink)
-            Spacer(minLength: 8)
-            Toggle("", isOn: Binding(
-                get: { store.betaOptIn },
-                set: { newValue in
-                    store.betaOptIn = newValue
-                    Task { await store.updateBetaOptIn(newValue) }
-                }
-            ))
-            .labelsHidden()
-            .tint(SomaTokens.accent)
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 46)
-    }
 }
 
 /// Three distinct states worth telling apart: paying, on a referral
@@ -1695,7 +1692,7 @@ private func deviceRow(_ provider: Provider, appState: AppState, store: ProfileS
 // MARK: - Detail sheets (field editors, shared by every page)
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, kitchenEquipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession, cycleTracking, language
+    case experience, goals, equipment, kitchenEquipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession, cycleTracking, language, quietHours
     var id: String { rawValue }
 
     /// Resolved explicitly against `locale` rather than a bare
@@ -1724,6 +1721,7 @@ private enum ProfileSheet: String, Identifiable {
         case .anchorSession: localizedString("profile.anchorSession.title", locale: locale)
         case .cycleTracking: localizedString("profile.cycleTracking.title", locale: locale)
         case .language: localizedString("Language", locale: locale)
+        case .quietHours: localizedString("profile.quietHours.title", locale: locale)
         }
     }
 }
@@ -1752,6 +1750,7 @@ private struct DetailSheetContent: View {
                     case .knownLifts: knownLiftsEditor
                     case .anchorSession: anchorSessionEditor
                     case .cycleTracking: cycleTrackingEditor
+                    case .quietHours: quietHoursEditor
                     }
                 }
                 .padding(20)
@@ -1764,10 +1763,11 @@ private struct DetailSheetContent: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
-                        // Language is a local display preference (applied
-                        // immediately by languageEditor's picker), not a
-                        // profile field -- skip the network save() for it.
-                        if sheet != .language { store.save() }
+                        // Language and quiet hours are local device
+                        // preferences applied immediately by their own
+                        // editors, not synced profile fields -- skip the
+                        // network save() for them.
+                        if sheet != .language && sheet != .quietHours { store.save() }
                         store.activeSheet = nil
                     }
                     .disabled(store.isSaving)
@@ -2146,6 +2146,40 @@ private struct DetailSheetContent: View {
             )
             .datePickerStyle(.wheel)
             .labelsHidden()
+        }
+    }
+
+    /// Local device preference (NotificationManager's own UserDefaults),
+    /// applied immediately on every change -- same "no store.save()"
+    /// pattern as languageEditor, so there's no separate save step for the
+    /// two time pickers below.
+    private var quietHoursEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "profile.quietHours.explainer", defaultValue: "Soma won't schedule new notifications inside this window -- anything that would've landed here waits until it ends.", comment: "Explainer text at top of the quiet-hours editor sheet"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Toggle(String(localized: "profile.quietHours.enable", defaultValue: "Quiet hours", comment: "Toggle label enabling/disabling quiet hours"), isOn: Binding(
+                get: { store.quietHoursEnabled },
+                set: { store.quietHoursEnabled = $0; store.applyQuietHours() }
+            ))
+            if store.quietHoursEnabled {
+                DatePicker(
+                    String(localized: "profile.quietHours.start", defaultValue: "Starts", comment: "Quiet hours start time picker label"),
+                    selection: Binding(
+                        get: { store.quietHoursStart },
+                        set: { store.quietHoursStart = $0; store.applyQuietHours() }
+                    ),
+                    displayedComponents: .hourAndMinute
+                )
+                DatePicker(
+                    String(localized: "profile.quietHours.end", defaultValue: "Ends", comment: "Quiet hours end time picker label"),
+                    selection: Binding(
+                        get: { store.quietHoursEnd },
+                        set: { store.quietHoursEnd = $0; store.applyQuietHours() }
+                    ),
+                    displayedComponents: .hourAndMinute
+                )
+            }
         }
     }
 }

@@ -521,6 +521,9 @@ extension UserGoal {
     }
 
     /// "week 4 of 10–12" -- only when both halves are real.
+    /// Placeholders must stay %lld in the catalog (not %@): these are Int
+    /// arguments, and a stored %@ crashes String(localized:) resolution
+    /// on-device (BUG-118 class -- see DailyRecommendation.explanation).
     var weekLine: String? {
         guard let currentWeek, let horizon = horizonWeeks else { return nil }
         return String(localized: "userGoal.weekLine", defaultValue: "week \(currentWeek) of \(horizon.low)–\(horizon.high)", comment: "Training-week progress line, e.g. 'week 4 of 10-12'; placeholders are the current week number and the horizon low/high week numbers")
