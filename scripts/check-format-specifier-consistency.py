@@ -105,8 +105,14 @@ CALL_SITE_RE = re.compile(
     r'String\(\s*localized:\s*"(?P<key>[^"]+)"\s*,\s*defaultValue:\s*"(?P<default>(?:[^"\\]|\\.)*)"'
 )
 NUMERIC_TYPES = r'Int8|Int16|Int32|Int64|Int|UInt8|UInt16|UInt32|UInt64|UInt|Double|Float|CGFloat'
-PROP_NUMERIC_RE = re.compile(r'\b(\w+)\s*:\s*(?:' + NUMERIC_TYPES + r')\??\b')
-PROP_STRING_RE = re.compile(r'\b(\w+)\s*:\s*String\??\b')
+# (?<!\.) excludes `case .name: String(...)`/`case .name: Int(...)` --
+# without it, a switch case whose body happens to start with a type-shaped
+# call (extremely common for `case .x: String(localized: ...)`, the
+# dominant pattern for enum displayName/explanation properties in this
+# codebase) reads identically to a real `name: Type` annotation, silently
+# polluting global_map with the case's own label under the wrong kind.
+PROP_NUMERIC_RE = re.compile(r'(?<!\.)\b(\w+)\s*:\s*(?:' + NUMERIC_TYPES + r')\??\b')
+PROP_STRING_RE = re.compile(r'(?<!\.)\b(\w+)\s*:\s*String\??\b')
 LOCAL_ASSIGN_RE = re.compile(r'\b(?:let|var)\s+(\w+)\s*=\s*([^\n]+)')
 # `func name(...) -> ReturnType`, tolerating async/throws/rethrows before the arrow.
 FUNC_RETURN_RE = re.compile(

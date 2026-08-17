@@ -5,14 +5,14 @@ import Foundation
 actor MealRatingCoordinator {
     static let shared = MealRatingCoordinator()
 
-    private var inFlight: [String: Task<(score: Int, rationale: String), Error>] = [:]
+    private var inFlight: [String: Task<(score: Int, rationale: String, breakdown: [String]), Error>] = [:]
 
-    func rate(id: String) async throws -> (score: Int, rationale: String) {
+    func rate(id: String) async throws -> (score: Int, rationale: String, breakdown: [String]) {
         if let existing = inFlight[id] {
             return try await existing.value
         }
 
-        let task = Task<(score: Int, rationale: String), Error> {
+        let task = Task<(score: Int, rationale: String, breakdown: [String]), Error> {
             try await SupabaseClient.shared.rateMeal(id: id)
         }
         inFlight[id] = task

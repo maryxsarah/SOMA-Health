@@ -21,6 +21,7 @@ import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shar
 import { type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
 import { computeInjuryProtocolRestApplied, computeMoodCapApplied } from "../_shared/independentCaps.ts";
 import { buildReasoningMessage } from "./reasoningMessage.ts";
+import { normalizeLanguageCode } from "../_shared/language.ts";
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
 // NOTE: verify these paths against the current Whoop developer dashboard
@@ -62,6 +63,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const date: string | undefined = body.date;
     const healthkit: HealthKitPayload | undefined = body.healthkit;
+    const language = normalizeLanguageCode(body.language);
 
     if (!date) {
       return jsonResponse({ error: "missing 'date' (YYYY-MM-DD)" }, 400);
@@ -447,7 +449,7 @@ Deno.serve(async (req: Request) => {
     // string citing today's actual numbers, replacing the old fixed
     // MESSAGES[category] lookup. Deterministic (see reasoningMessage.ts's
     // own header) -- the category decision above is never recomputed here.
-    const message = buildReasoningMessage({
+    const { summary: message, detail: messageDetail } = buildReasoningMessage({
       category,
       userRequestedCategory,
       source,
@@ -473,6 +475,7 @@ Deno.serve(async (req: Request) => {
         injuryModerate: injuryProtocolModerateCapApplied,
         injuryRest: injuryProtocolRestApplied,
       },
+      language,
     });
 
     await supabase
@@ -483,6 +486,7 @@ Deno.serve(async (req: Request) => {
           date,
           category,
           message,
+          message_detail: messageDetail,
           reason,
           sleep_cap_applied: sleepCapApplied,
           injury_cap_applied: injuryCapApplied,

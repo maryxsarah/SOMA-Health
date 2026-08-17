@@ -134,7 +134,7 @@ struct NutritionView: View {
                         Text("Today")
                             .font(.subheadline.bold())
                         Spacer()
-                        Text(String(localized: "nutrition.today.caloriesRemaining", defaultValue: "\(progress.caloriesRemaining) kcal left", comment: "Calories remaining today, e.g. '450 kcal left'"))
+                        Text(String(localized: "nutrition.today.caloriesRemaining", defaultValue: "\(progress.caloriesRemaining.formatted()) kcal left", comment: "Calories remaining today, e.g. '450 kcal left'"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -295,7 +295,7 @@ struct NutritionView: View {
 
     private func macroSummary(_ entry: MealLogEntry) -> String {
         var parts = [
-            String(localized: "nutrition.macroSummary.calories", defaultValue: "\(entry.calories) kcal", comment: "Calorie amount in a meal log row's macro summary"),
+            String(localized: "nutrition.macroSummary.calories", defaultValue: "\(entry.calories.formatted()) kcal", comment: "Calorie amount in a meal log row's macro summary"),
             String(localized: "nutrition.macroSummary.protein", defaultValue: "\(entry.proteinG)g protein", comment: "Protein amount in a meal log row's macro summary"),
         ]
         if let carbsG = entry.carbsG { parts.append(String(localized: "nutrition.macroSummary.carbs", defaultValue: "\(carbsG)g carbs", comment: "Carb amount in a meal log row's macro summary")) }
@@ -346,6 +346,7 @@ struct NutritionView: View {
                    let index = entries.firstIndex(where: { $0.id == entry.id }) {
                     entries[index].score = result.score
                     entries[index].rationale = result.rationale
+                    entries[index].scoreBreakdown = result.breakdown
                 }
                 ratingInFlight.remove(entry.id)
             }

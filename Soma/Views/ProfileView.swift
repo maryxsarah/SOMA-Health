@@ -368,7 +368,9 @@ struct ProfileView: View {
     /// always baking them in. Live preview so toggling actually shows what
     /// changes; the final image is only rendered once (here), not
     /// speculatively on every Settings load.
-    private struct StreakShareSheet: View {
+    // Internal (not private): HomeView's streak tile presents this same
+    // sheet -- one share card, not two implementations.
+    struct StreakShareSheet: View {
         let streakDays: Int
         let category: RecommendationCategory?
         let steps: Int?
@@ -763,11 +765,79 @@ final class ProfileStore: ObservableObject {
     // nearby gyms/partners suggestions; saved via the normal profile flow.
     @Published var countryCode: String?
     @Published var cityText = ""
-    // Weekly anchor session (Phase 4: see docs/coaching-personalization-plan.md)
+    // Weekly anchor sessions (Phase 4: see docs/coaching-personalization-plan.md)
     // -- a real editor, unlike preservedHeightCm/etc above, so these are
     // loaded AND sent back live on every save, same as countryCode/cityText.
-    @Published var anchorSessionName = ""
-    @Published var anchorSessionDays: Set<Int> = []
+    // Item 6 fix: a list (up to 5), not a single name/days pair.
+    @Published var anchorSessions: [AnchorSession] = []
+    /// Non-nil while the add/edit sub-sheet is open -- a fresh UUID string
+    /// not yet in `anchorSessions` means "adding new"; an id that IS in
+    /// the list means "editing that one". Draft fields below hold the
+    /// in-progress edit until committed, so canceling never mutates
+    /// `anchorSessions` itself.
+    @Published var editingAnchorId: String?
+    @Published var draftAnchorName = ""
+    @Published var draftAnchorDays: Set<Int> = []
+    @Published var anchorEditError: String?
+
+    var isAddingNewAnchor: Bool {
+        guard let editingAnchorId else { return false }
+        return !anchorSessions.contains { $0.id == editingAnchorId }
+    }
+
+    static let maxAnchorSessions = 5
+
+    func beginAddingAnchor() {
+        editingAnchorId = UUID().uuidString
+        draftAnchorName = ""
+        draftAnchorDays = []
+        anchorEditError = nil
+    }
+
+    func beginEditingAnchor(_ anchor: AnchorSession) {
+        editingAnchorId = anchor.id
+        draftAnchorName = anchor.name
+        draftAnchorDays = Set(anchor.days)
+        anchorEditError = nil
+    }
+
+    func cancelAnchorEdit() {
+        editingAnchorId = nil
+        anchorEditError = nil
+    }
+
+    /// Validates (name 1-40 chars, >=1 day) then appends or replaces --
+    /// duplicate names are allowed (per spec: two "Gym" entries at
+    /// different times is a real scenario), only the day/name shape is
+    /// validated.
+    func commitAnchorEdit() {
+        guard let editingAnchorId else { return }
+        let name = draftAnchorName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 40 else {
+            anchorEditError = String(localized: "profile.anchorSession.error.name", defaultValue: "Give it a short name (1-40 characters).", comment: "Validation error when an anchor session's name is empty or too long")
+            return
+        }
+        guard !draftAnchorDays.isEmpty else {
+            anchorEditError = String(localized: "profile.anchorSession.error.days", defaultValue: "Pick at least one day.", comment: "Validation error when an anchor session has no days selected")
+            return
+        }
+        let anchor = AnchorSession(id: editingAnchorId, name: name, days: draftAnchorDays.sorted())
+        if let index = anchorSessions.firstIndex(where: { $0.id == editingAnchorId }) {
+            anchorSessions[index] = anchor
+        } else {
+            guard anchorSessions.count < Self.maxAnchorSessions else {
+                anchorEditError = String(localized: "profile.anchorSession.error.max", defaultValue: "You can have up to 5 recurring activities.", comment: "Validation error when trying to add more than the maximum allowed anchor sessions")
+                return
+            }
+            anchorSessions.append(anchor)
+        }
+        self.editingAnchorId = nil
+        anchorEditError = nil
+    }
+
+    func deleteAnchor(_ id: String) {
+        anchorSessions.removeAll { $0.id == id }
+    }
 
     @Published var isSaving = false
     @Published var errorMessage: String?
@@ -866,13 +936,12 @@ final class ProfileStore: ObservableObject {
         String(localized: "profile.signOut", defaultValue: "Sign out", comment: "Button to sign out of the account")
     }
 
-    /// "Hot Yoga · Tue" / "Hot Yoga" (no day picked yet) / "Not set".
+    /// "Hot Yoga, Tennis league" / "Hot Yoga" / "Not set" -- summary shown
+    /// on the Profile hub's row; the sheet itself shows the full list with
+    /// days per anchor.
     var anchorSessionRowValue: String {
-        let name = anchorSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return notSetLabel }
-        guard !anchorSessionDays.isEmpty else { return name }
-        let days = anchorSessionDays.sorted().map(WeekdayMiniPicker.shortName(forValue:)).joined(separator: ", ")
-        return "\(name) · \(days)"
+        guard !anchorSessions.isEmpty else { return notSetLabel }
+        return anchorSessions.map(\.name).joined(separator: ", ")
     }
 
     /// Kill switch: the row exists only when the server-gated catalog has
@@ -993,8 +1062,7 @@ final class ProfileStore: ObservableObject {
         })
         countryCode = profile.country
         cityText = profile.city ?? ""
-        anchorSessionName = profile.anchorSessionName ?? ""
-        anchorSessionDays = Set(profile.anchorSessionDays)
+        anchorSessions = profile.anchorSessions
         preservedHeightCm = profile.heightCm
         preservedJourneyStage = profile.journeyStage
         preservedBlockersNotes = profile.blockersNotes
@@ -1166,8 +1234,7 @@ final class ProfileStore: ObservableObject {
             blockersNotes: preservedBlockersNotes,
             knownLifts: knownLifts,
             dateOfBirth: dateOfBirthDate.map(Self.dobFormatter.string(from:)),
-            anchorSessionName: anchorSessionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : anchorSessionName,
-            anchorSessionDays: Array(anchorSessionDays)
+            anchorSessions: anchorSessions
         )
 
         let currentInjuryTags = Array(injuryTags)
@@ -2151,18 +2218,126 @@ private struct DetailSheetContent: View {
     /// Same field pair as onboarding's AnchorSessionQuestionView, same
     /// WeekdayMiniPicker component -- lets someone who skipped it at
     /// onboarding set it later, or fix the wrong day.
+    /// Item 6 fix: a list (up to 5), not a single name/days form -- real
+    /// feedback is that anyone with a weekly schedule almost always has
+    /// more than one recurring commitment. Add/edit happens in its own
+    /// small sub-sheet (anchorSessionEditForm) rather than sharing this
+    /// screen, so the day picker and keyboard never fight this list for
+    /// space.
     private var anchorSessionEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(String(localized: "profile.anchorSession.explainer", defaultValue: "A recurring class or activity (e.g. a Tuesday hot yoga class) the rest of your week gets built around.", comment: "Explainer text at top of the weekly anchor session editor sheet"))
+            Text(String(localized: "profile.anchorSession.explainer", defaultValue: "Recurring classes or activities (e.g. a Tuesday hot yoga class) the rest of your week gets built around.", comment: "Explainer text at top of the weekly anchor sessions list"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            TextField(String(localized: "profile.anchorSession.namePlaceholder", defaultValue: "e.g. \"Hot Yoga\", \"Tennis league\"", comment: "Placeholder text for the anchor session name field"), text: $store.anchorSessionName)
-                .textFieldStyle(.roundedBorder)
-            VStack(alignment: .leading, spacing: 10) {
-                Text(String(localized: "profile.anchorSession.dayPrompt", defaultValue: "Which day(s) is it usually on?", comment: "Prompt above the weekday picker for the anchor session"))
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                WeekdayMiniPicker(selected: $store.anchorSessionDays)
+
+            if store.anchorSessions.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(localized: "profile.anchorSession.emptyState", defaultValue: "A regular class or activity the rest of the week gets built around.", comment: "Empty-state description shown when no anchor sessions are set yet"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(String(localized: "profile.anchorSession.emptyStateExample", defaultValue: "For example: \"Hot Yoga\" every Tuesday.", comment: "Empty-state example shown under the anchor sessions explainer"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(store.anchorSessions) { anchor in
+                        Button {
+                            store.beginEditingAnchor(anchor)
+                        } label: {
+                            HStack {
+                                Text(anchor.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Text(anchor.days.sorted().map(WeekdayMiniPicker.shortName(forValue:)).joined(separator: ", "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
+                        if anchor.id != store.anchorSessions.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+
+            if store.anchorSessions.count < ProfileStore.maxAnchorSessions {
+                Button {
+                    store.beginAddingAnchor()
+                } label: {
+                    Label(String(localized: "profile.anchorSession.addButton", defaultValue: "Add activity", comment: "Button that opens the add-anchor-session sub-sheet"), systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { store.editingAnchorId != nil },
+            set: { if !$0 { store.cancelAnchorEdit() } }
+        )) {
+            anchorSessionEditForm
+        }
+    }
+
+    /// Add/edit sub-sheet -- own NavigationStack/toolbar (Cancel/Save,
+    /// plus Delete when editing an existing anchor), separate from the
+    /// list screen's own Done button above.
+    private var anchorSessionEditForm: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                TextField(String(localized: "profile.anchorSession.namePlaceholder", defaultValue: "e.g. \"Hot Yoga\", \"Tennis league\"", comment: "Placeholder text for the anchor session name field"), text: $store.draftAnchorName)
+                    .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(String(localized: "profile.anchorSession.dayPrompt", defaultValue: "Which day(s) is it usually on?", comment: "Prompt above the weekday picker for the anchor session"))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    WeekdayMiniPicker(selected: $store.draftAnchorDays)
+                }
+                if let anchorEditError = store.anchorEditError {
+                    Text(anchorEditError)
+                        .font(.caption)
+                        .foregroundStyle(SomaTokens.danger)
+                }
+                Spacer()
+                if !store.isAddingNewAnchor, let editingAnchorId = store.editingAnchorId {
+                    Button(role: .destructive) {
+                        store.deleteAnchor(editingAnchorId)
+                        store.cancelAnchorEdit()
+                    } label: {
+                        Text(String(localized: "profile.anchorSession.deleteButton", defaultValue: "Delete", comment: "Button that removes an anchor session"))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(SomaTokens.danger)
+                }
+            }
+            .padding(20)
+            .somaBackground()
+            .navigationTitle(store.isAddingNewAnchor
+                ? String(localized: "profile.anchorSession.addTitle", defaultValue: "Add activity", comment: "Navigation title for the add-anchor-session sub-sheet")
+                : String(localized: "profile.anchorSession.editTitle", defaultValue: "Edit activity", comment: "Navigation title for the edit-anchor-session sub-sheet"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "profile.anchorSession.cancelButton", defaultValue: "Cancel", comment: "Cancel button on the add/edit anchor session sub-sheet")) {
+                        store.cancelAnchorEdit()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "profile.anchorSession.saveButton", defaultValue: "Save", comment: "Save button on the add/edit anchor session sub-sheet")) {
+                        store.commitAnchorEdit()
+                    }
+                }
             }
         }
     }

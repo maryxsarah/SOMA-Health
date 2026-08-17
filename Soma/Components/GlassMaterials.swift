@@ -77,37 +77,41 @@ private struct GlassLensModifier: ViewModifier {
         content.background(
             ZStack {
                 shape.fill(.ultraThinMaterial)
-                // The CSS recipe's own gradient stops (0.98/0.75/0.3/0.5)
-                // read as near-opaque white on their own -- correct with
-                // real `backdrop-filter: blur()` showing a saturated
-                // blurred background underneath, but SwiftUI's
-                // `.ultraThinMaterial` is far more muted, so at CSS-literal
-                // opacity the base fill alone drowns out every layer
-                // painted on top of it (specular, tint, both rings) and
-                // any hint of the screen's blob color. Cut ~30% across the
-                // board so the material/background actually shows through.
+                // Literal `soma-glass-tokens.css` stops (0.98/0.75/0.3/0.5)
+                // -- an earlier pass here cut these ~30% to compensate for
+                // `.ultraThinMaterial` reading weaker than a real CSS
+                // `backdrop-filter: blur()`, but that also muted the
+                // specular/tint/ring layers riding on top of it into an
+                // overall flat, washed-out lens ("эффекты кривые"). Full
+                // literal values, matching the design's own SwiftUI port.
                 shape.fill(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.68),
-                            Color.white.opacity(0.5),
-                            Color(red: 240 / 255, green: 246 / 255, blue: 255 / 255).opacity(0.2),
-                            Color(red: 224 / 255, green: 234 / 255, blue: 252 / 255).opacity(0.35)
+                            Color.white.opacity(0.98),
+                            Color.white.opacity(0.75),
+                            Color(red: 240 / 255, green: 246 / 255, blue: 255 / 255).opacity(0.3),
+                            Color(red: 224 / 255, green: 234 / 255, blue: 252 / 255).opacity(0.5)
                         ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
-                topSpecular(shape, opacity: 0.7)
-                bottomInsetTint(shape, color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255), opacity: 0.16)
+                topSpecular(shape, opacity: 0.9, heightFraction: 0.38)
+                bottomInsetTint(shape, color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255), opacity: 0.14)
                 shape.strokeBorder(Color.white.opacity(0.95), lineWidth: 1)
             }
             // Outer hairline is a plain .stroke() pushed half a point
             // OUTSIDE the shape (not another strokeBorder on the same
             // inward band) -- two strokeBorders here wash into one mushy
-            // edge instead of two distinct rings.
-            .overlay(shape.stroke(Color(red: 120 / 255, green: 150 / 255, blue: 220 / 255).opacity(0.4), lineWidth: 1.25).padding(-0.5))
-            .shadow(color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.22), radius: 8, x: 0, y: 6)
+            // edge instead of two distinct rings. SomaTokens.accentSoft22
+            // (0.22) rather than a hand-rolled 0.4 -- the doubled opacity
+            // read as a hard outline instead of a soft glass edge.
+            .overlay(shape.stroke(SomaTokens.accentSoft22, lineWidth: 1).padding(-0.5))
+            // Two shadows, matching the CSS recipe's soft lift + tight
+            // contact shadow -- one shadow alone left every lens looking
+            // like it was floating rather than resting on the surface.
+            .shadow(color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.18), radius: 8, x: 0, y: 7)
+            .shadow(color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.12), radius: 2, x: 0, y: 2)
         )
     }
 }

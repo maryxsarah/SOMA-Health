@@ -430,6 +430,9 @@ struct GoalHubView: View {
                 Text(description)
                     .font(.system(size: 15, weight: .semibold))
             }
+            Text(String(localized: "goalHub.upcoming.caption", defaultValue: "Built into your daily workout automatically — nothing separate to follow.", comment: "Caption under the Upcoming card, confirming this goal's sessions are woven into the app's regular daily-generated workout rather than a separate plan to track"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -486,6 +489,9 @@ struct GoalHubView: View {
             let values = measurements.map { (date: $0.dayString, value: $0.value) }
             if values.count >= 2 {
                 AxisLabeledTrendChart(values: values)
+                Text(chartTrendCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else if values.count == 1 {
                 Text(SportGoalFormat.value(values[0].value, unit: unit))
                     .font(SomaType.metric(24))
@@ -504,6 +510,18 @@ struct GoalHubView: View {
     /// the metric trend-chart card.
     private var progressCardTitle: String {
         String(localized: "goalHub.progress.title", defaultValue: "Progress", comment: "Card title shown above either the stage ladder or the trend chart")
+    }
+
+    /// A flat or near-flat line otherwise reads as "nothing happened" --
+    /// this names the trend so a within-noise pair of points isn't mistaken
+    /// for a stalled goal.
+    private var chartTrendCaption: String {
+        guard let first = measurements.first?.value, let last = measurements.last?.value else { return "" }
+        let delta = last - first
+        if abs(delta) <= noiseBand {
+            return String(localized: "goalHub.chart.noChangeCaption", defaultValue: "No meaningful change yet — normal this early in the block.", comment: "Caption under the progress chart when the latest value is within measurement noise of the first")
+        }
+        return String(localized: "goalHub.chart.trendCaption", defaultValue: "\(SportGoalFormat.delta(delta, unit: unit)) since your baseline.", comment: "Caption under the progress chart showing the signed change since baseline; placeholder is the formatted delta with unit")
     }
 
     // MARK: - Re-test (A4, in place)
@@ -602,14 +620,19 @@ struct GoalHubView: View {
     }
 
     private func lockedRow(daysLeft: Int) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 13, weight: .semibold))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink4)
+                Text(lockedRowText(daysLeft: daysLeft))
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink3)
+                Spacer()
+            }
+            Text(String(localized: "goalHub.retest.lockedCaption", defaultValue: "Testing again this soon would just measure noise, not real progress.", comment: "Explanatory caption under the locked re-test row, shown while the next check-in is still time-gated"))
+                .font(.system(size: 12))
                 .foregroundStyle(SomaTokens.ink4)
-            Text(lockedRowText(daysLeft: daysLeft))
-                .font(.system(size: 13.5, weight: .semibold))
-                .foregroundStyle(SomaTokens.ink3)
-            Spacer()
         }
         .padding(14)
         .glassCardFlat(cornerRadius: SomaTokens.rXL)

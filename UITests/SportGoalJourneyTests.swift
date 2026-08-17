@@ -59,8 +59,14 @@ final class SportGoalJourneyTests: XCTestCase {
     /// icon itself is a stable nav anchor whether or not the catalog is
     /// dark -- SportGoalFlowView decides what to show once it opens.
     private func openSportGoalFlow(_ app: XCUIApplication) {
+        // Goals lives in the More sheet now (swapped with Nutrition, which
+        // took the dock slot) -- open More first, then tap the same
+        // identified Goals row inside it.
+        let moreButton = app.buttons["dock-more-button"]
+        XCTAssertTrue(moreButton.waitForExistence(timeout: 20), "Home's dock should show the More icon")
+        moreButton.tap()
         let goalsButton = app.buttons["dock-goals-button"]
-        XCTAssertTrue(goalsButton.waitForExistence(timeout: 20), "Home's dock should show the Goals icon")
+        XCTAssertTrue(goalsButton.waitForExistence(timeout: 10), "The More sheet should show the Goals action")
         goalsButton.tap()
     }
 

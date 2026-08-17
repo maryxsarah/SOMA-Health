@@ -28,6 +28,14 @@ export interface AnchorSessionInput {
   date: string;
 }
 
+/// Item 6 fix: up to 5 anchors, not one. `id` distinguishes anchors with
+/// the same name (dedupe/display only -- this module never returns it).
+export interface Anchor {
+  id: string;
+  name: string;
+  days: number[];
+}
+
 function utcWeekday(dateStr: string): number {
   return new Date(`${dateStr}T00:00:00.000Z`).getUTCDay();
 }
@@ -66,4 +74,31 @@ export function describeAnchorSession(input: AnchorSessionInput): string | null 
     return `The user had their recurring "${name}" session yesterday -- factor in that they may still be carrying some fatigue or tightness from it.`;
   }
   return null;
+}
+
+/// Item 6 fix: loops the single-anchor logic above over up to 5 anchors,
+/// joining whichever ones produce a line today. When 2+ anchors land on
+/// the SAME day as today, prepends one extra advisory line naming all of
+/// them and flagging it as a heavier day than usual -- still advisory only
+/// (see this module's own header comment on why it never becomes a
+/// structured decision), just surfacing the "double load" case explicitly
+/// rather than silently listing two unrelated single-anchor lines.
+export function describeAnchorSessions(anchors: Anchor[], date: string): string | null {
+  const today = utcWeekday(date);
+  const todaysAnchors = anchors.filter((a) => a.name.trim().length > 0 && a.days.includes(today));
+
+  const lines: string[] = [];
+  if (todaysAnchors.length >= 2) {
+    const names = todaysAnchors.map((a) => `"${a.name.trim()}"`).join(" and ");
+    lines.push(
+      `The user has ${todaysAnchors.length} recurring commitments on their own calendar today (${names}) -- that's a heavier day than usual on top of this workout, so favor a lighter/shorter session than the category alone would suggest. Never let this override the day's actual injury exclusions or equipment above.`,
+    );
+  }
+
+  for (const anchor of anchors) {
+    const line = describeAnchorSession({ name: anchor.name, days: anchor.days, date });
+    if (line) lines.push(line);
+  }
+
+  return lines.length > 0 ? lines.join(" ") : null;
 }

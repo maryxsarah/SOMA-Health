@@ -37,6 +37,21 @@ enum RecommendationCategory: String, Codable {
         }
     }
 
+    /// Rough expected calorie burn for a session in this category -- the
+    /// "dayTarget" DayLoadState compares a logged workout's calories
+    /// against, so Home/RecommendationDetail can tell "closed today's
+    /// quota" apart from "barely started" apart from "way over". Not
+    /// personalized (no such per-user target exists yet), same posture as
+    /// stepTarget above.
+    var dayLoadTargetKcal: Int {
+        switch self {
+        case .pushHard: 550
+        case .moderate: 350
+        case .light: 150
+        case .rest: 50
+        }
+    }
+
     /// Fixed, specific suggestions per category -- concrete activity +
     /// duration, no AI generation, same pattern as the existing 4 message
     /// templates. Each carries equipment/impact/body-part tags so the
@@ -330,6 +345,12 @@ struct DailyRecommendation: Codable, Equatable {
     let date: String
     let category: RecommendationCategory
     let message: String
+    /// The fuller reasoning `message` was capped down from (caps/confidence
+    /// clauses included) -- shown in the "Why this?" disclosure. Nil for
+    /// rows written before this column existed, or for the user-requested-
+    /// override/insufficient-data paths, which have nothing more to add
+    /// beyond `message` itself.
+    let messageDetail: String?
     let reason: RecommendationReason
     let sleepCapApplied: Bool
     let injuryCapApplied: Bool
@@ -367,6 +388,7 @@ struct DailyRecommendation: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case date, category, message, reason
+        case messageDetail = "message_detail"
         case dataConfidence = "data_confidence"
         case sleepCapApplied = "sleep_cap_applied"
         case injuryCapApplied = "injury_cap_applied"
@@ -399,6 +421,7 @@ extension DailyRecommendation {
         date = try container.decode(String.self, forKey: .date)
         category = try container.decode(RecommendationCategory.self, forKey: .category)
         message = try container.decode(String.self, forKey: .message)
+        messageDetail = try container.decodeIfPresent(String.self, forKey: .messageDetail)
         reason = try container.decode(RecommendationReason.self, forKey: .reason)
         sleepCapApplied = try container.decode(Bool.self, forKey: .sleepCapApplied)
         injuryCapApplied = try container.decode(Bool.self, forKey: .injuryCapApplied)

@@ -45,8 +45,29 @@ struct GenerationProgressView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ProgressView(value: progress, total: 1.0)
-                .tint(Theme.pillFill)
+            // 13b: a 5pt capsule bar -- soft accent track, light-to-deep
+            // accent gradient fill -- not the system ProgressView.
+            GeometryReader { geo in
+                Capsule()
+                    .fill(SomaTokens.accent.opacity(0.12))
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0x4A / 255, green: 0x75 / 255, blue: 0xF2 / 255),
+                                        SomaTokens.accent
+                                    ],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            )
+                            .frame(width: geo.size.width * progress)
+                    }
+            }
+            .frame(height: 5)
+            .accessibilityElement()
+            .accessibilityLabel(stages[stageIndex])
+            .accessibilityValue("\(Int(progress * 100))%")
             HStack {
                 Text(stages[stageIndex])
                     .contentTransition(.opacity)
@@ -56,7 +77,7 @@ struct GenerationProgressView: View {
                     .monospacedDigit()
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SomaTokens.ink3)
         }
         .onAppear { advance() }
     }

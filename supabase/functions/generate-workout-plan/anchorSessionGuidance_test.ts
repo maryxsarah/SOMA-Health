@@ -6,7 +6,7 @@
 // Tue=2026-08-04, Wed=2026-08-05, Thu=2026-08-06.
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { describeAnchorSession } from "./anchorSessionGuidance.ts";
+import { type Anchor, describeAnchorSession, describeAnchorSessions } from "./anchorSessionGuidance.ts";
 
 Deno.test("null when no name is set", () => {
   assertEquals(describeAnchorSession({ name: null, days: [2], date: "2026-08-03" }), null);
@@ -68,4 +68,72 @@ Deno.test("every advisory line explicitly defers to the day's real safety/catego
   const tomorrow = describeAnchorSession({ name: "Hot Yoga", days: [2], date: "2026-08-03" });
   assert(today?.includes("Never let this override"));
   assert(tomorrow?.includes("Never let this override"));
+});
+
+// MARK: - describeAnchorSessions (item 6: a list of anchors, not one)
+
+function anchor(id: string, name: string, days: number[]): Anchor {
+  return { id, name, days };
+}
+
+Deno.test("empty anchor list yields no guidance", () => {
+  assertEquals(describeAnchorSessions([], "2026-08-04"), null);
+});
+
+Deno.test("a single anchor in the list behaves exactly like describeAnchorSession", () => {
+  const line = describeAnchorSessions([anchor("1", "Hot Yoga", [2])], "2026-08-04");
+  assert(line);
+  assert(line.includes("Hot Yoga"));
+  assert(line.toLowerCase().includes("today"));
+});
+
+Deno.test("multiple anchors on different days each contribute their own line", () => {
+  const line = describeAnchorSessions(
+    [anchor("1", "Hot Yoga", [2]), anchor("2", "Tennis league", [3])],
+    "2026-08-04", // Tuesday: Hot Yoga is today, Tennis league (Wed) is tomorrow
+  );
+  assert(line);
+  assert(line.includes("Hot Yoga"));
+  assert(line.includes("Tennis league"));
+  assert(line.toLowerCase().includes("today"));
+  assert(line.toLowerCase().includes("tomorrow"));
+});
+
+Deno.test("two anchors on the SAME day today are flagged as a heavier-than-usual day", () => {
+  const line = describeAnchorSessions(
+    [anchor("1", "Hot Yoga", [2]), anchor("2", "Boxing", [2])],
+    "2026-08-04",
+  );
+  assert(line);
+  assert(line.includes("Hot Yoga"));
+  assert(line.includes("Boxing"));
+  assert(line.toLowerCase().includes("heavier"));
+  assert(line.includes("2 recurring commitments"));
+});
+
+Deno.test("same-day conflict note still defers to real safety/category rules", () => {
+  const line = describeAnchorSessions(
+    [anchor("1", "Hot Yoga", [2]), anchor("2", "Boxing", [2])],
+    "2026-08-04",
+  );
+  assert(line?.includes("Never let this override"));
+});
+
+Deno.test("only one anchor today among several doesn't trigger the conflict note", () => {
+  const line = describeAnchorSessions(
+    [anchor("1", "Hot Yoga", [2]), anchor("2", "Tennis league", [4])],
+    "2026-08-04",
+  );
+  assert(line);
+  assert(!line.toLowerCase().includes("heavier"));
+});
+
+Deno.test("blank-name and empty-days anchors in the list are silently skipped, not errored", () => {
+  const line = describeAnchorSessions(
+    [anchor("1", "  ", [2]), anchor("2", "Hot Yoga", []), anchor("3", "Tennis league", [2])],
+    "2026-08-04",
+  );
+  assert(line);
+  assert(line.includes("Tennis league"));
+  assert(!line.includes("Hot Yoga"));
 });

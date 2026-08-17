@@ -276,7 +276,11 @@ struct CompletedWorkoutView: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(SomaTokens.accent)
-                Text(String(localized: "completedWorkout.whyToday.eyebrow", defaultValue: "WHY THIS WORKOUT TODAY", comment: "Completed workout: eyebrow label over the why-this-workout explanation"))
+                // Item 1, completed: prescriptive copy never headlines a
+                // finished session -- every source now gets the same
+                // retrospective "what this did" framing (the resolver
+                // returns impact copy for ai_plan too).
+                Text(String(localized: "completedWorkout.whatThisDid.eyebrow", defaultValue: "WHAT THIS DID", comment: "Completed workout: eyebrow label over the retrospective impact note, shown for sessions Soma didn't suggest"))
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.6)
                     .foregroundStyle(SomaTokens.accent)
@@ -368,6 +372,12 @@ struct CompletedWorkoutView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(log.title)
                         .font(.system(size: 14, weight: .semibold))
+                    // Source note lives here now, not as a third chip
+                    // alongside body-part/category (which describe the
+                    // workout itself, not where the log came from).
+                    Text(Self.sourceDisplayName(log.source))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(SomaTokens.ink3)
                     if let feedback = log.feedback, !feedback.isEmpty {
                         Text(feedback)
                             .font(.system(size: 12.5))
@@ -385,7 +395,6 @@ struct CompletedWorkoutView: View {
             HStack(spacing: 6) {
                 metaChip(BodyPartFocus(rawValue: log.bodyPart)?.displayName ?? log.bodyPart)
                 metaChip(Self.categoryDisplayName(log.category))
-                metaChip(Self.sourceDisplayName(log.source))
             }
         }
     }
@@ -563,7 +572,9 @@ struct CompletedWorkoutView: View {
         }
 
         if reasonSnapshot?.isEmpty ?? true {
-            reasonSnapshot = WorkoutReasonResolver.reason(for: log, recommendation: recommendation, snapshots: snapshots)
+            let target = RecommendationCategory(rawValue: log.category)?.dayLoadTargetKcal ?? RecommendationCategory.moderate.dayLoadTargetKcal
+            let dayLoadState = DayLoadState.resolve(hasLoggedWorkout: true, loggedKcal: caloriesBurned, target: target)
+            reasonSnapshot = WorkoutReasonResolver.reason(for: log, recommendation: recommendation, snapshots: snapshots, dayLoadState: dayLoadState)
             needsWrite = true
         }
 

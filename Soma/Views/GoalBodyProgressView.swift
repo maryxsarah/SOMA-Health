@@ -159,9 +159,16 @@ struct GoalBodyProgressView: View {
 
     private var photosSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
-                compareSlot(kind: .current, title: "Current body", image: currentImage, isUploading: isUploadingCurrent, selection: $currentPhotoItem)
-                compareSlot(kind: .goal, title: "Goal body", image: goalImage, isUploading: isUploadingGoal, selection: $goalPhotoItem)
+            // Item 3 fix: equal-width columns regardless of either slot's
+            // intrinsic content -- Current uniquely renders an extra
+            // on-photo date chip, so a plain HStack + maxWidth: .infinity
+            // (which only splits LEFTOVER space, each child still claims
+            // its own minimum content width first) let Current win the
+            // width fight and pushed Goal past the screen edge. Same
+            // flexible-GridItem recipe HomeView's widget grid already uses.
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 10) {
+                compareSlot(kind: .current, title: LocalizedStringKey(String(localized: "goalProgress.photos.currentBody", defaultValue: "Current body", comment: "Caption under the 'Current' progress photo")), image: currentImage, isUploading: isUploadingCurrent, selection: $currentPhotoItem)
+                compareSlot(kind: .goal, title: LocalizedStringKey(String(localized: "goalProgress.photos.goalBody", defaultValue: "Goal body", comment: "Caption under the 'Goal' progress photo")), image: goalImage, isUploading: isUploadingGoal, selection: $goalPhotoItem)
             }
             if !currentHistory.isEmpty {
                 historyStrip
@@ -171,11 +178,11 @@ struct GoalBodyProgressView: View {
                     AnalyticsManager.shared.featureUsed(name: "body_photo_comparison")
                     showComparison = true
                 } label: {
-                    Label("Compare Goal vs. Current", systemImage: "arrow.left.and.right.square")
+                    Label(String(localized: "goalProgress.photos.compareButton", defaultValue: "Compare Goal vs. Current", comment: "Button that opens a side-by-side goal-vs-current photo comparison"), systemImage: "arrow.left.and.right.square")
                         .font(.caption.bold())
                 }
             }
-            CTAPillButton(title: "Add a new progress photo", icon: Image(systemName: "camera.fill")) {
+            CTAPillButton(title: LocalizedStringKey(String(localized: "goalProgress.photos.addNewButton", defaultValue: "Add a new progress photo", comment: "Button that opens the photo picker to add a new progress photo")), icon: Image(systemName: "camera.fill")) {
                 showAddPhotoPicker = true
             }
         }
@@ -270,7 +277,7 @@ struct GoalBodyProgressView: View {
 
     private var historyStrip: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("HISTORY")
+            Text(String(localized: "goalProgress.history.title", defaultValue: "HISTORY", comment: "All-caps section label above the current-body photo history strip"))
                 .font(.system(size: 11, weight: .bold))
                 .tracking(0.7)
                 .foregroundStyle(SomaTokens.inkPlaceholder)
@@ -282,7 +289,7 @@ struct GoalBodyProgressView: View {
                     addHistoryTile
                 }
             }
-            Text("Tap a photo to make it your current one.")
+            Text(String(localized: "goalProgress.history.caption", defaultValue: "Tap a photo to make it your current one.", comment: "Caption under the photo history strip explaining that tapping a past photo repins it as current"))
                 .font(.system(size: 11.5))
                 .foregroundStyle(SomaTokens.ink3)
         }
@@ -308,7 +315,7 @@ struct GoalBodyProgressView: View {
     private func progressSection(_ progress: GoalJourneyProgress) -> some View {
         CardView {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Day \(progress.daysElapsed + 1) of your journey")
+                Text(String(localized: "goalProgress.journey.dayCount", defaultValue: "Day \(progress.daysElapsed + 1) of your journey", comment: "Progress-screen headline showing how many days into the journey the user is"))
                     .font(.subheadline.bold())
                 if progress.hasReliableEstimate {
                     ProgressView(value: progress.fraction)
@@ -327,7 +334,8 @@ struct GoalBodyProgressView: View {
         guard progress.hasReliableEstimate else {
             return String(localized: "goal_progress.estimate.no_reliable_estimate", defaultValue: "Your target weight doesn't match your goal photo yet -- update it in Settings for a real estimate.", comment: "Shown when the user's target weight doesn't support a reliable goal timeline estimate")
         }
-        let months = progress.estimatedTotalDays / 30
+        // Rounded, not truncated -- 59 days is "2 months", not "1".
+        let months = max(1, Int((Double(progress.estimatedTotalDays) / 30.0).rounded()))
         let monthsText = String(
             localized: "onboarding.monthsStandalone",
             defaultValue: "\(months) months",
@@ -343,7 +351,7 @@ struct GoalBodyProgressView: View {
     private var insightsSection: some View {
         CardView {
             VStack(alignment: .leading, spacing: 8) {
-                Text("How Soma is getting you there")
+                Text(String(localized: "goalProgress.insights.title", defaultValue: "How Soma is getting you there", comment: "Title of the card explaining how the plan targets the user's goal photo comparison"))
                     .font(.subheadline.bold())
                 if let trainingEmphasis {
                     Text(trainingEmphasis.planDirectionSentence)
@@ -363,7 +371,7 @@ struct GoalBodyProgressView: View {
                         }
                     }
                 }
-                Text("Based on comparing your goal and current photos -- a secondary signal alongside your stated goals, not a replacement for them.")
+                Text(String(localized: "goalProgress.insights.disclaimer", defaultValue: "Based on comparing your goal and current photos -- a secondary signal alongside your stated goals, not a replacement for them.", comment: "Disclaimer under the goal-progress insights card"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

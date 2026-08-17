@@ -54,6 +54,7 @@ struct HomeView: View {
     @State private var timelineEntries: [WorkoutTimelineEntry] = []
 
     @State private var showGymPhotoFlow = false
+    @State private var scanUnavailableReason: ScanUnavailableReason?
     // Goal-progress card -- previously the only way to find the goal/
     // current body photo feature was one buried row deep in Profile's
     // Training tab. Loaded independently of `profile` in ProfileView since
@@ -124,6 +125,7 @@ struct HomeView: View {
     @State private var checklistDone: Int?
     @State private var checklistTotal: Int?
     @State private var showChecklistSheet = false
+    @State private var showHistoryCalendar = false
 
     // MARK: - Dashboard widgets + dock (Soma Glass 3a/3c/3e handoff)
 
@@ -136,9 +138,13 @@ struct HomeView: View {
     @AppStorage("dashboardWidget.streak") private var streakWidgetEnabled = true
     @AppStorage("dashboardWidget.dailyTasks") private var dailyTasksWidgetEnabled = true
     @AppStorage("dashboardWidget.mood") private var moodWidgetEnabled = true
+    @AppStorage("dashboardWidget.nutrition") private var nutritionWidgetEnabled = true
     @AppStorage("dashboardWidget.sportGoal") private var sportGoalWidgetEnabled = true
     @AppStorage("dashboardWidget.photoProgress") private var photoProgressWidgetEnabled = false
     @State private var showEditWidgets = false
+    /// Streak tile tap -> the same share card Profile's streak section
+    /// offers (real feedback: streak must be tappable and sharable).
+    @State private var showStreakShare = false
     @State private var showMoreActions = false
     /// Set by `MoreActionsSheet` right before it dismisses itself, fired
     /// from that sheet's own `.onDismiss` -- the same chain-sheets pattern
@@ -150,7 +156,15 @@ struct HomeView: View {
     /// anywhere... kept as a placeholder by the user's explicit choice").
     /// Keyed by day so it doesn't carry yesterday's count into today.
     @State private var waterGlassesToday = 0
-    private static func waterStorageKey() -> String { "water.\(Self.todayDateString())" }
+    private static func waterStorageKey(for date: String = Self.todayDateString()) -> String { "water.\(date)" }
+
+    /// Reads a past day's water count straight from the same date-keyed
+    /// UserDefaults entry this widget already writes -- lets the history
+    /// calendar's "perfect day" crown check water without a backend, same
+    /// UI-only-placeholder scope this widget already has.
+    static func waterGlasses(on date: String) -> Int {
+        UserDefaults.standard.integer(forKey: waterStorageKey(for: date))
+    }
 
     /// Glass size chip (9b) -- a standing preference, not day-scoped, that
     /// the "+"/"-" and droplet-tap actions all read but don't themselves
@@ -203,9 +217,7 @@ struct HomeView: View {
                     }
                 }
 
-                if let todaysWorkoutLog {
-                    todaysWorkoutCard(todaysWorkoutLog)
-                } else if let todaysAIPlan, todaysAIPlan.addedToPlan {
+                if todaysWorkoutLog == nil, let todaysAIPlan, todaysAIPlan.addedToPlan {
                     aiGeneratedWorkoutCard(todaysAIPlan)
                 }
 
@@ -386,6 +398,14 @@ struct HomeView: View {
                 pendingGymPlan = (plan, title, bodyPart)
             }
         }
+        .alert(
+            scanUnavailableAlertTitle,
+            isPresented: Binding(get: { scanUnavailableReason != nil }, set: { if !$0 { scanUnavailableReason = nil } })
+        ) {
+            Button(String(localized: "home.scanGym.unavailable.gotIt", defaultValue: "Got it", comment: "Dismiss button for the scan-gym-unavailable alert")) {}
+        } message: {
+            Text(scanUnavailableAlertMessage)
+        }
         .sheet(isPresented: $showSeededDetail, onDismiss: {
             pendingGymPlan = nil
             Task {
@@ -418,6 +438,9 @@ struct HomeView: View {
         .sheet(isPresented: $showChecklistSheet) {
             checklistSheet
         }
+        .sheet(isPresented: $showHistoryCalendar) {
+            HistoryCalendarView()
+        }
         .sheet(isPresented: $showEditWidgets) {
             EditWidgetsSheet(
                 waterEnabled: $waterWidgetEnabled,
@@ -425,6 +448,7 @@ struct HomeView: View {
                 streakEnabled: $streakWidgetEnabled,
                 dailyTasksEnabled: $dailyTasksWidgetEnabled,
                 moodEnabled: $moodWidgetEnabled,
+                nutritionEnabled: $nutritionWidgetEnabled,
                 sportGoalEnabled: $sportGoalWidgetEnabled,
                 photoProgressEnabled: $photoProgressWidgetEnabled
             )
@@ -460,6 +484,16 @@ struct HomeView: View {
                 handleChecklistDeepLink(pending)
                 checklistRouter.pending = nil
             }
+            #if DEBUG
+            // Fixture-run shortcut straight into the History calendar --
+            // this Mac's Simulator intermittently stops delivering synthetic
+            // taps to SwiftUI content (see the project's own note), so
+            // screenshot verification of 15a needs a tap-free way in.
+            if UITestSupport.isActive,
+               ProcessInfo.processInfo.arguments.contains("--ui-test-open-history") {
+                showHistoryCalendar = true
+            }
+            #endif
         }
     }
 
@@ -561,27 +595,54 @@ struct HomeView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // No placeholder state -- until DailyChecklistCardView has
-            // actually loaded once (inline widget or this pill's own
-            // sheet), there's nothing real to show, so show nothing.
-            if let checklistDone, let checklistTotal, checklistTotal > 0 {
-                Button {
-                    showChecklistSheet = true
-                } label: {
-                    HStack(spacing: 6) {
-                        ProgressRing(fraction: Double(checklistDone) / Double(checklistTotal))
-                            .frame(width: 14, height: 14)
-                        Text(String(localized: "home.greetingRow.checklistProgress", defaultValue: "\(checklistDone)/\(checklistTotal)", comment: "Home: greeting row ring-pill showing checklist items done out of total, e.g. '3/5'"))
-                            .font(.system(size: 12, weight: .bold))
+            HStack(spacing: 8) {
+                historyCalendarButton
+
+                // No placeholder state -- until DailyChecklistCardView has
+                // actually loaded once (inline widget or this pill's own
+                // sheet), there's nothing real to show, so show nothing.
+                if let checklistDone, let checklistTotal, checklistTotal > 0 {
+                    Button {
+                        showChecklistSheet = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            ProgressRing(fraction: Double(checklistDone) / Double(checklistTotal))
+                                .frame(width: 14, height: 14)
+                            Text(String(localized: "home.greetingRow.checklistProgress", defaultValue: "\(checklistDone)/\(checklistTotal)", comment: "Home: greeting row ring-pill showing checklist items done out of total, e.g. '3/5'"))
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundStyle(SomaTokens.accent)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 7)
+                        .glassLens()
                     }
-                    .foregroundStyle(SomaTokens.accent)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 7)
-                    .glassLens()
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
+    }
+
+    /// 3a: calendar-lens entry point immediately left of the checklist
+    /// ring-pill -- opens the new month-grid history screen (15a). Distinct
+    /// from tapping a day chip in the week strip, which still opens
+    /// `DayDetailView` for that single day.
+    private var historyCalendarButton: some View {
+        Button {
+            showHistoryCalendar = true
+        } label: {
+            // 3a draws its own minimal glyph (rounded rect + 2 hinge ticks +
+            // 1 divider line) rather than SF Symbol "calendar" -- that
+            // symbol bakes in a 3x3 dot grid that reads busy/off-center at
+            // 18pt inside a 30pt circle.
+            HistoryCalendarGlyph()
+                .stroke(SomaTokens.accent, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                .frame(width: 18, height: 18)
+                .frame(width: 30, height: 30)
+                .glassLens(cornerRadius: SomaTokens.rPill)
+        }
+        .buttonStyle(SomaNavPillButtonStyle())
+        .accessibilityLabel(String(localized: "home.greetingRow.historyCalendar.accessibilityLabel", defaultValue: "History", comment: "Home: greeting row calendar-icon button that opens the full training history calendar"))
+        .accessibilityIdentifier("home.historyCalendarButton")
     }
 
     /// The mockup's own top row (`21:36 •••`) -- the dots are a real
@@ -751,24 +812,42 @@ struct HomeView: View {
 
     // MARK: - Readiness card (guide 03: category + one line + disclosure + CTA)
 
+    /// Today's logged-activity state relative to the category's own rough
+    /// calorie target -- drives readinessCard's headline/subtitle/CTA below
+    /// so the card actually reflects reality once something's logged,
+    /// instead of forever pitching the same suggestion (item 2 fix). See
+    /// DayLoadState's own doc comment.
+    private func dayLoadState(for recommendation: DailyRecommendation) -> DayLoadState {
+        DayLoadState.resolve(
+            hasLoggedWorkout: todaysWorkoutLog != nil,
+            loggedKcal: todaysWorkoutLog?.caloriesBurned,
+            target: recommendation.category.dayLoadTargetKcal
+        )
+    }
+
     private func readinessCard(_ recommendation: DailyRecommendation) -> some View {
-        VStack(alignment: .leading, spacing: 13) {
+        let state = dayLoadState(for: recommendation)
+        let isDone = state == .fulfilled || state == .overreached
+        return VStack(alignment: .leading, spacing: 13) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(recommendation.category.displayTitle)
+                    Text(readinessHeadline(recommendation, state: state))
                         .font(SomaType.heroTitle)
                     // The only screen a day-1 user is guaranteed to see --
                     // without this, a zero-signal "moderate" reads exactly
                     // like a real one until they tap through to Detail.
-                    if recommendation.reason == .insufficientData {
+                    if recommendation.reason == .insufficientData, state == .pending {
                         Text(String(localized: "home.readiness.buildingBaseline", defaultValue: "Building your baseline", comment: "Home: badge shown on the readiness card while there isn't enough data yet for a real reading"))
-                            .font(.caption.bold())
+                            .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.orange)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.orange.opacity(0.15)))
                     }
-                    Text(recommendation.message)
+                    Text(readinessSubtitle(recommendation, state: state))
                         .font(.system(size: 14))
                         .foregroundStyle(SomaTokens.ink2)
-                        .lineLimit(2)
+                        .lineLimit(3)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 8) {
@@ -785,78 +864,149 @@ struct HomeView: View {
                 }
             }
 
-            // 3a: always-visible flat-tinted metric chips (they carry data,
-            // not affordance -- never `.glassLens()`/`.glassGel()`), not
-            // hidden inside the disclosure. Duration always exists (the
-            // category's own fixed suggestion pool, not fabricated); health
-            // inputs only when a source actually reported them.
-            let chips = heroChips(for: recommendation)
-            if chips.count > 1 {
-                // True equal-width columns (unlike an HStack + maxWidth:
-                // .infinity, which only splits LEFTOVER space -- each child
-                // still claims its own minimum content width first, so the
-                // longest chip, e.g. "Resting HR 61 bpm", won out and got
-                // truncated instead of shrinking evenly with the rest).
-                // Same flexible-GridItem recipe the Sleep widget's 2x2 grid
-                // already uses successfully, just N columns in one row.
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: chips.count), spacing: 8) {
-                    ForEach(chips, id: \.self) { HomeMetricChip(text: $0) }
-                }
-            } else if let onlyChip = chips.first {
-                HStack(spacing: 8) {
-                    HomeMetricChip(text: onlyChip, fillsRow: false)
-                }
+            if let todaysWorkoutLog {
+                loggedWorkoutRow(todaysWorkoutLog)
             }
 
-            SomaDisclosure {
-                Text(recommendation.reason.explanation(snapshots: todaysSnapshots))
-            }
+            // Once today's activity is done, the pitch below (chips,
+            // "why this?", the goal row) is about a session that no longer
+            // applies -- de-emphasized out entirely rather than left
+            // stale underneath the completed state.
+            if !isDone {
+                // 3a: always-visible flat-tinted metric chips (they carry
+                // data, not affordance -- never `.glassLens()`/`.glassGel()`),
+                // not hidden inside the disclosure. Duration always exists
+                // (the category's own fixed suggestion pool, not
+                // fabricated); health inputs only when a source actually
+                // reported them.
+                let chips = heroChips(for: recommendation)
+                if chips.count > 1 {
+                    // True equal-width columns (unlike an HStack + maxWidth:
+                    // .infinity, which only splits LEFTOVER space -- each
+                    // child still claims its own minimum content width
+                    // first, so the longest chip, e.g. "Resting HR 61 bpm",
+                    // won out and got truncated instead of shrinking evenly
+                    // with the rest). Same flexible-GridItem recipe the
+                    // Sleep widget's 2x2 grid already uses successfully,
+                    // just N columns in one row.
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: chips.count), spacing: 8) {
+                        ForEach(chips, id: \.self) { HomeMetricChip(text: $0) }
+                    }
+                } else if let onlyChip = chips.first {
+                    HStack(spacing: 8) {
+                        HomeMetricChip(text: onlyChip, fillsRow: false)
+                    }
+                }
 
-            if sportGoalWidgetEnabled, let activeSportGoal {
-                goalRow(activeSportGoal)
+                SomaDisclosure {
+                    Text(recommendation.messageDetail ?? recommendation.reason.explanation(snapshots: todaysSnapshots))
+                }
+
+                if sportGoalWidgetEnabled, let activeSportGoal {
+                    goalRow(activeSportGoal)
+                }
             }
 
             Divider().overlay(SomaTokens.hairline)
 
-            if todaysWorkoutLog != nil {
-                // Today's session is already logged -- reviewing it is the
-                // action now; the detail sheet shows the completed state.
-                SomaButton(title: LocalizedStringKey(String(localized: "home.readiness.checkWorkoutDetailsButton", defaultValue: "Check workout details", comment: "Home: readiness card CTA once today's workout is already logged")), size: .lg, variant: .secondary) {
-                    openTodaysWorkoutDetail()
-                }
-            } else {
-                // Same routing call as "Check workout details" above --
+            switch state {
+            case .pending:
+                // Same routing call as "Check workout details" below --
                 // openTodaysWorkoutDetail() branches on todaysWorkoutLog
                 // itself, so both buttons can share one implementation
                 // instead of this one re-inlining the nil-case directly.
                 SomaButton(title: LocalizedStringKey(String(localized: "home.readiness.startWorkoutButton", defaultValue: "Start workout", comment: "Home: readiness card primary CTA when nothing is logged yet")), size: .lg, variant: .primary) {
                     openTodaysWorkoutDetail()
                 }
+            case .partiallyDone:
+                SomaButton(title: LocalizedStringKey(String(localized: "home.readiness.checkWorkoutDetailsButton", defaultValue: "Check workout details", comment: "Home: readiness card CTA once today's workout is already logged")), size: .lg, variant: .secondary) {
+                    openTodaysWorkoutDetail()
+                }
+            case .fulfilled, .overreached:
+                SomaButton(title: LocalizedStringKey(String(localized: "home.readiness.whatsNextButton", defaultValue: "What's next", comment: "Home: readiness card CTA once today's activity target is already met or exceeded")), size: .lg, variant: .secondary) {
+                    openTodaysWorkoutDetail()
+                }
             }
 
-            // Always available, regardless of whether today's AI workout
-            // is logged -- a user might do this INSTEAD of (or in
-            // addition to) the AI plan. Free, no paywall: this is basic
-            // tracking, same posture as manual meal logging.
-            Button {
-                showLogManualWorkout = true
-            } label: {
-                Text(String(localized: "home.readiness.logDifferentActivity", defaultValue: "Log a different activity", comment: "Home: readiness card link to log an activity outside the AI plan"))
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(SomaTokens.accent)
+            switch state {
+            case .pending, .partiallyDone:
+                // Always available -- a user might do this INSTEAD of (or
+                // in addition to) the AI plan. Free, no paywall: this is
+                // basic tracking, same posture as manual meal logging.
+                Button {
+                    showLogManualWorkout = true
+                } label: {
+                    Text(String(localized: "home.readiness.logDifferentActivity", defaultValue: "Log a different activity", comment: "Home: readiness card link to log an activity outside the AI plan"))
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                }
+                .buttonStyle(.plain)
+            case .fulfilled:
+                // A link, deliberately not a second CTA -- today's target
+                // is already met, so this is "if you really want to", not
+                // something the card is pushing.
+                Button {
+                    showLogManualWorkout = true
+                } label: {
+                    Text(String(localized: "home.readiness.trainAnywayLink", defaultValue: "Train anyway", comment: "Home: readiness card low-emphasis link to log more activity once today's target is already met"))
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink3)
+                }
+                .buttonStyle(.plain)
+            case .overreached:
+                // No CTA suggesting more activity at all -- today's already
+                // well past target.
+                EmptyView()
             }
-            .buttonStyle(.plain)
 
-            restDayRequestControl(recommendation)
+            if state == .pending {
+                restDayRequestControl(recommendation)
+            }
         }
         .padding(.init(top: 24, leading: 24, bottom: 20, trailing: 24))
         .background {
             let shape = RoundedRectangle(cornerRadius: 32, style: .continuous)
-            shape
-                .fill(.ultraThinMaterial)
-                .overlay(shape.fill(Color.white.opacity(0.4)))
-                .overlay(shape.strokeBorder(Color.white.opacity(0.75), lineWidth: 1))
-                .shadow(color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.12), radius: 20, x: 0, y: 16)
+            if isDone {
+                // Visually lower priority once today's done -- no
+                // accent-tinted glow pulling the eye back to a pitch
+                // that's already been acted on.
+                shape.fill(SomaTokens.surface3)
+            } else {
+                shape
+                    .fill(.ultraThinMaterial)
+                    .overlay(shape.fill(Color.white.opacity(0.4)))
+                    .overlay(shape.strokeBorder(Color.white.opacity(0.75), lineWidth: 1))
+                    .shadow(color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.12), radius: 20, x: 0, y: 16)
+            }
+        }
+    }
+
+    private func readinessHeadline(_ recommendation: DailyRecommendation, state: DayLoadState) -> String {
+        switch state {
+        case .pending, .partiallyDone:
+            return recommendation.category.displayTitle
+        case .fulfilled:
+            return String(localized: "home.readiness.fulfilled.headline", defaultValue: "Done for today", comment: "Home: readiness card headline once today's logged activity has met the day's target")
+        case .overreached:
+            return String(localized: "home.readiness.overreached.headline", defaultValue: "Plenty today", comment: "Home: readiness card headline once today's logged activity is well past the day's target")
+        }
+    }
+
+    private func readinessSubtitle(_ recommendation: DailyRecommendation, state: DayLoadState) -> String {
+        switch state {
+        case .pending:
+            return recommendation.message
+        case .partiallyDone:
+            let logged = todaysWorkoutLog?.caloriesBurned ?? 0
+            let target = recommendation.category.dayLoadTargetKcal
+            return String(localized: "home.readiness.partiallyDone.subtitle", defaultValue: "You've logged \(logged) of \(target) kcal today. A light session would finish it off.", comment: "Home: readiness card subtitle once some, but not enough, of today's activity target is logged; both numbers are kcal")
+        case .fulfilled:
+            if let calories = todaysWorkoutLog?.caloriesBurned, calories > 0 {
+                return String(localized: "home.readiness.fulfilled.subtitleWithCalories", defaultValue: "\(calories) kcal logged. Daily target met.", comment: "Home: readiness card subtitle once today's activity target is met, with a real calorie number")
+            }
+            return String(localized: "home.readiness.fulfilled.subtitle", defaultValue: "Today's activity is logged. Daily target met.", comment: "Home: readiness card subtitle once today's activity target is met, no calorie number available")
+        case .overreached:
+            return String(localized: "home.readiness.overreached.subtitle", defaultValue: "Today's already a lot. Tomorrow will be easier.", comment: "Home: readiness card subtitle once today's logged activity is well past the day's target")
         }
     }
 
@@ -1027,6 +1177,29 @@ struct HomeView: View {
 
     private enum ScanState { case available, locked, hidden }
 
+    /// Why a tap on the dock's always-visible "Scan gym" icon didn't open
+    /// the scan flow -- surfaced via `.alert` so the icon never just sits
+    /// there doing nothing (see `performScanGymAction`).
+    private enum ScanUnavailableReason { case workoutSet, quotaSpent }
+
+    private var scanUnavailableAlertTitle: String {
+        switch scanUnavailableReason {
+        case .quotaSpent:
+            String(localized: "home.scanGym.unavailable.quotaSpent.title", defaultValue: "Today's scans used up", comment: "Alert title shown when tapping Scan gym after today's generation quota is spent")
+        case .workoutSet, nil:
+            String(localized: "home.scanGym.unavailable.workoutSet.title", defaultValue: "Today's workout is set", comment: "Alert title shown when tapping Scan gym after today's workout is already logged or planned")
+        }
+    }
+
+    private var scanUnavailableAlertMessage: String {
+        switch scanUnavailableReason {
+        case .quotaSpent:
+            String(localized: "home.scanGym.unavailable.quotaSpent.message", defaultValue: "You've used today's gym scans. More opens up tomorrow.", comment: "Alert message shown when tapping Scan gym after today's generation quota is spent")
+        case .workoutSet, nil:
+            String(localized: "home.scanGym.unavailable.workoutSet.message", defaultValue: "You've already logged or added today's workout, so there's nothing to scan for right now.", comment: "Alert message shown when tapping Scan gym after today's workout is already logged or planned")
+        }
+    }
+
     /// Mirrors the server's tiered quota (generationLimits.ts): 3/day on
     /// annual, 1/day otherwise -- an explicit product decision there.
     private var dailyGenerationLimit: Int {
@@ -1051,6 +1224,7 @@ struct HomeView: View {
     /// (9a's own "chips match the water/sleep family" note) -- was a bare
     /// `CardView` row before, the one widget that didn't match the others.
     private var moodCheckInRow: some View {
+        homeWidgetTileFrame {
         VStack(alignment: .leading, spacing: 3) {
             if let todaysMood, let rating = MoodRating(rawValue: todaysMood.rating) {
                 HStack(spacing: 6) {
@@ -1071,9 +1245,13 @@ struct HomeView: View {
                     .font(Theme.display)
                     .fontWidth(.condensed)
                     .padding(.top, 3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(String(localized: "home.moodCheckIn.loggedAt", defaultValue: "\(Self.moodLoggedTimeText(todaysMood.loggedAt)) · tap to change", comment: "Home: mood widget caption once logged today, e.g. '9:02 AM · tap to change'"))
                     .font(.system(size: 11.5))
                     .foregroundStyle(SomaTokens.ink5)
+                    .padding(.top, 2)
+                    .lineLimit(2)
                     .onTapGesture { self.todaysMood = nil }
             } else {
                 HStack(spacing: 6) {
@@ -1111,21 +1289,7 @@ struct HomeView: View {
                 .disabled(isSavingMood)
             }
         }
-        // maxHeight too, not just maxWidth -- LazyVGrid equalizes each
-        // ROW's layout height across columns, but without this each tile's
-        // own background only wraps ITS content's natural height, leaving
-        // the shorter tile's card visibly shorter than its row-mate's
-        // (e.g. Water taller than Sleep once Sleep's phase-breakdown line
-        // wraps to 2 lines in a longer translation). minHeight ALSO fixed,
-        // not just maxHeight -- row-only equalization still let a tile with
-        // no row-mate (Streak, whenever Mood is off and it lands alone in
-        // row 2) end up visibly shorter than row 1's pair, since nothing
-        // forces separate ROWS to match each other, only same-row siblings.
-        // 172 matches Water/Sleep's own natural height (4 content lines +
-        // this padding) -- the tallest realistic tile, not a magic number.
-        .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
-        .background(HomeWidgetTileBackground())
+        }
     }
 
     /// Ported from the Turn 9 handoff's mood SVGs -- stroke circle + two eye
@@ -1202,15 +1366,18 @@ struct HomeView: View {
         case .hidden:
             // A committed or completed workout already removed this row's
             // affordance -- the dock icon staying tappable must not still
-            // open a second scan for a day that's already spoken for.
-            break
+            // open a second scan for a day that's already spoken for. Says
+            // so via alert rather than a silent no-op (which read as the
+            // button randomly "not working").
+            scanUnavailableReason = .workoutSet
         case .locked:
             if SubscriptionManager.shared.tier != "annual" {
                 Superwall.shared.register(placement: "view_premium")
+            } else {
+                // Annual tier, quota spent for today: no paywall to show,
+                // but still owes the tap an explanation rather than silence.
+                scanUnavailableReason = .quotaSpent
             }
-            // Annual tier, quota spent for today: no destination to open
-            // (matches the old inline row, which showed a static "more
-            // tomorrow" message with no action rather than a dead tap).
         }
     }
 
@@ -1234,7 +1401,7 @@ struct HomeView: View {
 
     @ViewBuilder
     private var widgetGrid: some View {
-        if waterWidgetEnabled || sleepWidgetEnabled || streakWidgetEnabled || moodWidgetEnabled {
+        if waterWidgetEnabled || sleepWidgetEnabled || streakWidgetEnabled || moodWidgetEnabled || nutritionWidgetEnabled {
             LazyVGrid(columns: Self.widgetGridColumns, alignment: .leading, spacing: 14) {
                 if waterWidgetEnabled {
                     waterWidgetTile
@@ -1248,6 +1415,9 @@ struct HomeView: View {
                 if moodWidgetEnabled {
                     moodCheckInRow
                 }
+                if nutritionWidgetEnabled {
+                    nutritionWidgetTile
+                }
             }
         }
     }
@@ -1258,94 +1428,166 @@ struct HomeView: View {
     private var currentStreak: Int { ProfileStore.streak(from: completedDates) }
 
     private var streakWidgetTile: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(currentStreak > 0 ? SomaTokens.accent : SomaTokens.ink4)
-                Text(String(localized: "home.widget.streak.eyebrow", defaultValue: "Streak", comment: "Home: streak widget tile eyebrow label"))
-                    .font(.system(size: 10.5, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundStyle(SomaTokens.ink4)
-                Spacer(minLength: 0)
-            }
-            Text(currentStreak > 0
-                ? String(localized: "profile.header.streakDays", defaultValue: "\(currentStreak)-day streak", comment: "Profile header status line: current workout streak length in days")
-                : String(localized: "home.widget.streak.inactiveHeadline", defaultValue: "No active streak", comment: "Streak widget headline when there is no current streak"))
-                .font(currentStreak > 0 ? Theme.display : .system(size: 14.5, weight: .semibold))
-                .fontWidth(currentStreak > 0 ? .condensed : nil)
-                .padding(.top, 3)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text(currentStreak > 0
-                ? String(localized: "home.widget.streak.activeSubtitle", defaultValue: "Keep showing up -- consistency compounds.", comment: "Streak widget subtitle when a streak is active")
-                : String(localized: "home.widget.streak.inactiveSubtitle", defaultValue: "Log a workout today to start one.", comment: "Streak widget subtitle when there is no current streak"))
-                .font(.system(size: 11.5))
-                .foregroundStyle(SomaTokens.ink5)
-                .padding(.top, 2)
+        // Tappable (real feedback: "Streak not clickable -- needs to be,
+        // and needs 'sharable feature'") -- opens the same share card
+        // Profile's streak section already offers, one implementation.
+        Button {
+            showStreakShare = true
+        } label: {
+            streakWidgetTileContent
         }
-        // maxHeight too, not just maxWidth -- LazyVGrid equalizes each
-        // ROW's layout height across columns, but without this each tile's
-        // own background only wraps ITS content's natural height, leaving
-        // the shorter tile's card visibly shorter than its row-mate's
-        // (e.g. Water taller than Sleep once Sleep's phase-breakdown line
-        // wraps to 2 lines in a longer translation). minHeight ALSO fixed,
-        // not just maxHeight -- row-only equalization still let a tile with
-        // no row-mate (Streak, whenever Mood is off and it lands alone in
-        // row 2) end up visibly shorter than row 1's pair, since nothing
-        // forces separate ROWS to match each other, only same-row siblings.
-        // 172 matches Water/Sleep's own natural height (4 content lines +
-        // this padding) -- the tallest realistic tile, not a magic number.
-        .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
-        .background(HomeWidgetTileBackground())
+        .buttonStyle(.plain)
+        .accessibilityHint(String(localized: "home.widget.streak.shareHint", defaultValue: "Opens a shareable streak card", comment: "Home: VoiceOver hint on the streak widget tile"))
+        .sheet(isPresented: $showStreakShare) {
+            ProfileView.StreakShareSheet(
+                streakDays: currentStreak,
+                category: appState.currentRecommendation?.category,
+                steps: nil
+            )
+        }
+    }
+
+    private var streakWidgetTileContent: some View {
+        homeWidgetTileFrame {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(currentStreak > 0 ? SomaTokens.accent : SomaTokens.ink4)
+                    Text(String(localized: "home.widget.streak.eyebrow", defaultValue: "Streak", comment: "Home: streak widget tile eyebrow label"))
+                        .font(.system(size: 10.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(SomaTokens.ink4)
+                    Spacer(minLength: 0)
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                }
+                // Item 5 fix: a short token ("2 days"), not a full sentence
+                // ("2-day streak") -- the value slot uses the same large
+                // display font every other tile's value does, and a
+                // sentence-length string there truncated ("2-day stre…").
+                // The full phrase already lives in the subtitle below.
+                Text(currentStreak > 0
+                    ? String(localized: "home.widget.streak.valueShort", defaultValue: "\(currentStreak) days", comment: "Short streak-length value, e.g. '2 days' -- pluralized by count")
+                    : String(localized: "home.widget.streak.inactiveHeadline", defaultValue: "No active streak", comment: "Streak widget headline when there is no current streak"))
+                    .font(currentStreak > 0 ? Theme.display : .system(size: 14.5, weight: .semibold))
+                    .fontWidth(currentStreak > 0 ? .condensed : nil)
+                    .padding(.top, 3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(currentStreak > 0
+                    ? String(localized: "home.widget.streak.activeSubtitle", defaultValue: "Keep showing up -- consistency compounds.", comment: "Streak widget subtitle when a streak is active")
+                    : String(localized: "home.widget.streak.inactiveSubtitle", defaultValue: "Log a workout today to start one.", comment: "Streak widget subtitle when there is no current streak"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SomaTokens.ink5)
+                    .padding(.top, 2)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    /// Nutrition widget (mockup 3e "NUTRITION · 1 240 / of 1 900 kcal" +
+    /// 14a's one-anatomy rule: eyebrow -> hero value -> supporting visual
+    /// -> bottom action). Data is the same `nutritionProgress` /
+    /// `nutritionTarget` pair Home already loads for the dock entry --
+    /// this tile renders it instead of leaving it invisible. No target
+    /// computed yet -> an honest set-up state, never fabricated numbers.
+    private var nutritionWidgetTile: some View {
+        Button {
+            showNutrition = true
+        } label: {
+            homeWidgetTileFrame {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "fork.knife")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(SomaTokens.accent)
+                        Text(String(localized: "home.widget.nutrition.eyebrow", defaultValue: "Nutrition", comment: "Home: nutrition widget tile eyebrow label"))
+                            .font(.system(size: 10.5, weight: .bold))
+                            .tracking(0.6)
+                            .foregroundStyle(SomaTokens.ink4)
+                        Spacer(minLength: 0)
+                    }
+                    if let progress = nutritionProgress {
+                        Text(progress.consumedCalories.formatted())
+                            .font(Theme.display)
+                            .fontWidth(.condensed)
+                            .padding(.top, 3)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Text(String(localized: "home.widget.nutrition.ofTarget", defaultValue: "of \(progress.targetCalories.formatted()) kcal", comment: "Home: nutrition widget caption under the consumed-calories value; placeholder is the daily calorie target"))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(SomaTokens.ink5)
+                            .lineLimit(1)
+                        Capsule()
+                            .fill(SomaTokens.accentSoft14)
+                            .frame(height: 4)
+                            .overlay(alignment: .leading) {
+                                GeometryReader { geo in
+                                    Capsule()
+                                        .fill(SomaTokens.accent)
+                                        .frame(width: geo.size.width * min(1, Double(progress.consumedCalories) / Double(max(1, progress.targetCalories))))
+                                }
+                            }
+                            .padding(.top, 6)
+                            .accessibilityHidden(true)
+                    } else {
+                        Text(String(localized: "home.widget.nutrition.noTargetHeadline", defaultValue: "No target yet", comment: "Home: nutrition widget headline before a calorie target has been computed"))
+                            .font(.system(size: 14.5, weight: .semibold))
+                            .padding(.top, 3)
+                            .lineLimit(1)
+                        Text(String(localized: "home.widget.nutrition.noTargetSubtitle", defaultValue: "Log meals to build today's picture.", comment: "Home: nutrition widget subtitle before a calorie target has been computed"))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(SomaTokens.ink5)
+                            .padding(.top, 2)
+                            .lineLimit(2)
+                    }
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(String(localized: "home.widget.nutrition.hint", defaultValue: "Opens nutrition", comment: "Home: VoiceOver hint on the nutrition widget tile"))
     }
 
     private var waterGoalReached: Bool { waterGlassesToday >= 8 }
 
     private var waterWidgetTile: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "drop.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(waterGoalReached ? SomaTokens.success : SomaTokens.accent)
-                Text(String(localized: "home.widget.water.eyebrow", defaultValue: "Water", comment: "Home: water widget tile eyebrow label"))
-                    .font(.system(size: 10.5, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundStyle(SomaTokens.ink4)
-                Spacer(minLength: 0)
-                if waterGoalReached {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(SomaTokens.success)
+        homeWidgetTileFrame {
+            // Item 5: same header->value rhythm as every other tile
+            // (spacing 3 + value .padding(.top, 3)), so the value line
+            // sits on one shared baseline across the whole grid.
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Image(systemName: "drop.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(waterGoalReached ? SomaTokens.success : SomaTokens.accent)
+                    Text(String(localized: "home.widget.water.eyebrow", defaultValue: "Water", comment: "Home: water widget tile eyebrow label"))
+                        .font(.system(size: 10.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(SomaTokens.ink4)
+                    Spacer(minLength: 0)
+                    if waterGoalReached {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(SomaTokens.success)
+                    }
                 }
+                HStack(alignment: .lastTextBaseline, spacing: 4) {
+                    Text("\(waterGlassesToday)")
+                        .font(Theme.display)
+                        .fontWidth(.condensed)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(String(localized: "home.widget.water.goalSuffix", defaultValue: "/ 8", comment: "Home: water widget fragment shown after the glass count, denoting the daily goal of 8 glasses"))
+                        .font(.system(size: 13))
+                        .foregroundStyle(SomaTokens.ink4)
+                }
+                .padding(.top, 3)
+                waterDropletRow
+                waterControlRow
             }
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text("\(waterGlassesToday)")
-                    .font(Theme.display)
-                    .fontWidth(.condensed)
-                Text(String(localized: "home.widget.water.goalSuffix", defaultValue: "/ 8", comment: "Home: water widget fragment shown after the glass count, denoting the daily goal of 8 glasses"))
-                    .font(.system(size: 13))
-                    .foregroundStyle(SomaTokens.ink4)
-            }
-            waterDropletRow
-            waterControlRow
         }
-        // maxHeight too, not just maxWidth -- LazyVGrid equalizes each
-        // ROW's layout height across columns, but without this each tile's
-        // own background only wraps ITS content's natural height, leaving
-        // the shorter tile's card visibly shorter than its row-mate's
-        // (e.g. Water taller than Sleep once Sleep's phase-breakdown line
-        // wraps to 2 lines in a longer translation). minHeight ALSO fixed,
-        // not just maxHeight -- row-only equalization still let a tile with
-        // no row-mate (Streak, whenever Mood is off and it lands alone in
-        // row 2) end up visibly shorter than row 1's pair, since nothing
-        // forces separate ROWS to match each other, only same-row siblings.
-        // 172 matches Water/Sleep's own natural height (4 content lines +
-        // this padding) -- the tallest realistic tile, not a magic number.
-        .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
-        .background(HomeWidgetTileBackground())
     }
 
     /// 8 droplets as a progress indicator -- "tap a drop to set the exact
@@ -1467,17 +1709,23 @@ struct HomeView: View {
     /// `moodCheckInRow`'s face row -- no sheet.
     private var sleepWidgetTile: some View {
         let snapshot = todaysSnapshots.first(where: { $0.sleepHours != nil })
-        return VStack(alignment: .leading, spacing: 3) {
+        return homeWidgetTileFrame {
+        VStack(alignment: .leading, spacing: 3) {
             if let snapshot, let hours = snapshot.sleepHours {
                 sleepEyebrow { sleepSourceBadge(snapshot.source) }
                 Text(String(format: "%.1f \(HealthMetricFamily.sleep.unit)", hours))
-                    .font(SomaType.widgetValue)
+                    .font(Theme.display)
+                    .fontWidth(.condensed)
+                    .padding(.top, 3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 if let bar = SleepPhaseSegments(snapshot: snapshot) {
                     bar.padding(.top, 3)
                     Text(bar.captionText)
                         .font(.system(size: 11.5))
                         .foregroundStyle(SomaTokens.ink5)
                         .padding(.top, 2)
+                        .lineLimit(2)
                 }
             } else if !isEditingSleep, let todaysSleepLog, let bucket = SleepDurationBucket(rawValue: todaysSleepLog.bucket) {
                 sleepEyebrow {
@@ -1488,12 +1736,17 @@ struct HomeView: View {
                         .glassGel(.blue, cornerRadius: 999)
                 }
                 Text(bucket.verdict)
-                    .font(SomaType.widgetValue)
+                    .font(Theme.display)
+                    .fontWidth(.condensed)
                     .padding(.top, 3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .accessibilityIdentifier("sleep-widget-logged-verdict")
                 Text(String(localized: "home.sleepCheckIn.loggedAt", defaultValue: "\(Self.sleepLoggedTimeText(todaysSleepLog.loggedAt)) · tap to change", comment: "Home: sleep widget caption once logged today, e.g. '8:12 AM · tap to change'"))
                     .font(.system(size: 11.5))
                     .foregroundStyle(SomaTokens.ink5)
+                    .padding(.top, 2)
+                    .lineLimit(2)
                     .onTapGesture { self.isEditingSleep = true }
             } else {
                 sleepEyebrowPlain
@@ -1535,21 +1788,7 @@ struct HomeView: View {
                 .disabled(isSavingSleep)
             }
         }
-        // maxHeight too, not just maxWidth -- LazyVGrid equalizes each
-        // ROW's layout height across columns, but without this each tile's
-        // own background only wraps ITS content's natural height, leaving
-        // the shorter tile's card visibly shorter than its row-mate's
-        // (e.g. Water taller than Sleep once Sleep's phase-breakdown line
-        // wraps to 2 lines in a longer translation). minHeight ALSO fixed,
-        // not just maxHeight -- row-only equalization still let a tile with
-        // no row-mate (Streak, whenever Mood is off and it lands alone in
-        // row 2) end up visibly shorter than row 1's pair, since nothing
-        // forces separate ROWS to match each other, only same-row siblings.
-        // 172 matches Water/Sleep's own natural height (4 content lines +
-        // this padding) -- the tallest realistic tile, not a magic number.
-        .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
-        .background(HomeWidgetTileBackground())
+        }
     }
 
     private static func sleepChipAccessibilityID(_ bucket: SleepDurationBucket) -> String {
@@ -1656,6 +1895,33 @@ struct HomeView: View {
                 .overlay(shape.fill(Color.white.opacity(0.32)))
                 .overlay(shape.strokeBorder(Color.white.opacity(0.65), lineWidth: 1))
         }
+    }
+
+    /// Shared outer frame/padding/background for the 4 widgetGrid tiles
+    /// (Water/Sleep/Streak/Mood) -- was copy-pasted 4x with an identical
+    /// comment (item 5 fix: collapsed to one definition). Each tile's
+    /// internal layout still differs (Water's droplet row, Sleep's 3-way
+    /// state, Mood's face grid vs. logged state) -- this only unifies the
+    /// part that was already meant to be identical across all 4.
+    private func homeWidgetTileFrame<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            // maxHeight too, not just maxWidth -- LazyVGrid equalizes each
+            // ROW's layout height across columns, but without this each
+            // tile's own background only wraps ITS content's natural
+            // height, leaving the shorter tile's card visibly shorter than
+            // its row-mate's (e.g. Water taller than Sleep once Sleep's
+            // phase-breakdown line wraps to 2 lines in a longer
+            // translation). minHeight ALSO fixed, not just maxHeight --
+            // row-only equalization still let a tile with no row-mate
+            // (Streak, whenever Mood is off and it lands alone in row 2)
+            // end up visibly shorter than row 1's pair, since nothing
+            // forces separate ROWS to match each other, only same-row
+            // siblings. 172 matches Water/Sleep's own natural height (4
+            // content lines + this padding) -- the tallest realistic tile,
+            // not a magic number.
+            .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
+            .background(HomeWidgetTileBackground())
     }
 
     /// Flat tinted metric chip -- deliberately NOT `.glassLens()`/`SomaChip`:
@@ -1836,33 +2102,36 @@ struct HomeView: View {
                     showHealthDashboard = true
                 }
             ),
+            // Real feedback: "Nutrition should be more accessible in menu,
+            // and goal should move to additional" -- nutrition takes the
+            // dock slot, Goals moves to the More sheet.
             DashboardDockAction(
-                id: "goals", assetImage: "soma.dock.goal", label: LocalizedStringKey(String(localized: "home.dock.goals.label", defaultValue: "Goals", comment: "Home: dock/More-sheet visible label for the sport goal icon")),
-                accessibilityLabel: String(localized: "home.dock.goals", defaultValue: "Sport goal", comment: "Home: floating dock icon that opens the sport goal flow"),
-                // Stable hook for XCUITest (see UITests/CASES.md) -- same
-                // reasoning as "dock-more-button"/"profile-button": the old
-                // promo-card + onboarding-popup front door is gone, this
-                // dock icon is the only way in now.
-                accessibilityIdentifier: "dock-goals-button",
-                action: openSportGoal
+                id: "nutrition", assetImage: "soma.dock.nutrition", label: LocalizedStringKey(String(localized: "home.dock.nutrition.label", defaultValue: "Nutrition", comment: "Home: dock/More-sheet visible label for the nutrition icon")),
+                accessibilityLabel: String(localized: "home.dock.nutrition", defaultValue: "Nutrition", comment: "Home: More-sheet icon that opens today's nutrition"),
+                accessibilityIdentifier: "dock-nutrition-button",
+                action: {
+                    AnalyticsManager.shared.featureUsed(name: "nutrition_home_card")
+                    showNutrition = true
+                }
             )
         ]
     }
 
     /// Everything else -- reachable from the "More" sheet (4h) even though
-    /// it isn't in a dock slot: nutrition, photo progress, editing widgets,
-    /// profile. Nutrition moved here from the fixed dock row per the
-    /// mockup -- 6 fixed slots don't have room for it alongside Dashboard/
-    /// Activity now covering health in two places.
+    /// it isn't in a dock slot: sport goals, photo progress, editing
+    /// widgets, profile. Goals swapped places with Nutrition (real
+    /// feedback: nutrition needs the more accessible slot; a goal, once
+    /// set, is mostly consumed through Home's goal row anyway).
     private var overflowDockActions: [DashboardDockAction] {
         [
             DashboardDockAction(
-                id: "nutrition", assetImage: "soma.dock.nutrition", label: LocalizedStringKey(String(localized: "home.dock.nutrition.label", defaultValue: "Nutrition", comment: "Home: dock/More-sheet visible label for the nutrition icon")),
-                accessibilityLabel: String(localized: "home.dock.nutrition", defaultValue: "Nutrition", comment: "Home: More-sheet icon that opens today's nutrition"),
-                action: {
-                    AnalyticsManager.shared.featureUsed(name: "nutrition_home_card")
-                    showNutrition = true
-                }
+                id: "goals", assetImage: "soma.dock.goal", label: LocalizedStringKey(String(localized: "home.dock.goals.label", defaultValue: "Goals", comment: "Home: dock/More-sheet visible label for the sport goal icon")),
+                accessibilityLabel: String(localized: "home.dock.goals", defaultValue: "Sport goal", comment: "Home: floating dock icon that opens the sport goal flow"),
+                // Stable hook for XCUITest -- the identifier survives the
+                // move into the More sheet (OptionalAccessibilityIdentifier
+                // in MoreActionsSheet applies it to the sheet row too).
+                accessibilityIdentifier: "dock-goals-button",
+                action: openSportGoal
             ),
             DashboardDockAction(
                 id: "photos", systemImage: "photo.on.rectangle.angled", label: LocalizedStringKey(String(localized: "home.dock.photos.label", defaultValue: "Photos", comment: "Home: dock/More-sheet visible label for the goal photo progress icon")),
@@ -1992,26 +2261,30 @@ struct HomeView: View {
         }
     }
 
-    /// Tapping opens the detail sheet in its completed state -- same
-    /// destination as the readiness card's "Check workout details" CTA.
-    private func todaysWorkoutCard(_ log: WorkoutLogEntry) -> some View {
+    /// Compact "what got logged" row, folded directly into readinessCard's
+    /// fulfilled/overreached/partiallyDone states (item 2 fix) instead of
+    /// rendering as its own separate card underneath -- having both the
+    /// still-pitching recommendation AND a "you already did this" card
+    /// stacked was the reported bug.
+    private func loggedWorkoutRow(_ log: WorkoutLogEntry) -> some View {
         Button {
             openTodaysWorkoutDetail()
         } label: {
-            CardView {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(Self.todaysWorkoutCardEyebrow(for: log.source))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(log.title)
-                            .font(.body.bold())
-                    }
-                    Spacer()
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Self.todaysWorkoutCardEyebrow(for: log.source))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(log.title)
+                        .font(.subheadline.bold())
                 }
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
         }
         .buttonStyle(.plain)
     }
@@ -2074,7 +2347,7 @@ struct HomeView: View {
                         // language, so a bolted-on " — X kcal" suffix can't
                         // be translated correctly on its own.
                         Text(entry.calories.map { calories in
-                            String(localized: "home.timeline.entry.withCalories", defaultValue: "\(entry.sourceDisplayName) — \(Self.timeString(entry.startTime)) — \(entry.durationMinutes) min — \(calories) kcal", comment: "Home: today's timeline entry -- source name, start time, duration, and calories burned")
+                            String(localized: "home.timeline.entry.withCalories", defaultValue: "\(entry.sourceDisplayName) — \(Self.timeString(entry.startTime)) — \(entry.durationMinutes) min — \(calories.formatted()) kcal", comment: "Home: today's timeline entry -- source name, start time, duration, and calories burned")
                         } ?? String(localized: "home.timeline.entry.noCalories", defaultValue: "\(entry.sourceDisplayName) — \(Self.timeString(entry.startTime)) — \(entry.durationMinutes) min", comment: "Home: today's timeline entry -- source name, start time, and duration, no calories reported"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -2361,7 +2634,7 @@ struct HomeView: View {
         // Two full sentences rather than a fragment-translating a trailing
         // optional clause -- same posture as the timeline entry text above.
         let feedback = entry.calories.map { calories in
-            String(localized: "home.autoLog.feedbackWithCalories", defaultValue: "Detected automatically from \(entry.sourceDisplayName) -- \(calories) kcal burned.", comment: "Home: auto-generated workout-log note when a device-detected session is logged automatically, including calories burned")
+            String(localized: "home.autoLog.feedbackWithCalories", defaultValue: "Detected automatically from \(entry.sourceDisplayName) -- \(calories.formatted()) kcal burned.", comment: "Home: auto-generated workout-log note when a device-detected session is logged automatically, including calories burned")
         } ?? String(localized: "home.autoLog.feedbackNoCalories", defaultValue: "Detected automatically from \(entry.sourceDisplayName).", comment: "Home: auto-generated workout-log note when a device-detected session is logged automatically, no calories reported")
 
         do {
@@ -2373,7 +2646,11 @@ struct HomeView: View {
                 feedback: feedback,
                 startedAt: entry.startTime,
                 endedAt: endedAt,
-                source: "device_detected"
+                source: "device_detected",
+                // Pre-log state: the "closed today's quota" variant only
+                // becomes true once this very log lands, so freeze the
+                // state-independent detected line instead.
+                reasonSnapshot: WorkoutReasonResolver.impactNote(source: "device_detected", dayLoadState: .pending)
             )
             await loadTodaysWorkoutLog()
             await loadCompletedDates()
@@ -2427,10 +2704,15 @@ struct HomeView: View {
         }
     }
 
+    /// Explicit locale -- DateFormatter's own default (Locale.autoupdatingCurrent)
+    /// tracks the SYSTEM locale only, not the in-app language override, so
+    /// this could otherwise show English time formatting under a Russian
+    /// in-app override even though the rest of the screen switched live.
     private static func timeString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .none
         formatter.timeStyle = .short
+        formatter.locale = LanguageManager.shared.effectiveLocale
         return formatter.string(from: date)
     }
 
@@ -2471,4 +2753,27 @@ struct HomeView: View {
     HomeView()
         .environmentObject(AppState())
         .environmentObject(SubscriptionManager.shared)
+}
+
+/// The 3a handoff's own calendar-lens glyph -- a 24x24 viewBox rounded rect
+/// + two hinge ticks + one header-divider line, no fill. Scales to whatever
+/// frame it's given.
+private struct HistoryCalendarGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let scale = rect.width / 24
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * scale, y: y * scale) }
+
+        var path = Path()
+        path.addRoundedRect(
+            in: CGRect(x: 3 * scale, y: 4 * scale, width: 18 * scale, height: 18 * scale),
+            cornerSize: CGSize(width: 4 * scale, height: 4 * scale)
+        )
+        path.move(to: pt(3, 9))
+        path.addLine(to: pt(21, 9))
+        path.move(to: pt(8, 2))
+        path.addLine(to: pt(8, 6))
+        path.move(to: pt(16, 2))
+        path.addLine(to: pt(16, 6))
+        return path
+    }
 }

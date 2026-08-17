@@ -122,11 +122,11 @@ struct AIWorkoutPlanView: View {
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.8)
                     .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SomaTokens.ink4)
                 Spacer()
                 Text(durationText(exercises))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(SomaTokens.ink4)
             }
             .padding(.top, 10)
             ForEach(exercises) { exercise in
@@ -142,7 +142,7 @@ struct AIWorkoutPlanView: View {
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.8)
                     .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SomaTokens.ink4)
                 Spacer()
                 // Clearly optional/skippable -- the finisher used to be
                 // mandatory ("no exceptions") on every plan; it's now
@@ -158,12 +158,12 @@ struct AIWorkoutPlanView: View {
                         .glassCardFlat(cornerRadius: SomaTokens.rPill)
                 } else if block.rounds > 1 {
                     Text(roundsRestText(block))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink4)
                 } else {
                     Text(durationText(block.exercises))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink4)
                 }
             }
             .padding(.top, 10)
@@ -209,6 +209,33 @@ struct AIWorkoutPlanView: View {
         }
     }
 
+    /// 13a's 26pt row badge -- the simple 2-stop gel disc (inner white
+    /// ring + top specular + tinted drop shadow), shared by the green
+    /// "done" check and the blue "expanded" number. Deliberately NOT the
+    /// 4-stop `.glassGel()` reserved for full-size controls.
+    private func gelBadge(top: Color, bottom: Color, shadow: Color, @ViewBuilder content: () -> some View) -> some View {
+        content()
+            .frame(width: 26, height: 26)
+            .background(
+                Circle()
+                    .fill(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 1))
+                    .overlay(
+                        Circle().strokeBorder(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .white.opacity(0.6), location: 0),
+                                    .init(color: .white.opacity(0), location: 0.5)
+                                ],
+                                startPoint: .top, endPoint: .bottom
+                            ),
+                            lineWidth: 1.5
+                        )
+                    )
+                    .shadow(color: shadow, radius: 3.5, x: 0, y: 3)
+            )
+    }
+
     private func aiExerciseRow(_ exercise: AIExercise) -> some View {
         let isDone = isCompletedToday || checkedExerciseIDs.contains(exercise.id)
         let isExpanded = expandedExerciseID == exercise.id
@@ -226,21 +253,31 @@ struct AIWorkoutPlanView: View {
                     }
                 } label: {
                     // 11d: unchecked = a numbered glass lens badge (position
-                    // in the plan); checked = the same green checkmark as
-                    // before. 13a adds a third look -- unchecked but this
-                    // row's cue is open -- the same filled/gel badge a
-                    // selected day/streak uses elsewhere in the app, so an
-                    // open row reads as "active" even before you finish it.
+                    // in the plan); checked = 13a's green gel disc -- ONLY
+                    // the badge changes, never the row surface. 13a's third
+                    // look -- unchecked but this row's cue is open -- is the
+                    // same gel disc in blue, so an open row reads as
+                    // "active" even before you finish it.
                     if isDone {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 21))
-                            .foregroundStyle(SomaTokens.success)
+                        gelBadge(
+                            top: Color(red: 94 / 255, green: 200 / 255, blue: 150 / 255).opacity(0.9),
+                            bottom: SomaTokens.success.opacity(0.92),
+                            shadow: SomaTokens.success.opacity(0.28)
+                        ) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .heavy))
+                                .foregroundStyle(.white)
+                        }
                     } else if isExpanded {
-                        Text("\(number)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 26, height: 26)
-                            .glassGel(.blue, cornerRadius: SomaTokens.rPill)
+                        gelBadge(
+                            top: Color(red: 122 / 255, green: 158 / 255, blue: 250 / 255).opacity(0.92),
+                            bottom: SomaTokens.accent.opacity(0.9),
+                            shadow: SomaTokens.accent.opacity(0.28)
+                        ) {
+                            Text("\(number)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
                     } else {
                         Text("\(number)")
                             .font(.system(size: 11, weight: .bold))
@@ -259,13 +296,16 @@ struct AIWorkoutPlanView: View {
                 } label: {
                     HStack(alignment: .top, spacing: 8) {
                         VStack(alignment: .leading, spacing: 3) {
+                            // 13a: done rows quiet down to ink4 + a plain
+                            // strikethrough -- never a green-tinted title.
                             Text(exercise.name)
                                 .font(.subheadline.bold())
-                                .strikethrough(isDone, color: SomaTokens.success)
-                                .foregroundStyle(isDone ? SomaTokens.ink3 : (isExpanded ? SomaTokens.accent : SomaTokens.ink))
+                                .strikethrough(isDone)
+                                .foregroundStyle(isDone ? SomaTokens.ink4 : (isExpanded ? SomaTokens.accent : SomaTokens.ink))
+                            // 13a: one quiet gray meta line, not link-blue.
                             Text(compactMetaLine(for: exercise))
                                 .font(.caption)
-                                .foregroundStyle(Theme.pillFill)
+                                .foregroundStyle(SomaTokens.ink4)
                             // Only populated by the gym-photo-workout flow --
                             // nil for the normal generate-workout-plan flow.
                             if let targetArea = exercise.targetArea {
@@ -277,7 +317,7 @@ struct AIWorkoutPlanView: View {
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.down")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(SomaTokens.ink4)
+                            .foregroundStyle(isExpanded ? SomaTokens.accent : SomaTokens.inkPlaceholder)
                             .rotationEffect(.degrees(isExpanded ? 180 : 0))
                             .padding(.top, 3)
                     }
@@ -292,11 +332,14 @@ struct AIWorkoutPlanView: View {
                     if !exercise.instructions.isEmpty {
                         Text(exercise.instructions)
                             .font(.caption)
-                            .foregroundStyle(SomaTokens.ink2)
+                            .foregroundStyle(SomaTokens.inkParagraph)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 11)
                             .padding(.horizontal, 13)
-                            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+                            .background(
+                                RoundedRectangle(cornerRadius: SomaTokens.rTile, style: .continuous)
+                                    .fill(Color(red: 237 / 255, green: 242 / 255, blue: 251 / 255).opacity(0.6))
+                            )
                     }
                     // 13a's mockup shows "Swap exercise"/"Too easy or hard"
                     // chips here -- neither has any backend behind it yet
@@ -323,12 +366,19 @@ struct AIWorkoutPlanView: View {
                 .padding(.leading, 36)
                 .padding(.bottom, 8)
             }
+
+            // 13a: hairline divider under every row except the plan's very
+            // last -- the design's rows carry border-bottom
+            // rgba(120,150,220,0.14); a finished list reads as a quiet
+            // column of green dots, so NO row surface tint here (the old
+            // successSoft flood made 13 checked rows shout).
+            if exercise.id != allExercises.last?.id {
+                Rectangle()
+                    .fill(Color(red: 120 / 255, green: 150 / 255, blue: 220 / 255).opacity(0.14))
+                    .frame(height: 1)
+            }
         }
         .padding(.horizontal, 8)
-        .background(
-            RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous)
-                .fill(isDone ? SomaTokens.successSoft : Color.clear)
-        )
         .animation(.easeInOut(duration: 0.18), value: isDone)
     }
 }

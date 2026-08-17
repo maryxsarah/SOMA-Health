@@ -147,15 +147,15 @@ struct SomaChip: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12.5, weight: .bold))
                     .lineLimit(1)
                 if showsRemoveIcon {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
                 }
             }
-            .padding(.horizontal, isSelected ? 10 : 11)
-            .padding(.vertical, isSelected ? 5 : 6)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 8)
             .frame(minHeight: 34)
             .modifier(SomaChipMaterial(isSelected: isSelected, isOneOff: isOneOff))
         }
@@ -163,22 +163,60 @@ struct SomaChip: View {
     }
 }
 
+/// The 11c/12a chip recipe -- deliberately LIGHTER than the big-surface
+/// materials: unselected is a quiet white 0.55 fill with two rings and one
+/// small shadow (not the raised `.glassLens()` gradient), selected is the
+/// simple 2-stop chip gel (not the 4-stop `.glassGel()` reserved for
+/// full-size buttons/toggles).
 private struct SomaChipMaterial: ViewModifier {
     let isSelected: Bool
     let isOneOff: Bool
 
     func body(content: Content) -> some View {
         if isSelected {
-            content.foregroundStyle(.white).glassGel(.blue)
+            content
+                .foregroundStyle(.white)
+                .background(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 122 / 255, green: 158 / 255, blue: 250 / 255).opacity(0.92),
+                                    SomaTokens.accent.opacity(0.9)
+                                ],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.45), lineWidth: 1))
+                        .overlay(
+                            Capsule().strokeBorder(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: .white.opacity(0.55), location: 0),
+                                        .init(color: .white.opacity(0), location: 0.5)
+                                    ],
+                                    startPoint: .top, endPoint: .bottom
+                                ),
+                                lineWidth: 1.5
+                            )
+                        )
+                        .shadow(color: SomaTokens.accent.opacity(0.28), radius: 6, x: 0, y: 5)
+                )
         } else {
             content
-                .foregroundStyle(SomaTokens.ink2)
-                .glassLens()
-                .overlay(
-                    Capsule().strokeBorder(
-                        SomaTokens.hairline,
-                        style: StrokeStyle(lineWidth: 1, dash: isOneOff ? [4, 3] : [])
-                    )
+                .foregroundStyle(SomaTokens.accent)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(0.55))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+                        .overlay(
+                            Capsule().stroke(
+                                Color(red: 120 / 255, green: 150 / 255, blue: 220 / 255).opacity(0.18),
+                                style: StrokeStyle(lineWidth: 1, dash: isOneOff ? [4, 3] : [])
+                            )
+                            .padding(-0.5)
+                        )
+                        .shadow(color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.12), radius: 2.5, x: 0, y: 2)
                 )
         }
     }
