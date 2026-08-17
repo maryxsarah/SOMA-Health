@@ -66,7 +66,7 @@ struct CTAPillButton: View {
             .padding(.vertical, 16)
             .background(labelPill)
             .padding(1.5)                        // the 1.5px energy gap
-            .background(energyLayer)             // directly behind label
+            .background(energyLayer.allowsHitTesting(false)) // directly behind label
             .background(Capsule().fill(Color.white.opacity(0.35))) // base
             .clipShape(Capsule())                // = overflow:hidden
             .shadow(color: SomaTokens.accent.opacity(0.16), radius: 12, x: 0, y: 10)

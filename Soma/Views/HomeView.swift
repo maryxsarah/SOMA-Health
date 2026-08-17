@@ -5,6 +5,7 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var checklistRouter = ChecklistDeepLinkRouter.shared
+    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
 
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -141,7 +142,14 @@ struct HomeView: View {
     @AppStorage("dashboardWidget.nutrition") private var nutritionWidgetEnabled = true
     @AppStorage("dashboardWidget.sportGoal") private var sportGoalWidgetEnabled = true
     @AppStorage("dashboardWidget.photoProgress") private var photoProgressWidgetEnabled = false
+    @AppStorage("dashboardWidget.affirmation") private var affirmationWidgetEnabled = true
     @State private var showEditWidgets = false
+    /// Affirmation widget (16a) -- today's line, its sheet, and the
+    /// inline refresh action's in-flight/limit state.
+    @State private var todaysAffirmation: DailyAffirmation?
+    @State private var showAffirmations = false
+    @State private var affirmationSheetStartsEditing = false
+    @State private var isRegeneratingAffirmation = false
     /// Streak tile tap -> the same share card Profile's streak section
     /// offers (real feedback: streak must be tappable and sharable).
     @State private var showStreakShare = false
@@ -202,6 +210,10 @@ struct HomeView: View {
                 bareWeekStrip
 
                 greetingRow
+
+                if subscriptionManager.isInTrial {
+                    trialUpgradeBanner
+                }
 
                 if showTrainingSourceToggle {
                     trainingSourceToggle
@@ -279,6 +291,7 @@ struct HomeView: View {
             await loadNutritionState()
             try? await loadTodaysMood()
             try? await loadTodaysSleep()
+            await loadTodaysAffirmation()
         }
         .refreshable {
             await checkNow()
@@ -297,6 +310,7 @@ struct HomeView: View {
             await loadNutritionState()
             try? await loadTodaysMood()
             try? await loadTodaysSleep()
+            await loadTodaysAffirmation()
         }
         .sheet(isPresented: $showDetail, onDismiss: {
             Task {
@@ -450,8 +464,17 @@ struct HomeView: View {
                 moodEnabled: $moodWidgetEnabled,
                 nutritionEnabled: $nutritionWidgetEnabled,
                 sportGoalEnabled: $sportGoalWidgetEnabled,
-                photoProgressEnabled: $photoProgressWidgetEnabled
+                photoProgressEnabled: $photoProgressWidgetEnabled,
+                affirmationEnabled: $affirmationWidgetEnabled
             )
+        }
+        .sheet(isPresented: $showAffirmations, onDismiss: {
+            affirmationSheetStartsEditing = false
+            // The sheet can edit/regenerate today's line -- re-read so the
+            // widget reflects it the moment the sheet closes.
+            Task { await loadTodaysAffirmation() }
+        }) {
+            AffirmationsView(startEditing: affirmationSheetStartsEditing)
         }
         .sheet(isPresented: $showMoreActions, onDismiss: {
             pendingMoreAction?()
@@ -596,6 +619,8 @@ struct HomeView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
+                editWidgetsButton
+
                 historyCalendarButton
 
                 // No placeholder state -- until DailyChecklistCardView has
@@ -626,6 +651,24 @@ struct HomeView: View {
     /// ring-pill -- opens the new month-grid history screen (15a). Distinct
     /// from tapping a day chip in the week strip, which still opens
     /// `DayDetailView` for that single day.
+    /// Quick access to the widget picker, right next to the calendar lens
+    /// -- same 30pt lens recipe; previously the sheet was only reachable
+    /// through the dock's More sheet.
+    private var editWidgetsButton: some View {
+        Button {
+            showEditWidgets = true
+        } label: {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SomaTokens.accent)
+                .frame(width: 30, height: 30)
+                .glassLens(cornerRadius: SomaTokens.rPill)
+        }
+        .buttonStyle(SomaNavPillButtonStyle())
+        .accessibilityLabel(String(localized: "home.greetingRow.editWidgets.accessibilityLabel", defaultValue: "Edit widgets", comment: "Home: greeting row grid-icon button that opens the edit-widgets sheet"))
+        .accessibilityIdentifier("home.editWidgetsButton")
+    }
+
     private var historyCalendarButton: some View {
         Button {
             showHistoryCalendar = true
@@ -1351,6 +1394,40 @@ struct HomeView: View {
         }
     }
 
+    /// Trial-time upgrade highlight (TestFlight feedback: during a free
+    /// trial the app should surface "Upgrade now" in-app, not only at the
+    /// paywall) -- routes to the same view_premium placement Profile uses.
+    private var trialUpgradeBanner: some View {
+        Button {
+            AnalyticsManager.shared.featureUsed(name: "trial_upgrade_banner")
+            Superwall.shared.register(placement: "view_premium")
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(SomaTokens.accent)
+                Text(String(localized: "home.trialUpgradeBanner.title", defaultValue: "You're on a free trial", comment: "Home: trial upgrade banner title"))
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(SomaTokens.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                Text(String(localized: "home.trialUpgradeBanner.cta", defaultValue: "Upgrade now", comment: "Home: trial upgrade banner call to action"))
+                    .font(.footnote.bold())
+                    .foregroundStyle(SomaTokens.accent)
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(SomaTokens.accent)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .glassCardFlat(cornerRadius: SomaTokens.rPill)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("home.trialUpgradeBanner")
+    }
+
     /// The dock's "Scan gym" action (3a) -- same three-state decision
     /// `scanRow` used to render inline, now a tap consequence instead of a
     /// row: the dock icon itself is always present (it's a stable nav
@@ -1401,7 +1478,7 @@ struct HomeView: View {
 
     @ViewBuilder
     private var widgetGrid: some View {
-        if waterWidgetEnabled || sleepWidgetEnabled || streakWidgetEnabled || moodWidgetEnabled || nutritionWidgetEnabled {
+        if waterWidgetEnabled || sleepWidgetEnabled || streakWidgetEnabled || moodWidgetEnabled || affirmationWidgetEnabled {
             LazyVGrid(columns: Self.widgetGridColumns, alignment: .leading, spacing: 14) {
                 if waterWidgetEnabled {
                     waterWidgetTile
@@ -1415,10 +1492,16 @@ struct HomeView: View {
                 if moodWidgetEnabled {
                     moodCheckInRow
                 }
-                if nutritionWidgetEnabled {
-                    nutritionWidgetTile
+                if affirmationWidgetEnabled {
+                    affirmationWidgetTile
                 }
             }
+        }
+        // Full-width row, not a grid cell (TestFlight feedback: "Nutrition
+        // feature needs to be bigger") -- the extra width also fits the
+        // per-macro breakdown a half-tile never could.
+        if nutritionWidgetEnabled {
+            nutritionWidgetTile
         }
     }
 
@@ -1487,6 +1570,133 @@ struct HomeView: View {
         }
     }
 
+    /// Affirmation widget (16a, Turn 16) -- 14a's one-anatomy rule:
+    /// eyebrow -> hero (the line itself, up to 3 rows) -> support ->
+    /// pinned actions. The line is today's server-cached generation;
+    /// refresh is the day's one manual regeneration, pencil jumps into
+    /// the sheet's edit-in-place, "List" opens the sheet (16b).
+    private var affirmationWidgetTile: some View {
+        homeWidgetTileFrame {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(todaysAffirmation == nil ? SomaTokens.ink4 : SomaTokens.accent)
+                    Text(String(localized: "home.widget.affirmation.eyebrow", defaultValue: "Affirmation", comment: "Home: affirmation widget tile eyebrow label"))
+                        .font(.system(size: 10.5, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(SomaTokens.ink4)
+                    Spacer(minLength: 0)
+                }
+                if let line = todaysAffirmation?.text {
+                    Text(line)
+                        .font(SomaType.widgetQuote)
+                        .foregroundStyle(SomaTokens.ink)
+                        .padding(.top, 3)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.8)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(String(localized: "home.widget.affirmation.placeholder", defaultValue: "Your line for today is on its way.", comment: "Home: affirmation widget placeholder while today's line loads or hasn't generated yet"))
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(SomaTokens.ink3)
+                        .padding(.top, 3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(String(localized: "home.widget.affirmation.support", defaultValue: "New each morning", comment: "Home: affirmation widget support caption"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SomaTokens.ink5)
+                    .padding(.top, 2)
+                Spacer(minLength: 6)
+                HStack(spacing: 6) {
+                    Button {
+                        affirmationSheetStartsEditing = true
+                        showAffirmations = true
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(SomaTokens.accent)
+                            .frame(width: 27, height: 27)
+                            .glassLens()
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(todaysAffirmation == nil)
+                    .opacity(todaysAffirmation == nil ? 0.35 : 1)
+                    .accessibilityLabel(Text(String(localized: "home.widget.affirmation.editAccessibility", defaultValue: "Edit today's affirmation", comment: "Home: VoiceOver label for the affirmation widget's pencil button")))
+
+                    Button {
+                        Task { await regenerateAffirmationInline() }
+                    } label: {
+                        Group {
+                            if isRegeneratingAffirmation {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(SomaTokens.accent)
+                            }
+                        }
+                        .frame(width: 27, height: 27)
+                        .glassLens()
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRegeneratingAffirmation || todaysAffirmation?.regenerationAvailable == false)
+                    .opacity(todaysAffirmation?.regenerationAvailable == false ? 0.35 : 1)
+                    .accessibilityLabel(Text(String(localized: "home.widget.affirmation.refreshAccessibility", defaultValue: "Get a new line", comment: "Home: VoiceOver label for the affirmation widget's refresh button")))
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        affirmationSheetStartsEditing = false
+                        showAffirmations = true
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(String(localized: "home.widget.affirmation.listLabel", defaultValue: "List", comment: "Home: affirmation widget label opening the full affirmations sheet"))
+                                .font(.system(size: 11, weight: .bold))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        .foregroundStyle(SomaTokens.accent)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(Text(String(localized: "home.widget.affirmation.openHint", defaultValue: "Opens your affirmations", comment: "Home: VoiceOver hint on the affirmation widget's List button")))
+                }
+            }
+        }
+    }
+
+    private func loadTodaysAffirmation() async {
+        guard affirmationWidgetEnabled else { return }
+        let date = Self.todayDateString()
+        if let cached = try? await SupabaseClient.shared.fetchTodaysAffirmation(date: date) {
+            todaysAffirmation = cached
+            return
+        }
+        // Fresh morning before the background pass ran (or first use) --
+        // generate now; the server caches per (user, date), so this stays
+        // one generation a day no matter how often Home appears.
+        todaysAffirmation = try? await SupabaseClient.shared.fetchOrGenerateDailyAffirmation(date: date)
+    }
+
+    private func regenerateAffirmationInline() async {
+        guard !isRegeneratingAffirmation else { return }
+        isRegeneratingAffirmation = true
+        defer { isRegeneratingAffirmation = false }
+        do {
+            todaysAffirmation = try await SupabaseClient.shared.fetchOrGenerateDailyAffirmation(date: Self.todayDateString(), forceRegenerate: true)
+        } catch let error as SupabaseError {
+            // Quota spent -- keep today's line, just disable the refresh
+            // affordance (the sheet's footer is where the "why" lives).
+            if case .generationLimitReached = error, let current = todaysAffirmation {
+                todaysAffirmation = DailyAffirmation(text: current.text, generatedAt: current.generatedAt, regenerationAvailable: false)
+            }
+        } catch {
+            // Offline/transient -- today's line stays; nothing to show here.
+        }
+    }
+
     /// Nutrition widget (mockup 3e "NUTRITION · 1 240 / of 1 900 kcal" +
     /// 14a's one-anatomy rule: eyebrow -> hero value -> supporting visual
     /// -> bottom action). Data is the same `nutritionProgress` /
@@ -1532,6 +1742,12 @@ struct HomeView: View {
                             }
                             .padding(.top, 6)
                             .accessibilityHidden(true)
+                        HStack(spacing: 12) {
+                            nutritionMacroCell(title: String(localized: "home.widget.nutrition.protein", defaultValue: "Protein", comment: "Home: nutrition widget macro column title"), consumed: progress.consumedProteinG, target: progress.targetProteinG)
+                            nutritionMacroCell(title: String(localized: "home.widget.nutrition.carbs", defaultValue: "Carbs", comment: "Home: nutrition widget macro column title"), consumed: progress.consumedCarbsG, target: progress.targetCarbsG)
+                            nutritionMacroCell(title: String(localized: "home.widget.nutrition.fat", defaultValue: "Fat", comment: "Home: nutrition widget macro column title"), consumed: progress.consumedFatG, target: progress.targetFatG)
+                        }
+                        .padding(.top, 8)
                     } else {
                         Text(String(localized: "home.widget.nutrition.noTargetHeadline", defaultValue: "No target yet", comment: "Home: nutrition widget headline before a calorie target has been computed"))
                             .font(.system(size: 14.5, weight: .semibold))
@@ -1548,6 +1764,22 @@ struct HomeView: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(String(localized: "home.widget.nutrition.hint", defaultValue: "Opens nutrition", comment: "Home: VoiceOver hint on the nutrition widget tile"))
+    }
+
+    private func nutritionMacroCell(title: String, consumed: Int, target: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.4)
+                .foregroundStyle(SomaTokens.ink4)
+                .lineLimit(1)
+            Text(String(localized: "home.widget.nutrition.macroValue", defaultValue: "\(consumed) / \(target) g", comment: "Home: nutrition widget macro cell value, consumed vs target grams"))
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(SomaTokens.inkParagraph)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var waterGoalReached: Bool { waterGlassesToday >= 8 }
@@ -1916,10 +2148,9 @@ struct HomeView: View {
             // (Streak, whenever Mood is off and it lands alone in row 2)
             // end up visibly shorter than row 1's pair, since nothing
             // forces separate ROWS to match each other, only same-row
-            // siblings. 172 matches Water/Sleep's own natural height (4
-            // content lines + this padding) -- the tallest realistic tile,
-            // not a magic number.
-            .frame(maxWidth: .infinity, minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
+            // siblings. 128 hugs Water's natural height (4 content lines +
+            // this padding) -- the tallest realistic tile, not a magic number.
+            .frame(maxWidth: .infinity, minHeight: 128, maxHeight: .infinity, alignment: .topLeading)
             .padding(.init(top: 16, leading: 18, bottom: 16, trailing: 18))
             .background(HomeWidgetTileBackground())
     }
@@ -2585,7 +2816,14 @@ struct HomeView: View {
         async let healthKitEntries: [WorkoutTimelineEntry] = HealthKitManager.isAvailable
             ? await HealthKitManager.shared.fetchTodaysWorkouts()
             : []
-        async let providerEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchProviderWorkoutTimeline(date: Self.todayDateString())) ?? []
+        // Explicit LOCAL-day bounds -- without them the edge function
+        // defaults to the UTC day, which west of UTC includes yesterday
+        // evening's session and auto-marked today done at wake-up.
+        async let providerEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchProviderWorkoutTimeline(
+            date: Self.todayDateString(),
+            startTime: Calendar.current.startOfDay(for: Date()),
+            endTime: Date()
+        )) ?? []
 
         async let syncedEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchSyncedHealthKitWorkouts(date: Self.todayDateString())) ?? []
 

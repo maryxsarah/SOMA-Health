@@ -12,6 +12,7 @@ struct EditWidgetsSheet: View {
     @Binding var nutritionEnabled: Bool
     @Binding var sportGoalEnabled: Bool
     @Binding var photoProgressEnabled: Bool
+    @Binding var affirmationEnabled: Bool
 
     @Environment(\.dismiss) private var dismiss
 
@@ -32,7 +33,8 @@ struct EditWidgetsSheet: View {
             Row(id: "mood", systemImage: "face.smiling", title: LocalizedStringKey(String(localized: "editWidgets.row.mood.title", defaultValue: "Mood check-in", comment: "Edit widgets sheet: title for the mood check-in widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.mood.subtitle", defaultValue: "How you're feeling today", comment: "Edit widgets sheet: subtitle for the mood check-in widget row")), binding: $moodEnabled),
             Row(id: "nutrition", systemImage: "fork.knife", title: LocalizedStringKey(String(localized: "editWidgets.row.nutrition.title", defaultValue: "Nutrition today", comment: "Edit widgets sheet: title for the nutrition widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.nutrition.subtitle", defaultValue: "Calories and macros vs today's target", comment: "Edit widgets sheet: subtitle for the nutrition widget row")), binding: $nutritionEnabled),
             Row(id: "goal", systemImage: "target", title: LocalizedStringKey(String(localized: "editWidgets.row.goal.title", defaultValue: "Sport goal", comment: "Edit widgets sheet: title for the sport goal widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.goal.subtitle", defaultValue: "Your active goal's progress", comment: "Edit widgets sheet: subtitle for the sport goal widget row")), binding: $sportGoalEnabled),
-            Row(id: "photos", systemImage: "photo.on.rectangle.angled", title: LocalizedStringKey(String(localized: "editWidgets.row.photos.title", defaultValue: "Photo progress", comment: "Edit widgets sheet: title for the photo progress widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.photos.subtitle", defaultValue: "Goal photo comparison", comment: "Edit widgets sheet: subtitle for the photo progress widget row")), binding: $photoProgressEnabled)
+            Row(id: "photos", systemImage: "photo.on.rectangle.angled", title: LocalizedStringKey(String(localized: "editWidgets.row.photos.title", defaultValue: "Photo progress", comment: "Edit widgets sheet: title for the photo progress widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.photos.subtitle", defaultValue: "Goal photo comparison", comment: "Edit widgets sheet: subtitle for the photo progress widget row")), binding: $photoProgressEnabled),
+            Row(id: "affirmation", systemImage: "sparkles", title: LocalizedStringKey(String(localized: "editWidgets.row.affirmation.title", defaultValue: "Affirmation", comment: "Edit widgets sheet: title for the affirmation widget row")), subtitle: LocalizedStringKey(String(localized: "editWidgets.row.affirmation.subtitle", defaultValue: "A kind line, new each morning", comment: "Edit widgets sheet: subtitle for the affirmation widget row")), binding: $affirmationEnabled)
         ]
     }
 

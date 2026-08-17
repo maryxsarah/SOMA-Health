@@ -18,6 +18,8 @@ struct HistoryCalendarView: View {
     @State private var recommendationsByDate: [String: DailyRecommendation] = [:]
     @State private var dailySteps: [String: Double] = [:]
     @State private var oldestLoadedMonthStart = Date()
+    /// "MM-dd" of the profile's date_of_birth; nil when the user never set one.
+    @State private var birthdayMonthDay: String?
 
     /// Months fetched on first open; each "Load earlier months" tap adds
     /// this many more. Bounded, not infinite -- a manual affordance instead
@@ -222,6 +224,16 @@ struct HistoryCalendarView: View {
                         }
                     }
                     .frame(height: 30)
+                    // Recurring birthday badge (profile date_of_birth) --
+                    // beside the number so the marker row stays a verdict.
+                    .overlay(alignment: .topTrailing) {
+                        if cell.isBirthday {
+                            Image(systemName: "birthday.cake.fill")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(SomaTokens.warn)
+                                .offset(x: 10, y: 2)
+                        }
+                    }
                     // 15a keeps the marker visible under today's disc too --
                     // for today it reads as "what today is", not a verdict.
                     markerGlyph(cell.marker)
@@ -304,7 +316,10 @@ struct HistoryCalendarView: View {
             case .perfect: String(localized: "historyCalendar.a11y.perfect", defaultValue: "perfect day", comment: "History calendar: VoiceOver state for a day every goal was hit")
             }
         }
-        return "\(month(of: cell.dateString)) \(cell.dayNumber), \(stateDescription)"
+        let birthdaySuffix = cell.isBirthday
+            ? ", " + String(localized: "historyCalendar.a11y.birthday", defaultValue: "your birthday", comment: "History calendar: VoiceOver suffix for the user's birthday cell")
+            : ""
+        return "\(month(of: cell.dateString)) \(cell.dayNumber), \(stateDescription)\(birthdaySuffix)"
     }
 
     private func month(of dateString: String) -> String {
@@ -356,10 +371,17 @@ struct HistoryCalendarView: View {
         }
         oldestLoadedMonthStart = starts.last ?? currentMonthStart
 
-        await fetchLogsAndSteps(from: oldestLoadedMonthStart, to: now)
+        await fetchLogs(from: oldestLoadedMonthStart, to: now)
         await fetchRecommendations(from: oldestLoadedMonthStart, to: now)
+        await fetchBirthday()
         months = starts.map { buildMonth(monthStart: $0, calendar: calendar) }
         isLoading = false
+        // Steps only upgrade "logged" days to "perfect" -- fetched AFTER
+        // the grid renders because HealthKit on a never-authorized install
+        // can stall its reply indefinitely, which held the whole calendar
+        // on a spinner (the DB data was ready the entire time).
+        await mergeSteps(from: oldestLoadedMonthStart, to: now)
+        months = starts.map { buildMonth(monthStart: $0, calendar: calendar) }
     }
 
     private func loadMore() async {
@@ -374,25 +396,50 @@ struct HistoryCalendarView: View {
         }
         let sliceEnd = calendar.date(byAdding: .day, value: -1, to: oldestLoadedMonthStart) ?? oldestLoadedMonthStart
 
-        await fetchLogsAndSteps(from: newOldest, to: sliceEnd)
+        await fetchLogs(from: newOldest, to: sliceEnd)
         oldestLoadedMonthStart = newOldest
         await fetchRecommendations(from: oldestLoadedMonthStart, to: Date())
         months.append(contentsOf: newStarts.map { buildMonth(monthStart: $0, calendar: calendar) })
         isLoadingMore = false
+        // Same render-first posture as loadInitial: crowns arrive late.
+        await mergeSteps(from: newOldest, to: sliceEnd)
+        rebuildAllMonths(calendar: calendar)
     }
 
-    private func fetchLogsAndSteps(from start: Date, to end: Date) async {
+    /// Rebuilds every already-loaded month section from its "yyyy-MM" id,
+    /// re-deriving markers from the current fetched state.
+    private func rebuildAllMonths(calendar: Calendar) {
+        let idFormatter = DateFormatter()
+        idFormatter.dateFormat = "yyyy-MM"
+        months = months.compactMap { section in
+            idFormatter.date(from: section.id).map { buildMonth(monthStart: $0, calendar: calendar) }
+        }
+    }
+
+    private func fetchLogs(from start: Date, to end: Date) async {
         guard start <= end else { return }
         let startStr = Self.dayFormatter.string(from: start)
         let endStr = Self.dayFormatter.string(from: end)
-
-        async let logsTask = SupabaseClient.shared.fetchWorkoutLogs(fromDate: startStr, toDate: endStr)
-        async let stepsTask = HealthKitManager.shared.fetchDailySteps(from: start, to: end)
-
-        if let logs = try? await logsTask {
+        if let logs = try? await SupabaseClient.shared.fetchWorkoutLogs(fromDate: startStr, toDate: endStr) {
             workoutLogDates.formUnion(logs.map(\.date))
         }
-        dailySteps.merge(await stepsTask) { _, new in new }
+    }
+
+    /// Skipped entirely when HealthKit was never authorized -- on such
+    /// installs the store can simply never answer the query (observed as
+    /// the calendar's forever-spinner), and there are no steps to add.
+    private func mergeSteps(from start: Date, to end: Date) async {
+        guard start <= end, await HealthKitManager.shared.isAuthorized() else { return }
+        dailySteps.merge(await HealthKitManager.shared.fetchDailySteps(from: start, to: end)) { _, new in new }
+    }
+
+    /// Best-effort: a missing profile or unset date_of_birth just means no
+    /// cake badges, never an error state.
+    private func fetchBirthday() async {
+        guard let userId = SupabaseClient.shared.currentUserID,
+              let profile = try? await SupabaseClient.shared.fetchProfile(id: userId),
+              let dob = profile.dateOfBirth, dob.count == 10 else { return }
+        birthdayMonthDay = String(dob.suffix(5))
     }
 
     private func fetchRecommendations(from start: Date, to end: Date) async {
@@ -416,6 +463,9 @@ struct HistoryCalendarView: View {
                 dateString: dateString,
                 dayNumber: dayNumber,
                 isToday: dateString == Self.todayString,
+                // "yyyy-MM-dd"'s last 5 chars are exactly "MM-dd", so the
+                // badge recurs on the right day of every displayed year.
+                isBirthday: birthdayMonthDay.map { dateString.hasSuffix($0) } ?? false,
                 marker: marker(for: dateString)
             ))
         }
@@ -463,6 +513,7 @@ struct HistoryCalendarView: View {
         let dateString: String
         let dayNumber: Int
         let isToday: Bool
+        let isBirthday: Bool
         let marker: DayMarker
     }
 

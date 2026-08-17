@@ -11,6 +11,9 @@ struct ExerciseDetailView: View {
 
     @State private var entry: ExerciseLibraryEntry?
     @State private var isLoading = true
+    /// Library name + how-to steps in the UI language (nil when English,
+    /// or while the translation is still in flight) -- see load().
+    @State private var translation: SupabaseClient.ExerciseGuideTranslation?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -33,7 +36,7 @@ struct ExerciseDetailView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(exercise.name)
+                        Text(translation?.name ?? exercise.name)
                             .font(.title3.bold())
                         Text(exercise.restLabel.map { restLabel in
                             String(localized: "exerciseDetail.summary.withRest", defaultValue: "\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity) — \(restLabel)", comment: "Exercise detail: sets/reps/weight/intensity/rest summary line, with a rest period")
@@ -63,8 +66,11 @@ struct ExerciseDetailView: View {
 
                     if let entry {
                         tagsRow(entry)
-                        if !entry.instructions.isEmpty {
-                            instructionsSection(entry)
+                        // Translated steps replace the library's English
+                        // ones whenever the UI language isn't English.
+                        let steps = (translation?.instructions.isEmpty == false) ? translation!.instructions : entry.instructions
+                        if !steps.isEmpty {
+                            instructionsSection(steps)
                         }
                     }
                 }
@@ -139,12 +145,12 @@ struct ExerciseDetailView: View {
         }
     }
 
-    private func instructionsSection(_ entry: ExerciseLibraryEntry) -> some View {
+    private func instructionsSection(_ steps: [String]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(String(localized: "exerciseDetail.howToPerform", defaultValue: "How to perform it", comment: "Header above the numbered exercise-library instructions"))
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
-            ForEach(Array(entry.instructions.enumerated()), id: \.offset) { index, step in
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
                 HStack(alignment: .top, spacing: 8) {
                     Text("\(index + 1).")
                         .font(.subheadline.bold())
@@ -165,6 +171,11 @@ struct ExerciseDetailView: View {
             name: exercise.name
         )
         isLoading = false
+        // After the entry is on screen -- English steps showing is a fine
+        // intermediate state; a failed translation just stays English.
+        if let entry {
+            translation = try? await SupabaseClient.shared.translateExerciseGuide(exerciseId: entry.id)
+        }
     }
 }
 

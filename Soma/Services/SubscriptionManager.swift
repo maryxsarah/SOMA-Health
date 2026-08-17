@@ -25,6 +25,9 @@ final class SubscriptionManager: ObservableObject {
     /// The tier last synced to Supabase ("free"/"monthly"/"annual") -- lets
     /// UI quota gates mirror the server's tier-scaled generation limits.
     @Published private(set) var tier = "free"
+    /// Subscribed via an introductory (free-trial) offer -- drives the
+    /// in-app "Upgrade now" highlight while the trial runs.
+    @Published private(set) var isInTrial = false
 
     private var transactionListener: Task<Void, Never>?
 
@@ -60,12 +63,19 @@ final class SubscriptionManager: ObservableObject {
             else { continue }
             isSubscribed = transaction.revocationDate == nil
             tier = isSubscribed ? (transaction.productID == Self.annualProductID ? "annual" : "monthly") : "free"
+            let offerType: Transaction.OfferType? = if #available(iOS 17.2, *) {
+                transaction.offer?.type
+            } else {
+                transaction.offerType
+            }
+            isInTrial = isSubscribed && offerType == .introductory
             updateSubscriptionTierRemote(tier)
             mirrorSubscriptionStatusToSuperwall()
             return
         }
         isSubscribed = false
         tier = "free"
+        isInTrial = false
         updateSubscriptionTierRemote("free")
         mirrorSubscriptionStatusToSuperwall()
     }

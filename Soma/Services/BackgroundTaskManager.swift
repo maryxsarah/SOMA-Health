@@ -80,6 +80,14 @@ final class BackgroundTaskManager {
                 message: recommendation.message
             )
             NotificationManager.shared.markSentToday()
+            // 16b: today's affirmation line rides this same daily pass --
+            // cached server-side per (user, date), so one cheap idempotent
+            // call, and the reminder scheduling below can already draw on
+            // today's line. Skipped entirely while the feature isn't in
+            // use, so it costs nothing for users who never opted in.
+            if Self.affirmationFeatureInUse {
+                _ = try? await SupabaseClient.shared.fetchOrGenerateDailyAffirmation(date: Self.todayDateString())
+            }
             // Best-effort: the movement/evening-reminder/progress-checkin
             // trio for later today. Safe to attempt even if the recommendation
             // call above is what actually failed in a partial-failure case --
@@ -103,6 +111,14 @@ final class BackgroundTaskManager {
 
     private static func defaultWakeTime() -> Date {
         Calendar.current.date(bySettingHour: 7, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
+    /// The affirmation widget is on the dashboard (@AppStorage default
+    /// true, so a missing key means enabled) or reminders are opted in --
+    /// the two ways the daily line is actually surfaced.
+    static var affirmationFeatureInUse: Bool {
+        (UserDefaults.standard.object(forKey: "dashboardWidget.affirmation") as? Bool ?? true)
+            || NotificationManager.shared.affirmationRemindersEnabled
     }
 
     private static func todayDateString() -> String {

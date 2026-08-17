@@ -1532,6 +1532,11 @@ private struct AccountSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var languageManager: LanguageManager
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
+    /// Pushed 16c page -- plus a local mirror of its On/Off for the row
+    /// value, refreshed on appear since the page edits NotificationManager
+    /// directly rather than going through ProfileStore.
+    @State private var showAffirmationReminders = false
+    @State private var affirmationRemindersOn = NotificationManager.shared.affirmationRemindersEnabled
 
     var body: some View {
         ScrollView {
@@ -1639,6 +1644,14 @@ private struct AccountSettingsView: View {
                             : String(localized: "profile.quietHours.offValue", defaultValue: "Off", comment: "Quiet hours row value when disabled"),
                         isSet: store.quietHoursEnabled
                     ) { store.activeSheet = .quietHours }
+                    groupDivider
+                    groupRow(
+                        title: LocalizedStringKey(String(localized: "profile.affirmationReminders.title", defaultValue: "Affirmation reminders", comment: "Row title opening the affirmation reminder settings page")),
+                        value: affirmationRemindersOn
+                            ? String(localized: "profile.notifications.onValue", defaultValue: "On", comment: "Push notifications row value when enabled")
+                            : String(localized: "profile.notifications.offValue", defaultValue: "Off", comment: "Push notifications row value when disabled"),
+                        isSet: affirmationRemindersOn
+                    ) { showAffirmationReminders = true }
                 }
 
                 if let errorMessage = store.errorMessage {
@@ -1662,6 +1675,12 @@ private struct AccountSettingsView: View {
         .sheet(isPresented: $store.showReferralCodeSheet) {
             ReferralCodeSheet()
         }
+        .navigationDestination(isPresented: $showAffirmationReminders) {
+            AffirmationRemindersView()
+        }
+        // The 16c page writes straight to NotificationManager -- re-read
+        // its On/Off when this page (re)appears so the row value tracks it.
+        .onAppear { affirmationRemindersOn = NotificationManager.shared.affirmationRemindersEnabled }
     }
 
 }
