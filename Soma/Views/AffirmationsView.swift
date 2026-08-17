@@ -29,6 +29,11 @@ struct AffirmationsView: View {
     @State private var addingDraft: String?
     @State private var errorMessage: String?
     @State private var showReminders = false
+    /// 16b batch size for "Generate new" -- one request, up to 10 lines
+    /// (first = today's, rest saved to the list). Cycled by the small
+    /// count chip, persisted like the water widget's glass-size pref.
+    @AppStorage("affirmations.generateCount") private var generateCount = 1
+    private static let generateCounts = [1, 3, 5, 10]
     @FocusState private var editorFocused: Bool
 
     private static func todayDateString() -> String {
@@ -177,6 +182,7 @@ struct AffirmationsView: View {
                         editorFocused = true
                     }
                     generateNewChip
+                    countChip
                     actionChip(
                         keptToday
                             ? String(localized: "affirmations.today.kept", defaultValue: "Kept", comment: "Chip state once today's affirmation is already saved to the list")
@@ -221,6 +227,27 @@ struct AffirmationsView: View {
         .disabled(isGeneratingToday || regenerationExhausted)
         .opacity(regenerationExhausted ? 0.45 : 1)
         .accessibilityHint(Text(String(localized: "affirmations.today.generateNewHint", defaultValue: "Uses today's one regeneration", comment: "VoiceOver hint on the Generate new chip")))
+    }
+
+    /// Cycles 1 -> 3 -> 5 -> 10, same tap-to-cycle pattern as the water
+    /// widget's glass-size chip.
+    private var countChip: some View {
+        Button {
+            let counts = Self.generateCounts
+            let index = counts.firstIndex(of: generateCount) ?? 0
+            generateCount = counts[(index + 1) % counts.count]
+        } label: {
+            Text(String(localized: "affirmations.today.countChip", defaultValue: "×\(generateCount)", comment: "Chip cycling how many affirmation lines one generation produces, e.g. '×3'"))
+                .font(.system(size: 12.5, weight: .bold))
+                .foregroundStyle(SomaTokens.accent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(SomaTokens.accentSoft10))
+        }
+        .buttonStyle(.plain)
+        .disabled(isGeneratingToday || regenerationExhausted)
+        .opacity(regenerationExhausted ? 0.45 : 1)
+        .accessibilityLabel(Text(String(localized: "affirmations.today.countChipAccessibility", defaultValue: "Lines per generation: \(generateCount). Double-tap to change.", comment: "VoiceOver label for the chip cycling how many affirmation lines one generation produces")))
     }
 
     private var keptToday: Bool {
@@ -497,9 +524,9 @@ struct AffirmationsView: View {
         defer { isGeneratingToday = false }
         errorMessage = nil
         do {
-            today = try await SupabaseClient.shared.fetchOrGenerateDailyAffirmation(date: Self.todayDateString(), forceRegenerate: true)
-            // An edited line the server just replaced got auto-promoted
-            // into the list server-side -- refresh so it appears at once.
+            today = try await SupabaseClient.shared.fetchOrGenerateDailyAffirmation(date: Self.todayDateString(), forceRegenerate: true, count: generateCount)
+            // Batch extras and any auto-promoted edited line were saved
+            // into the list server-side -- refresh so they appear at once.
             lines = (try? await SupabaseClient.shared.fetchAffirmationLines()) ?? lines
         } catch let error as SupabaseError {
             if case .generationLimitReached = error { regenerationSpent = true } else { errorMessage = error.localizedDescription }

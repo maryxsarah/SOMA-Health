@@ -66,22 +66,21 @@ struct FeedbackView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
 
-            Picker(String(localized: "feedback.typePicker.label", defaultValue: "Type", comment: "Feedback form: label for the bug/idea/other type picker"), selection: $type) {
+            // House chips, not the system segmented control -- same
+            // selected-gel/unselected-flat pair every other picker uses.
+            HStack(spacing: 6) {
                 ForEach(FeedbackType.allCases, id: \.self) { t in
-                    Text(t.label).tag(t)
+                    SomaChip(title: LocalizedStringKey(t.label), isSelected: type == t) { type = t }
                 }
             }
-            .pickerStyle(.segmented)
 
-            TextField(
-                type == .bug
+            GlassTextField(
+                placeholder: type == .bug
                     ? String(localized: "feedback.placeholder.bug", defaultValue: "What happened, and what did you expect instead?", comment: "Text field placeholder when reporting a bug")
                     : String(localized: "feedback.placeholder.other", defaultValue: "What's on your mind?", comment: "Text field placeholder for general feedback"),
                 text: $message,
-                axis: .vertical
+                minLines: 5
             )
-            .lineLimit(5...10)
-            .textFieldStyle(.roundedBorder)
             .onChange(of: message) { _, newValue in
                 if newValue.count > Self.maxMessageLength {
                     message = String(newValue.prefix(Self.maxMessageLength))
@@ -93,13 +92,13 @@ struct FeedbackView: View {
             if message.count >= Self.maxMessageLength - 500 {
                 Text("\(message.count)/\(Self.maxMessageLength)")
                     .font(.caption2)
-                    .foregroundStyle(message.count >= Self.maxMessageLength ? .red : .secondary)
+                    .foregroundStyle(message.count >= Self.maxMessageLength ? SomaTokens.danger : SomaTokens.ink3)
             }
 
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(SomaTokens.danger)
             }
 
             PillButton(

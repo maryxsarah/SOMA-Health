@@ -134,6 +134,24 @@ final class AnalyticsManager {
         log(.featureUsed, parameters: [Parameter.featureName: name])
     }
 
+    /// Fired right BEFORE the delete-account call -- after it succeeds the
+    /// local identifiers are reset, so this is the last attributable event.
+    func accountDeleted() {
+        log(.accountDeleted)
+    }
+
+    /// Client half of analytics erasure after a successful account
+    /// deletion (the server half -- PostHog person deletion -- lives in
+    /// the delete-account edge function): fresh anonymous PostHog
+    /// distinct_id + cleared Firebase app-instance data. Deliberately not
+    /// wrapped in `#if !DEBUG` -- resetting identifiers is state hygiene,
+    /// not event reporting, and must also happen in Debug.
+    func resetAfterAccountDeletion() {
+        PostHogSDK.shared.reset()
+        Analytics.resetAnalyticsData()
+        Analytics.setUserID(nil)
+    }
+
     // MARK: - Private
 
     /// Event names shared by both backends -- snake_case, which is both
@@ -161,6 +179,7 @@ final class AnalyticsManager {
         case paywallPresentationFailed = "paywall_presentation_failed"
         case paywallSkipped = "paywall_skipped"
         case featureUsed = "feature_used"
+        case accountDeleted = "account_deleted"
     }
 
     private enum Parameter {

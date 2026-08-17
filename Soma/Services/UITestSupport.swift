@@ -40,6 +40,22 @@ enum UITestSupport {
         ProcessInfo.processInfo.environment["UITEST_ONBOARDING_SURVEY_STEP"]
     }
 
+    /// Mocked StoreKit entitlement for fixture runs -- the simulator has
+    /// no real purchases, so subscription-dependent UI (trial banner,
+    /// Subscription row, quota locks, Superwall gating) is otherwise
+    /// untestable. Set via UITEST_SUBSCRIPTION: "trial" |
+    /// "premium_monthly" | "premium_annual" | "free". Nil = don't mock.
+    static var subscriptionMock: (isSubscribed: Bool, tier: String, isInTrial: Bool)? {
+        guard isActive else { return nil }
+        switch ProcessInfo.processInfo.environment["UITEST_SUBSCRIPTION"] {
+        case "trial": return (true, "monthly", true)
+        case "premium_monthly": return (true, "monthly", false)
+        case "premium_annual": return (true, "annual", false)
+        case "free": return (false, "free", false)
+        default: return nil
+        }
+    }
+
     /// Session whose requests never leave the process. Nil when inactive.
     static var stubbedSession: URLSession? {
         guard isActive else { return nil }
@@ -109,6 +125,7 @@ enum UITestSupport {
     static let isOnboardingDemoResume = false
     static let onboardingSurveyStartStep: String? = nil
     static let stubbedSession: URLSession? = nil
+    static let subscriptionMock: (isSubscribed: Bool, tier: String, isInTrial: Bool)? = nil
     static func bootstrapIfNeeded() {}
     #endif
 }
@@ -809,6 +826,14 @@ final class FixtureURLProtocol: URLProtocol {
     private static var goalPauseReason: String?
     private static var requestedCategory: String?
     private static var loggedWorkouts: [[String: Any]] = []
+    /// 16b: kept/custom affirmation lines saved during this fixture run --
+    /// lets Keep/"Write your own"/hearts/delete round-trip offline.
+    private static var savedAffirmations: [[String: Any]] = []
+    /// Mood/sleep check-ins logged during this fixture run -- the widgets
+    /// re-read after writing, and the generic empty-GET fallback made a
+    /// successful tap look like nothing happened.
+    private static var savedMood: [String: Any]?
+    private static var savedSleep: [String: Any]?
     private static var insertedMeasurements: [[String: Any]] = []
     private static var loggedSleep: [String: Any]?
 
@@ -1076,31 +1101,137 @@ final class FixtureURLProtocol: URLProtocol {
 
         // Paywall bypass: far-future referral bonus means the detail sheet
         // never routes through Superwall in tests. date_of_birth feeds the
-        // history calendar's recurring birthday badge (Aug 20). The empty
+        // history calendar's recurring birthday badge (Aug 16). The empty
         // collection keys are UserProfile's non-optional fields -- without
         // them fetchProfile's decode throws and try? call sites see nil.
         case path.hasSuffix("/rest/v1/users") && method == "GET":
+            // The promo-chip scenario wants a REAL countdown ("5 DAYS"),
+            // not the year-2099 paywall bypass every other scenario uses.
+            let bonusISO: String
+            if ProcessInfo.processInfo.environment["UITEST_SUBSCRIPTION"] == "free" {
+                bonusISO = FixtureData.iso(daysAgo: -5)
+            } else {
+                bonusISO = "2099-01-01T00:00:00Z"
+            }
             return ([[
-                "referral_bonus_until": "2099-01-01T00:00:00Z",
-                "date_of_birth": "1999-08-20",
+                "referral_bonus_until": bonusISO,
+                "date_of_birth": "1999-08-16",
+                "contact_email": "fixture@soma4health.com",
+                "country": "US", "city": "New York",
                 "goals": [], "equipment": [], "household_equipment": [],
                 "injury_tags": [], "injury_severity": [:], "injury_type": [:],
                 "injury_pain_level": [:], "anchor_sessions": [],
             ] as [String: Any]], 200)
 
+        // Account deletion: identities say "email" so no SIWA prompt runs
+        // in tests; the function stub just confirms.
+        case path.hasSuffix("/auth/v1/user") && method == "GET":
+            return (["identities": [["provider": "email"]]] as [String: Any], 200)
+        // Mood/sleep round-trip (the widgets refetch right after logging).
+        case path.contains("/rest/v1/daily_mood") && method == "POST":
+            Self.savedMood = [
+                "date": requestBody["date"] as? String ?? FixtureData.today,
+                "rating": requestBody["rating"] as? Int ?? 3,
+                "logged_at": FixtureData.iso(daysAgo: 0),
+            ]
+            return ([:] as [String: Any], 201)
+        case path.contains("/rest/v1/daily_mood") && method == "GET":
+            return (Self.savedMood.map { [$0] } ?? [], 200)
+        case path.contains("/rest/v1/daily_sleep_log") && method == "POST":
+            Self.savedSleep = [
+                "date": requestBody["date"] as? String ?? FixtureData.today,
+                "bucket": requestBody["bucket"] as? String ?? "seven_eight",
+                "logged_at": FixtureData.iso(daysAgo: 0),
+            ]
+            return ([:] as [String: Any], 201)
+        case path.contains("/rest/v1/daily_sleep_log") && method == "GET":
+            return (Self.savedSleep.map { [$0] } ?? [], 200)
+
+        case path.hasSuffix("/functions/v1/get-referral-code"):
+            return (["code": "SOMA-TEST7", "bonusDays": 7, "redemptionCount": 2] as [String: Any], 200)
+        case path.hasSuffix("/functions/v1/redeem-referral-code"):
+            return (["referral_bonus_until": "2099-01-01T00:00:00Z"] as [String: Any], 200)
+        case path.hasSuffix("/functions/v1/delete-account"):
+            return (["deleted": true] as [String: Any], 200)
+
         case path.hasSuffix("/functions/v1/generate-recommendation"):
             return (FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory), 200)
 
-        // Affirmation widget (16a) -- a fixed line so the tile renders
-        // deterministically; the passive daily_affirmation read falls
-        // through to the generic empty-GET case below, which is what
-        // routes the client here.
+        // Affirmation widget/sheet (16a/16b) -- deterministic lines; the
+        // passive daily_affirmation read falls through to the generic
+        // empty-GET case below, which is what routes the client here.
+        // forceRegenerate returns a different line with the quota spent,
+        // so "Generate new" visibly works exactly once, like production.
         case path.hasSuffix("/functions/v1/generate-affirmation"):
+            let force = requestBody["forceRegenerate"] as? Bool == true
+            // Batch mode: extras land in the in-memory list, mirroring the
+            // real function's server-side inserts.
+            let count = min(max(requestBody["count"] as? Int ?? 1, 1), 10)
+            // Real affirmations (first person, owned statements), not
+            // placeholder filler -- the fixture sim is also the demo build.
+            let pool = [
+                "I am building strength with every honest effort.",
+                "I show up for myself, even on slow days.",
+                "I trust the work I put in today.",
+                "I let rest count as part of my training.",
+                "I am more consistent than I give myself credit for.",
+                "I choose progress over perfection.",
+                "I keep promises I make to my body.",
+                "I am patient with what takes time.",
+                "I make space for ten honest minutes today.",
+            ]
+            if count > 1 {
+                for index in 1..<count {
+                    Self.savedAffirmations.insert([
+                        "id": "aff-gen-\(Self.savedAffirmations.count + index)",
+                        "text": pool[(Self.savedAffirmations.count + index) % pool.count],
+                        "source": "generated",
+                        "in_rotation": true,
+                        "created_at": FixtureData.iso(daysAgo: 0),
+                    ], at: 0)
+                }
+            }
             return ([
-                "text": "You don't need a perfect day -- just ten honest minutes.",
+                "text": force
+                    ? "I am stronger than the excuse I almost made."
+                    : "I don't need a perfect day -- just ten honest minutes.",
                 "generatedAt": FixtureData.iso(daysAgo: 0),
-                "regenerationAvailable": true,
+                "regenerationAvailable": !force,
+                "extraSavedCount": count - 1,
             ] as [String: Any], 200)
+
+        // 16b list CRUD -- in-memory only. POST echoes the created row
+        // (the client sends Prefer: return=representation and decodes
+        // [AffirmationLine]; the generic default's `{}` broke that with
+        // "data couldn't be read").
+        case path.contains("/rest/v1/user_affirmations") && method == "POST":
+            let row: [String: Any] = [
+                "id": "aff-\(Self.savedAffirmations.count + 1)",
+                "text": requestBody["text"] as? String ?? "",
+                "source": requestBody["source"] as? String ?? "custom",
+                "in_rotation": true,
+                "created_at": FixtureData.iso(daysAgo: 0),
+            ]
+            Self.savedAffirmations.insert(row, at: 0)
+            return ([row], 201)
+        case path.contains("/rest/v1/user_affirmations") && method == "PATCH":
+            if let id = queryFilterValue(query, field: "id"),
+               let index = Self.savedAffirmations.firstIndex(where: { $0["id"] as? String == id }) {
+                if let inRotation = requestBody["in_rotation"] as? Bool {
+                    Self.savedAffirmations[index]["in_rotation"] = inRotation
+                }
+                if let text = requestBody["text"] as? String {
+                    Self.savedAffirmations[index]["text"] = text
+                }
+            }
+            return ([:] as [String: Any], 204)
+        case path.contains("/rest/v1/user_affirmations") && method == "DELETE":
+            if let id = queryFilterValue(query, field: "id") {
+                Self.savedAffirmations.removeAll { $0["id"] as? String == id }
+            }
+            return ([:] as [String: Any], 204)
+        case path.contains("/rest/v1/user_affirmations"):
+            return (Self.savedAffirmations, 200)
 
         // Deterministic fake translation (real endpoint calls Claude) --
         // enough for a test to assert the swap actually happens.

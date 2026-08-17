@@ -1,5 +1,6 @@
 import PhotosUI
 import SuperwallKit
+import StoreKit
 import SwiftUI
 
 /// Settings entry point, presented as a sheet from Home and from
@@ -20,6 +21,8 @@ struct ProfileView: View {
 
     @StateObject private var store = ProfileStore()
     @State private var showSignOutConfirmation = false
+    /// 12b plan-line tap while paid: the native manage-subscriptions sheet.
+    @State private var showManageSubscriptions = false
 
     var body: some View {
         NavigationStack {
@@ -72,6 +75,7 @@ struct ProfileView: View {
                 appState.signOut()
             }
         }
+        .manageSubscriptionsSheet(isPresented: $showManageSubscriptions)
     }
 
     // MARK: - Identity row
@@ -82,15 +86,122 @@ struct ProfileView: View {
     private var identityRow: some View {
         HStack(spacing: 12) {
             avatarButton
+                // 12b: gold crown mini-badge on the avatar -- PAID only
+                // (the spec is explicit: promo bonus gets the gold plan
+                // line but no avatar badge, trials neither).
+                .overlay(alignment: .bottomTrailing) {
+                    if subscriptionManager.isSubscribed && !subscriptionManager.isInTrial {
+                        avatarCrownBadge
+                    }
+                }
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(localized: "profile.yourProfile.title", defaultValue: "Your profile", comment: "Heading label next to the avatar in the identity row"))
                     .font(Theme.display)
                 Text(identitySubtitle)
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink3)
+                planLine
             }
             Spacer(minLength: 0)
         }
+    }
+
+    private static let crownGoldLight = Color(red: 0xF5 / 255, green: 0xCD / 255, blue: 0x78 / 255)
+
+    private var avatarCrownBadge: some View {
+        Circle()
+            .fill(
+                LinearGradient(
+                    colors: [Self.crownGoldLight.opacity(0.95), SomaTokens.warn.opacity(0.95)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+            .frame(width: 20, height: 20)
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.55), lineWidth: 1))
+            // The page-background cutout ring from the mockup.
+            .overlay(Circle().stroke(SomaTokens.bgScreenTop, lineWidth: 2).padding(-1))
+            .overlay(
+                Image(systemName: "crown")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+            )
+            .offset(x: 3, y: 3)
+            .shadow(color: SomaTokens.warn.opacity(0.35), radius: 3, x: 0, y: 2)
+            .accessibilityHidden(true)
+    }
+
+    /// 12b's plan line under the email -- "Premium shows twice, quietly."
+    /// Four states: paid "Soma Premium · renews <date>" (tap -> manage),
+    /// trial "Free trial · N days left · Subscribe", promo bonus
+    /// "Free access · N days left · Upgrade" (gold, no avatar badge),
+    /// free "Free plan · Upgrade" -- the latter three tap into the paywall.
+    private var planLine: some View {
+        let paid = subscriptionManager.isSubscribed && !subscriptionManager.isInTrial
+        return Button {
+            if paid {
+                showManageSubscriptions = true
+            } else if subscriptionManager.isInTrial {
+                SuperwallDiagnostics.registerTrialUpgrade { showManageSubscriptions = true }
+            } else {
+                store.presentPremiumPaywall()
+            }
+        } label: {
+            HStack(spacing: 5) {
+                if paid || planLineIsGold {
+                    Image(systemName: "crown")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(SomaTokens.warn)
+                }
+                Text(planLineTitle)
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(planLineIsGold || paid ? SomaTokens.warn : SomaTokens.ink3)
+                Text(planLineSuffix)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SomaTokens.inkPlaceholder)
+            }
+            .padding(.top, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var planLineIsGold: Bool {
+        subscriptionManager.isInTrial || (appState.referralBonusUntil.map { $0 > Date() } ?? false)
+    }
+
+    private var planDaysLeft: Int? {
+        let target = subscriptionManager.isInTrial ? subscriptionManager.expirationDate : appState.referralBonusUntil
+        guard let target, target > Date() else { return nil }
+        return max(Int(ceil(target.timeIntervalSinceNow / 86400)), 1)
+    }
+
+    private var planLineTitle: String {
+        if subscriptionManager.isSubscribed && !subscriptionManager.isInTrial {
+            return String(localized: "profile.plan.premium", defaultValue: "Soma Premium", comment: "Plan line under the profile email while subscribed")
+        }
+        if subscriptionManager.isInTrial {
+            if let days = planDaysLeft {
+                return String(localized: "profile.plan.trialDays", defaultValue: "Free trial · \(days) days left", comment: "Plan line during the free trial, with days remaining")
+            }
+            return String(localized: "profile.plan.trial", defaultValue: "Free trial", comment: "Plan line during the free trial when days remaining are unknown")
+        }
+        if let days = planDaysLeft {
+            return String(localized: "profile.plan.bonusDays", defaultValue: "Free access · \(days) days left", comment: "Plan line while a referral/promo free-access bonus is active, with days remaining")
+        }
+        return String(localized: "profile.plan.free", defaultValue: "Free plan", comment: "Plan line under the profile email on the free plan")
+    }
+
+    private var planLineSuffix: String {
+        if subscriptionManager.isSubscribed && !subscriptionManager.isInTrial {
+            if let renewal = subscriptionManager.expirationDate {
+                return String(localized: "profile.plan.renews", defaultValue: "· renews \(renewal.formatted(date: .abbreviated, time: .omitted))", comment: "Suffix on the Premium plan line showing the next renewal date")
+            }
+            return ""
+        }
+        if subscriptionManager.isInTrial {
+            return String(localized: "profile.plan.subscribeSuffix", defaultValue: "· Subscribe", comment: "Tappable suffix on the trial plan line leading to the paywall")
+        }
+        return String(localized: "profile.plan.upgradeSuffix", defaultValue: "· Upgrade", comment: "Tappable suffix on the free/bonus plan line leading to the paywall")
     }
 
     private var identitySubtitle: String {
@@ -1541,6 +1652,8 @@ private struct AccountSettingsView: View {
     /// directly rather than going through ProfileStore.
     @State private var showAffirmationReminders = false
     @State private var affirmationRemindersOn = NotificationManager.shared.affirmationRemindersEnabled
+    /// App Review 5.1.1(v): in-app account deletion, pushed as its own page.
+    @State private var showDeleteAccount = false
 
     var body: some View {
         ScrollView {
@@ -1664,6 +1777,22 @@ private struct AccountSettingsView: View {
                 if store.savedConfirmation {
                     Text(String(localized: "profile.save.confirmation", defaultValue: "Saved.", comment: "Confirmation text shown briefly after a successful profile save")).font(.caption).foregroundStyle(SomaTokens.success)
                 }
+
+                // 5.1.1(v): easy to find, in account settings, destructive
+                // styling -- same quiet centered-text treatment as the
+                // hub's Sign out row, in danger rather than ink.
+                Button {
+                    showDeleteAccount = true
+                } label: {
+                    Text(String(localized: "profile.deleteAccount.row", defaultValue: "Delete account", comment: "Row in Account settings opening the account deletion page"))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(SomaTokens.danger)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(Text(String(localized: "profile.deleteAccount.rowHint", defaultValue: "Opens the page for permanently deleting your account", comment: "VoiceOver hint on the Delete account row")))
             }
             .padding(20)
         }
@@ -1681,6 +1810,9 @@ private struct AccountSettingsView: View {
         }
         .navigationDestination(isPresented: $showAffirmationReminders) {
             AffirmationRemindersView()
+        }
+        .navigationDestination(isPresented: $showDeleteAccount) {
+            DeleteAccountView()
         }
         // The 16c page writes straight to NotificationManager -- re-read
         // its On/Off when this page (re)appears so the row value tracks it.

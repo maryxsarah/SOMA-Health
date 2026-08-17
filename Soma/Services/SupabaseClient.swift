@@ -575,6 +575,23 @@ final class SupabaseClient {
         return Self.parsePostgRESTDate(iso)
     }
 
+    /// The caller's personal share code -- fetch-or-create via the
+    /// get-referral-code Edge Function ("show + share" scope; no owner
+    /// reward is granted automatically yet).
+    struct MyReferralCode: Decodable {
+        let code: String
+        let bonusDays: Int
+        let redemptionCount: Int
+    }
+
+    func fetchMyReferralCode() async throws -> MyReferralCode {
+        var request = try await authorizedRequest(path: "functions/v1/get-referral-code", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [:])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode(MyReferralCode.self, from: data)
+    }
+
     /// Calls the redeem-referral-code Edge Function; returns the new
     /// referral_bonus_until on success.
     func redeemReferralCode(_ code: String) async throws -> Date {
@@ -1124,13 +1141,18 @@ final class SupabaseClient {
     /// morning background pass, the widget, and the sheet share one
     /// generation. forceRegenerate ("New line") is bounded server-side to
     /// one manual regeneration a day on top of the automatic one.
-    func fetchOrGenerateDailyAffirmation(date: String, forceRegenerate: Bool = false) async throws -> DailyAffirmation {
+    /// `count` (1-10, 16b batch mode): still ONE generation request and one
+    /// quota unit -- the model returns all lines in a single call; the
+    /// first becomes today's line, the rest land in the user's list
+    /// server-side (source "generated").
+    func fetchOrGenerateDailyAffirmation(date: String, forceRegenerate: Bool = false, count: Int = 1) async throws -> DailyAffirmation {
         var request = try await authorizedRequest(path: "functions/v1/generate-affirmation", method: "POST", timeout: 120)
         var body: [String: Any] = [
             "date": date,
             "language": await currentAILanguageCode(),
         ]
         if forceRegenerate { body["forceRegenerate"] = true }
+        if count > 1 { body["count"] = min(count, 10) }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
@@ -1217,6 +1239,44 @@ final class SupabaseClient {
         let request = try await authorizedRequest(path: "rest/v1/user_affirmations?id=eq.\(id)", method: "DELETE")
         let (data, response) = try await urlSession.data(for: request)
         try assertSuccess(response, data: data)
+    }
+
+    // MARK: - Account deletion (App Review 5.1.1(v))
+
+    /// Identity providers on the current auth user ("apple", "google",
+    /// "email") -- DeleteAccountView uses this to decide whether Apple's
+    /// mandated token revocation (a fresh SIWA prompt) applies.
+    func fetchAuthProviders() async throws -> [String] {
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL)/auth/v1/user")!)
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        struct AuthUser: Decodable {
+            struct Identity: Decodable { let provider: String }
+            let identities: [Identity]?
+        }
+        return (try JSONDecoder().decode(AuthUser.self, from: data).identities ?? []).map(\.provider)
+    }
+
+    /// Full server-side erasure -- see supabase/functions/delete-account
+    /// for the order of operations (SIWA revocation, Storage, analytics,
+    /// DB, auth). The caller is resolved from the JWT server-side; the
+    /// only input is the fresh Apple authorization code (nil for
+    /// Google/email users). The caller MUST sign out locally on success --
+    /// the deleted account's JWT isn't instantly invalidated server-side.
+    func deleteAccount(appleAuthorizationCode: String?) async throws {
+        var request = try await authorizedRequest(path: "functions/v1/delete-account", method: "POST", timeout: 120)
+        var body: [String: Any] = [:]
+        if let appleAuthorizationCode { body["appleAuthorizationCode"] = appleAuthorizationCode }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        struct Response: Decodable { let deleted: Bool }
+        guard (try? JSONDecoder().decode(Response.self, from: data))?.deleted == true else {
+            throw SupabaseError.requestFailed(status: 500, message: "deletion not confirmed")
+        }
     }
 
     // MARK: - daily_recommendation
@@ -1543,18 +1603,16 @@ final class SupabaseClient {
         return Set(rows.map(\.date))
     }
 
-    /// Count of actual AI *workout* generations logged for `date` -- mirrors
-    /// the server's tiered quota check (generationLimits.ts's
-    /// WORKOUT_GENERATION_SOURCES). Must stay source-filtered the same way:
-    /// the server used to count every row in ai_generation_log with no
-    /// source filter, which silently consumed the daily workout-generation
-    /// quota on meal ratings/text parses/addon suggestions that log into
-    /// this same shared table. This client mirror had the identical bug --
-    /// counting every source made Home's scan row (and its "N generations
-    /// used" copy) lock out based on unrelated AI activity for the day, not
-    /// on actual workout generations.
+    /// Count of gym-photo scans generated for `date` -- mirrors the
+    /// server's per-source quota (generationLimits.ts): each feature has
+    /// its OWN independent daily cap (1 workout suggestion + 1 gym-photo
+    /// workout + 1 affirmation regeneration; annual tier 3 for the workout
+    /// features). This drives Home's SCAN row lock only, so it counts
+    /// exactly the gym_photo source -- counting any other source here
+    /// re-creates the old shared-bucket bug where unrelated AI activity
+    /// locked the scan row for the day.
     func fetchTodaysGenerationCount(date: String) async throws -> Int {
-        let path = "rest/v1/ai_generation_log?date=eq.\(date)&source=in.(suggestion,gym_photo)&select=id"
+        let path = "rest/v1/ai_generation_log?date=eq.\(date)&source=eq.gym_photo&select=id"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try assertSuccess(response, data: data)

@@ -28,6 +28,10 @@ final class SubscriptionManager: ObservableObject {
     /// Subscribed via an introductory (free-trial) offer -- drives the
     /// in-app "Upgrade now" highlight while the trial runs.
     @Published private(set) var isInTrial = false
+    /// Current entitlement's expiration: the trial's end while isInTrial,
+    /// otherwise the next renewal date -- feeds the status-row chip's
+    /// "TRIAL · N DAYS" countdown and 12b's "renews <date>" line.
+    @Published private(set) var expirationDate: Date?
 
     private var transactionListener: Task<Void, Never>?
 
@@ -45,6 +49,20 @@ final class SubscriptionManager: ObservableObject {
     }
 
     func refreshEntitlement() async {
+        // Fixture runs mock the entitlement (no StoreKit purchases exist
+        // in the simulator) -- still mirrors into Superwall, so paywall
+        // gating behaves exactly as it would for a real subscriber.
+        if let mock = UITestSupport.subscriptionMock {
+            isSubscribed = mock.isSubscribed
+            tier = mock.tier
+            isInTrial = mock.isInTrial
+            expirationDate = mock.isInTrial
+                ? Calendar.current.date(byAdding: .day, value: 3, to: Date())
+                : (mock.isSubscribed ? Calendar.current.date(byAdding: .day, value: 117, to: Date()) : nil)
+            mirrorSubscriptionStatusToSuperwall()
+            return
+        }
+
         // StoreKit has no direct "user cancelled" push -- this is the one
         // observable signal available: isSubscribed flipping true -> false
         // across a refresh (expired, revoked/refunded, or no longer in
@@ -69,6 +87,7 @@ final class SubscriptionManager: ObservableObject {
                 transaction.offerType
             }
             isInTrial = isSubscribed && offerType == .introductory
+            expirationDate = transaction.expirationDate
             updateSubscriptionTierRemote(tier)
             mirrorSubscriptionStatusToSuperwall()
             return
@@ -76,6 +95,7 @@ final class SubscriptionManager: ObservableObject {
         isSubscribed = false
         tier = "free"
         isInTrial = false
+        expirationDate = nil
         updateSubscriptionTierRemote("free")
         mirrorSubscriptionStatusToSuperwall()
     }

@@ -1,4 +1,5 @@
 import SuperwallKit
+import StoreKit
 import SwiftUI
 
 /// Screen 4 -- Home. No text input, no chat history, no voice button.
@@ -83,10 +84,9 @@ struct HomeView: View {
     @State private var scanStreak = 0
     /// Raw scan dates -- feeds the scan streak.
     @State private var scanDates: Set<String> = []
-    /// Actual AI *workout* generations logged today (suggestion + gym_photo
-    /// sources only, matching the server's WORKOUT_GENERATION_SOURCES) --
-    /// compared against the tier's daily limit to drive the scan row's
-    /// `locked` state. Must stay source-filtered -- see
+    /// Gym-photo scans generated today (gym_photo source only -- each AI
+    /// feature has its own independent daily cap now) -- compared against
+    /// the tier's daily limit to drive the scan row's `locked` state. See
     /// SupabaseClient.fetchTodaysGenerationCount's doc comment.
     @State private var todaysGenerationCount = 0
     /// Profile's weekly session target -- the week card's progress bar and
@@ -151,6 +151,8 @@ struct HomeView: View {
     /// inline refresh action's in-flight/limit state.
     @State private var todaysAffirmation: DailyAffirmation?
     @State private var showAffirmations = false
+    /// PRO chip tap (15a): the native manage-subscriptions sheet.
+    @State private var showManageSubscriptions = false
     @State private var affirmationSheetStartsEditing = false
     @State private var isRegeneratingAffirmation = false
     /// Streak tile tap -> the same share card Profile's streak section
@@ -471,6 +473,7 @@ struct HomeView: View {
                 affirmationEnabled: $affirmationWidgetEnabled
             )
         }
+        .manageSubscriptionsSheet(isPresented: $showManageSubscriptions)
         .sheet(isPresented: $showAffirmations, onDismiss: {
             affirmationSheetStartsEditing = false
             // The sheet can edit/regenerate today's line -- re-read so the
@@ -703,8 +706,34 @@ struct HomeView: View {
     /// status-bar stand-in. No time label: the real device status bar
     /// already shows one.
     private var settingsRow: some View {
-        HStack {
+        HStack(spacing: 8) {
             Spacer()
+            // 15a's gold plaque: PRO (paid) / N DAYS (promo bonus) /
+            // TRIAL · N DAYS (trial), immediately left of the ••• --
+            // plain free users see nothing here.
+            if let chipState = SubscriptionChipState.resolve(
+                isSubscribed: subscriptionManager.isSubscribed,
+                isInTrial: subscriptionManager.isInTrial,
+                expirationDate: subscriptionManager.expirationDate,
+                referralBonusUntil: appState.referralBonusUntil
+            ) {
+                SubscriptionStatusChip(state: chipState) {
+                    switch chipState {
+                    case .paid:
+                        showManageSubscriptions = true
+                    case .trial:
+                        // Entitled user -- view_premium's audience skips
+                        // them; see SuperwallDiagnostics.registerTrialUpgrade.
+                        SuperwallDiagnostics.registerTrialUpgrade { showManageSubscriptions = true }
+                    case .promoBonus:
+                        let handler = SuperwallDiagnostics.handler(placement: "view_premium")
+                        handler.onDismiss { _, result in
+                            WinBackOfferManager.maybePresentAfterDecline(result: result)
+                        }
+                        Superwall.shared.register(placement: "view_premium", handler: handler)
+                    }
+                }
+            }
             Button {
                 showProfile = true
             } label: {
@@ -1253,8 +1282,9 @@ struct HomeView: View {
         }
     }
 
-    /// Mirrors the server's tiered quota (generationLimits.ts): 3/day on
-    /// annual, 1/day otherwise -- an explicit product decision there.
+    /// Mirrors the server's tiered PER-SOURCE quota (generationLimits.ts):
+    /// 3/day on annual, 1/day otherwise, counted for gym_photo alone --
+    /// an explicit product decision there.
     private var dailyGenerationLimit: Int {
         SubscriptionManager.shared.tier == "annual" ? 3 : 1
     }
@@ -1410,11 +1440,8 @@ struct HomeView: View {
     private var trialUpgradeBanner: some View {
         Button {
             AnalyticsManager.shared.featureUsed(name: "trial_upgrade_banner")
-            let handler = SuperwallDiagnostics.handler(placement: "view_premium")
-            handler.onDismiss { _, result in
-                WinBackOfferManager.maybePresentAfterDecline(result: result)
-            }
-            Superwall.shared.register(placement: "view_premium", handler: handler)
+            // Same entitled-user routing as the status-row chip.
+            SuperwallDiagnostics.registerTrialUpgrade { showManageSubscriptions = true }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "sparkles")
@@ -1836,6 +1863,7 @@ struct HomeView: View {
                 .padding(.top, 3)
                 waterDropletRow
                 waterControlRow
+                    .padding(.top, 6)
             }
         }
     }

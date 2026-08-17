@@ -39,6 +39,10 @@ Deno.serve(async (req: Request) => {
     const date: string = body.date ?? new Date().toISOString().slice(0, 10);
     const languageCode = normalizeLanguageCode(body.language);
     const forceRegenerate = body.forceRegenerate === true;
+    // 16b batch mode: one generation request can produce up to 10 distinct
+    // lines -- still ONE quota unit and one Claude call. lines[0] becomes
+    // today's line; the rest are saved straight into the user's list.
+    const count = Math.min(Math.max(Math.trunc(Number(body.count) || 1), 1), 10);
 
     const supabase = serviceRoleClient();
 
@@ -107,7 +111,8 @@ Deno.serve(async (req: Request) => {
       ...(cached ? [cached.text] : []),
     ].filter(Boolean);
 
-    const text = await callClaude({
+    const lines = await callClaude({
+      count,
       goalLine: userRow?.training_emphasis
         ? `Their current goal direction is "${userRow.training_emphasis}" (cut = losing fat, bulk = gaining size, recomp = body composition, maintain = staying steady).`
         : "",
@@ -119,6 +124,8 @@ Deno.serve(async (req: Request) => {
         : "",
       language: languageName(body.language),
     });
+    const text = lines[0];
+    if (!text) throw new Error("model returned no lines");
 
     // 16b "your words are never discarded": a line the user EDITED is
     // auto-promoted into their list the moment a replacement generates.
@@ -144,12 +151,24 @@ Deno.serve(async (req: Request) => {
         { onConflict: "user_id,date" },
       );
     if (upsertError) throw new Error(`daily_affirmation upsert failed: ${upsertError.message}`);
+
+    // Batch extras -> the list (source "generated", in rotation), skipping
+    // anything the user already has verbatim.
+    const known = new Set((keptLines ?? []).map((r) => r.text));
+    const extras = lines.slice(1).filter((line) => line && line !== text && !known.has(line));
+    if (extras.length > 0) {
+      const { error: insertError } = await supabase
+        .from("user_affirmations")
+        .insert(extras.map((line) => ({ user_id: userId, text: line, source: "generated" })));
+      if (insertError) console.error(`user_affirmations batch insert failed: ${insertError.message}`);
+    }
     await logGeneration(supabase, userId, date, "affirmation");
 
     return jsonResponse({
       text,
       generatedAt,
       regenerationAvailable: await regenerationAllowed(),
+      extraSavedCount: extras.length,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -159,34 +178,37 @@ Deno.serve(async (req: Request) => {
 });
 
 interface ClaudeInput {
+  count: number;
   goalLine: string;
   dayLine: string;
   avoidLine: string;
   language: string;
 }
 
-async function callClaude(input: ClaudeInput): Promise<string> {
+async function callClaude(input: ClaudeInput): Promise<string[]> {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
   const schema = {
     type: "object",
-    properties: { text: { type: "string" } },
-    required: ["text"],
+    properties: { lines: { type: "array", items: { type: "string" } } },
+    required: ["lines"],
     additionalProperties: false,
   };
 
-  const prompt = `You write ONE short affirmation line for a fitness app user's day -- the kind of line that lands on a home-screen widget and in a gentle push notification.
+  const prompt = `You write ${input.count === 1 ? "ONE short affirmation line" : `${input.count} DISTINCT short affirmation lines`} for a fitness app user's day -- the kind of line that lands on a home-screen widget and in a gentle push notification.
 
 ${input.goalLine}
 ${input.dayLine}
 ${input.avoidLine}
 
-Rules for the line:
-- One sentence, at most 90 characters. Second person ("you"), present tense.
-- Warm and grounded -- a specific, human observation about effort, consistency, or rest. Think "You don't need a perfect day -- just ten honest minutes."
-- Never toxic positivity, never about weight/appearance, never a command barked at them, never clinical.
+Rules for every line:
+- A REAL affirmation: first person ("I ..."), present tense, stated as an owned truth -- e.g. "I am building strength with every honest effort." or "I show up for myself, even on slow days." Never advice, never a description of the user from outside, never a command.
+- One sentence, at most 90 characters.
+- Warm and grounded in effort, consistency, recovery, or self-respect -- specific enough to feel written, not a fortune cookie.
+- Never toxic positivity, never about weight/appearance, never clinical.
 - No emoji, no hashtags, no surrounding quotation marks, no exclamation-mark pileups.
+- Each line meaningfully different from the others in both wording and idea -- no rephrasings of the same thought.
 
-Return { text } with just the line. Write it in ${input.language}.`;
+Return { lines } with exactly ${input.count} line${input.count === 1 ? "" : "s"}. Write them in ${input.language}.`;
 
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
@@ -197,7 +219,7 @@ Return { text } with just the line. Write it in ${input.language}.`;
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 200,
+      max_tokens: 1000,
       output_config: { format: { type: "json_schema", schema } },
       messages: [{ role: "user", content: prompt }],
     }),
@@ -210,6 +232,6 @@ Return { text } with just the line. Write it in ${input.language}.`;
   // deno-lint-ignore no-explicit-any
   const textBlock = (json.content ?? []).find((b: any) => b.type === "text");
   if (!textBlock?.text) throw new Error("No text content in Anthropic response");
-  const parsed = JSON.parse(textBlock.text) as { text: string };
-  return parsed.text.trim();
+  const parsed = JSON.parse(textBlock.text) as { lines: string[] };
+  return parsed.lines.map((line) => line.trim()).filter(Boolean).slice(0, input.count);
 }

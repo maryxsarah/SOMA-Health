@@ -361,7 +361,7 @@ Deno.serve(async (req: Request) => {
       .eq("id", userId)
       .maybeSingle();
     const subscriptionTier = ((tierRow?.subscription_tier as SubscriptionTier | null) ?? "free");
-    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier);
+    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier, "suggestion");
     if (!limitCheck.allowed) {
       return jsonResponse({ date, generation_limit_reached: true, message: GENERATION_LIMIT_MESSAGE });
     }
