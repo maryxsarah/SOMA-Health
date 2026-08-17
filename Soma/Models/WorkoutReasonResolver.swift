@@ -1,9 +1,8 @@
 import Foundation
 
-/// Resolves the "why this workout today" text CompletedWorkoutView shows
-/// up front (never behind a SomaDisclosure -- this is the app's biggest
-/// post-workout trust moment). Never returns an empty string: every branch
-/// ends in real, honest copy.
+/// Resolves the text CompletedWorkoutView shows up front (never behind a
+/// SomaDisclosure -- this is the app's biggest post-workout trust moment).
+/// Never returns an empty string: every branch ends in real, honest copy.
 ///
 /// A persisted `log.reasonSnapshot` always wins outright -- it's frozen
 /// from the first time this resolver ever ran for that log (see the
@@ -12,39 +11,48 @@ import Foundation
 /// user is told about a workout they already did). This function is what
 /// computes that snapshot in the first place, via CompletedWorkoutView's
 /// lazy backfill, and what a legacy pre-migration row falls back to live.
+///
+/// Every source gets retrospective IMPACT copy (item 1 fix, completed):
+/// prescriptive "why was this suggested" copy never appears on a completed
+/// object -- a retrospective screen answers what it counted toward and how
+/// it changes tomorrow, not why a plan was picked. The day's forward
+/// rationale still lives where plans live (RecommendationDetailView's
+/// "Why this?" disclosure), frozen there by its own snapshot.
 enum WorkoutReasonResolver {
-    static func reason(for log: WorkoutLogEntry, recommendation: DailyRecommendation?, snapshots: [DailySnapshotRow]) -> String {
+    static func reason(for log: WorkoutLogEntry, recommendation: DailyRecommendation?, snapshots: [DailySnapshotRow], dayLoadState: DayLoadState) -> String {
         if let persisted = log.reasonSnapshot, !persisted.isEmpty {
             return persisted
         }
-        guard let recommendation else {
-            return fallback(source: log.source)
-        }
-        let explanation = recommendation.reason.explanation(snapshots: snapshots)
-        // ai_plan is literally what the recommendation produced -- the
-        // explanation alone is the whole story. Manual/device-detected
-        // sessions are real, but weren't the suggested plan, so the day's
-        // real readiness read is still true and worth showing -- it just
-        // needs an honest caveat that this specific session diverged from it.
-        guard log.source != "ai_plan" else { return explanation }
-        return explanation + " " + offPlanNote(source: log.source)
+        return impactNote(source: log.source, dayLoadState: dayLoadState)
     }
 
-    private static func offPlanNote(source: String) -> String {
+    /// Retrospective "what this did", not a plan-screen rationale --
+    /// internal (not private) so the log-time paths can freeze this exact
+    /// text into `reason_snapshot` the moment a workout is logged, instead
+    /// of waiting for CompletedWorkoutView's first-open backfill (spec:
+    /// rationale is frozen when the session is created, so a same-day
+    /// recommendation regeneration can never rewrite it).
+    static func impactNote(source: String, dayLoadState: DayLoadState) -> String {
         switch source {
-        case "manual": "You logged this yourself, outside today's suggested plan."
-        case "device_detected": "Detected automatically from a connected device, outside today's suggested plan."
-        default: "This wasn't today's suggested plan."
+        case "ai_plan":
+            switch dayLoadState {
+            case .fulfilled, .overreached:
+                return String(localized: "workoutReason.impact.aiPlan.done", defaultValue: "Today's plan, completed -- daily target met. Tomorrow's recommendation builds on this.", comment: "Completed workout: retrospective impact note for a completed AI-plan session that met today's activity target")
+            case .pending, .partiallyDone:
+                return String(localized: "workoutReason.impact.aiPlan.partial", defaultValue: "Today's plan, logged. Counted toward your weekly target -- tomorrow's recommendation builds on it.", comment: "Completed workout: retrospective impact note for a completed AI-plan session that didn't fully close today's activity target")
+            }
+        case "device_detected":
+            switch dayLoadState {
+            case .fulfilled, .overreached:
+                return String(localized: "workoutReason.impact.deviceDetected.done", defaultValue: "Counted toward your weekly volume. Tomorrow, Soma will lower the load -- you've already closed today's quota.", comment: "Completed workout: retrospective impact note for an auto-detected session that met or exceeded today's activity target")
+            case .pending, .partiallyDone:
+                return String(localized: "workoutReason.impact.deviceDetected.partial", defaultValue: "Detected automatically from a connected device, outside today's suggested plan. Counted toward your weekly volume.", comment: "Completed workout: retrospective impact note for an auto-detected session that didn't fully close today's activity target")
+            }
+        case "manual":
+            return String(localized: "workoutReason.impact.manual", defaultValue: "Your workout, outside Soma's plan. Counted in weekly load.", comment: "Completed workout: retrospective impact note for a manually-logged session")
+        default:
+            return String(localized: "workoutReason.impact.other", defaultValue: "This wasn't today's suggested plan. Counted in weekly load.", comment: "Completed workout: retrospective impact note for a session logged from an unrecognized source")
         }
     }
 
-    /// No daily_recommendation row exists at all for this log's date --
-    /// still an honest, specific line, never a blank card.
-    private static func fallback(source: String) -> String {
-        switch source {
-        case "manual": "You logged this yourself -- no readiness read is on file for this day."
-        case "device_detected": "Detected automatically from a connected device -- no readiness read is on file for this day."
-        default: "No readiness read is on file for this day."
-        }
-    }
 }

@@ -116,12 +116,6 @@ struct GoalStartView: View {
         .sheet(isPresented: $showFrequencySheet) {
             ScheduleRulesSheet(scheduleRule: $scheduleRule, scheduleDays: $scheduleDays, courtDays: $courtDays)
         }
-        .onChange(of: showFrequencySheet) { old, new in
-            NSLog("DIAG showFrequencySheet %@ -> %@", old ? "true" : "false", new ? "true" : "false")
-        }
-        .onChange(of: hasBaseline) { old, new in
-            NSLog("DIAG hasBaseline %@ -> %@", old ? "true" : "false", new ? "true" : "false")
-        }
     }
 
     private var header: some View {

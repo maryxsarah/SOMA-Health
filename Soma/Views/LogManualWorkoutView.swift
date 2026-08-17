@@ -80,12 +80,18 @@ struct LogManualWorkoutView: View {
                 // "Done", which uses .confirmationAction, not .cancellationAction
                 // (the latter renders leading and put this on the wrong side).
                 ToolbarItem(placement: .confirmationAction) {
+                    // 11c: Cancel is the quiet flat pill (white 0.55 + white
+                    // ring, no shadow) -- not the raised `.glassLens()`.
                     Button(String(localized: "logWorkout.cancel", defaultValue: "Cancel", comment: "Log-activity form: cancel button in the toolbar")) { dismiss() }
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(SomaTokens.accent)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .glassLens(cornerRadius: SomaTokens.rPill)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(0.55))
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+                        )
                 }
             }
         }
@@ -99,15 +105,14 @@ struct LogManualWorkoutView: View {
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(SomaTokens.ink)
 
-            TextField(String(localized: "logWorkout.title.placeholder", defaultValue: "e.g. Soccer training, Hot yoga, Volleyball", comment: "Log-activity form: placeholder for the activity title text field"), text: $title)
-                .textFieldStyle(.roundedBorder)
+            GlassTextField(placeholder: String(localized: "logWorkout.title.placeholder", defaultValue: "e.g. Soccer training, Hot yoga, Volleyball", comment: "Log-activity form: placeholder for the activity title text field"), text: $title)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(String(localized: "logWorkout.focus.label", defaultValue: "Focus", comment: "Log-activity form: label for the body-part-focus picker"))
                     .font(SomaType.eyebrow)
                     .tracking(0.6)
                     .textCase(.uppercase)
-                    .foregroundStyle(SomaTokens.ink3)
+                    .foregroundStyle(SomaTokens.ink4)
                 FlowLayout {
                     ForEach(Self.focusOptions, id: \.self) { part in
                         SomaChip(title: LocalizedStringKey(part.displayName), isSelected: bodyPart == part) {
@@ -122,7 +127,7 @@ struct LogManualWorkoutView: View {
                     .font(SomaType.eyebrow)
                     .tracking(0.6)
                     .textCase(.uppercase)
-                    .foregroundStyle(SomaTokens.ink3)
+                    .foregroundStyle(SomaTokens.ink4)
                 FlowLayout {
                     ForEach(Self.intensityOptions, id: \.self) { intensity in
                         SomaChip(title: LocalizedStringKey(intensity.displayTitle), isSelected: category == intensity) {
@@ -156,12 +161,12 @@ struct LogManualWorkoutView: View {
                     DatePicker("", selection: $date, in: ...Date(), displayedComponents: .date)
                         .tint(SomaTokens.accent)
                 }
-                Divider().overlay(SomaTokens.hairline)
+                Divider().overlay(SomaTokens.ink.opacity(0.06))
                 whenRow(label: String(localized: "logWorkout.startTime.label", defaultValue: "Start time", comment: "Log-activity form: label for the start-time picker"), valueText: Self.timeFormatter.string(from: startTime)) {
                     DatePicker("", selection: $startTime, displayedComponents: .hourAndMinute)
                         .tint(SomaTokens.accent)
                 }
-                Divider().overlay(SomaTokens.hairline)
+                Divider().overlay(SomaTokens.ink.opacity(0.06))
                 durationRow
             }
 
@@ -177,12 +182,26 @@ struct LogManualWorkoutView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(SomaTokens.ink)
             Spacer()
+            // 11c: value pills use the flat chip recipe (white 0.55 + two
+            // rings + one small shadow), not the raised `.glassLens()`.
             Text(valueText)
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(SomaTokens.accent)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 7)
-                .glassLens(cornerRadius: SomaTokens.rPill)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(0.55))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+                        .overlay(
+                            Capsule().stroke(
+                                Color(red: 120 / 255, green: 150 / 255, blue: 220 / 255).opacity(0.18),
+                                lineWidth: 1
+                            )
+                            .padding(-0.5)
+                        )
+                        .shadow(color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.12), radius: 2.5, x: 0, y: 2)
+                )
         }
         .padding(.vertical, 10)
         .accessibilityHidden(true)
@@ -242,9 +261,7 @@ struct LogManualWorkoutView: View {
             Text(String(localized: "logWorkout.section.notes", defaultValue: "Notes (optional)", comment: "Log-activity form: header for the optional notes section"))
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(SomaTokens.ink)
-            TextField(String(localized: "logWorkout.notes.placeholder", defaultValue: "Anything worth remembering", comment: "Log-activity form: placeholder for the optional free-text notes field"), text: $notes, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...3)
+            GlassTextField(placeholder: String(localized: "logWorkout.notes.placeholder", defaultValue: "Anything worth remembering", comment: "Log-activity form: placeholder for the optional free-text notes field"), text: $notes, minLines: 1)
         }
     }
 
@@ -269,7 +286,8 @@ struct LogManualWorkoutView: View {
                 feedback: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,
                 startedAt: startedAt,
                 endedAt: endedAt,
-                source: "manual"
+                source: "manual",
+                reasonSnapshot: WorkoutReasonResolver.impactNote(source: "manual", dayLoadState: .pending)
             )
             dismiss()
         } catch {

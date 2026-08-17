@@ -98,6 +98,7 @@ enum UITestSupport {
         defaults.set(true, forKey: "dashboardWidget.sleep")
         defaults.set(true, forKey: "dashboardWidget.dailyTasks")
         defaults.set(true, forKey: "dashboardWidget.mood")
+        defaults.set(true, forKey: "dashboardWidget.nutrition")
         defaults.set(true, forKey: "dashboardWidget.sportGoal")
         defaults.set(false, forKey: "dashboardWidget.photoProgress")
     }
@@ -446,6 +447,56 @@ enum FixtureData {
         }
     }
 
+    /// ~5 weeks of past workouts so the history calendar isn't empty on
+    /// manual fixture runs; none today, Home still offers "Start workout".
+    static var pastWorkoutLogs: [[String: Any]] {
+        let entries: [(daysAgo: Int, title: String, bodyPart: String, category: String)] = [
+            (1, "Lower body strength", "legs", "moderate"),
+            (2, "Recovery mobility", "full_body", "light"),
+            (4, "Upper body push", "chest", "moderate"),
+            (6, "Lower body power", "legs", "push_hard"),
+            (8, "Zone 2 run", "full_body", "light"),
+            (10, "Full body strength", "full_body", "moderate"),
+            (13, "Upper body pull", "back", "moderate"),
+            (15, "Plyo + core", "legs", "push_hard"),
+            (18, "Recovery mobility", "full_body", "light"),
+            (20, "Lower body strength", "legs", "moderate"),
+            (23, "Upper body push", "chest", "moderate"),
+            (25, "Zone 2 run", "full_body", "light"),
+            (28, "Full body strength", "full_body", "moderate"),
+            (31, "Lower body power", "legs", "push_hard"),
+            (34, "Upper body pull", "back", "moderate"),
+        ]
+        return entries.enumerated().map { index, entry in
+            // "source" is REQUIRED by WorkoutLogEntry's synthesized Codable --
+            // one row without it fails the whole array's decode, and the
+            // callers' `try?` swallows that into an empty-looking history.
+            ["id": "wl-hist-\(index)",
+             "date": day(fromNow: -entry.daysAgo),
+             "title": entry.title,
+             "body_part": entry.bodyPart,
+             "category": entry.category,
+             "source": "ai_plan",
+             "calories_estimated": false,
+             "completed_at": iso(daysAgo: entry.daysAgo)]
+        }
+    }
+
+    /// Matching daily_recommendation history (fetchRecentRecommendations)
+    /// so past calendar days carry a category, not just workout dots.
+    static func recommendationHistory(days: Int = 40) -> [[String: Any]] {
+        (1...days).map { daysAgo in
+            ["date": day(fromNow: -daysAgo),
+             "category": ["moderate", "light", "push_hard", "rest"][daysAgo % 4],
+             "message": "Solid day for quality work.",
+             "reason": "healthkit_medium",
+             "data_confidence": "high",
+             "sleep_cap_applied": false,
+             "injury_cap_applied": false,
+             "load_cap_applied": false]
+        }
+    }
+
     /// Three past sessions for the coach's-task hub ("3 of 16"); none today,
     /// so Home still offers "Start workout".
     static var customGoalPastLogs: [[String: Any]] {
@@ -455,6 +506,8 @@ enum FixtureData {
              "title": "Coach Alex's task",
              "body_part": "legs",
              "category": "moderate",
+             "source": "ai_plan",
+             "calories_estimated": false,
              "completed_at": iso(daysAgo: daysAgo)]
         }
     }
@@ -726,6 +779,16 @@ final class FixtureURLProtocol: URLProtocol {
                 "user": ["id": "00000000-0000-0000-0000-0000000000fe", "email": requestBody["email"] as? String ?? "demo@example.com"],
             ] as [String: Any], 200)
 
+        // Plain fixture mode: sign-in/sign-up/refresh succeed offline with
+        // the SEEDED user id (not the demo one), so manual login works too.
+        case path.hasSuffix("/auth/v1/token") || path.hasSuffix("/auth/v1/signup"):
+            return ([
+                "access_token": "fixture-access-token",
+                "refresh_token": "fixture-refresh-token",
+                "expires_in": 10 * 365 * 86400,
+                "user": ["id": "00000000-0000-0000-0000-0000000000ff", "email": requestBody["email"] as? String ?? "fixture@example.com"],
+            ] as [String: Any], 200)
+
         // Catalog. Sport goals are live to everyone now (status='live'),
         // so the fixture always serves it -- no opt-in gate to model.
         case path.hasSuffix("/rest/v1/sports"):
@@ -784,9 +847,11 @@ final class FixtureURLProtocol: URLProtocol {
             }
             return (["parsed": FixtureData.parsedAssignment, "confidence": 0.92, "lowConfidence": false], 200)
 
-        // Home data
+        // Home data. Both real query shapes carry a date filter (eq or
+        // gte/lte), so day-filtering serves today AND history correctly.
         case path.hasSuffix("/rest/v1/daily_recommendation"):
-            return ([FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory)], 200)
+            let todayRow = FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory)
+            return (filterByDate(FixtureData.recommendationHistory() + [todayRow], query: query), 200)
         case path.hasSuffix("/rest/v1/daily_snapshot"):
             guard let source = SleepSourceFixture.current else { return ([], 200) }
             return ([[
@@ -840,11 +905,14 @@ final class FixtureURLProtocol: URLProtocol {
                 "title": requestBody["title"] as? String ?? "Workout",
                 "body_part": requestBody["body_part"] as? String ?? "full_body",
                 "category": requestBody["category"] as? String ?? "moderate",
+                "source": requestBody["source"] as? String ?? "ai_plan",
+                "calories_estimated": false,
                 "completed_at": FixtureData.iso(daysAgo: 0),
             ])
             return ([:] as [String: Any], 201)
         case path.contains("/rest/v1/workout_log"):
-            let seeded = scenario == .customGoalWeek2 ? FixtureData.customGoalPastLogs : []
+            // Custom-goal journeys keep exactly 3 seeded logs ("3 of 16").
+            let seeded = scenario == .customGoalWeek2 ? FixtureData.customGoalPastLogs : FixtureData.pastWorkoutLogs
             return (filterByDate(seeded + Self.loggedWorkouts, query: query), 200)
 
         // Paywall bypass: far-future referral bonus means the detail sheet

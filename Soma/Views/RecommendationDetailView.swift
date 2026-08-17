@@ -16,6 +16,13 @@ struct RecommendationDetailView: View {
     @State private var todaySteps: Double?
     @State private var profile: UserProfile = .empty
     @State private var loggedTitlesToday: Set<String> = []
+    /// Sum of caloriesBurned across today's logged workouts, when any are
+    /// known -- feeds the same DayLoadState computation HomeView's
+    /// readinessCard uses, so this sheet's pick card agrees with Home about
+    /// whether today's already done (item 2 fix). Nil (not zero) when
+    /// nothing's logged, or nothing logged has a resolved calorie number
+    /// yet -- DayLoadState treats that the same as "logged, unknown load".
+    @State private var todaysLoggedCalories: Int?
     @State private var recentBodyPartCounts: [BodyPartFocus: Int] = [:]
     @State private var shuffleSeed: UInt64 = 0
     @State private var selectedTitle: String?
@@ -88,25 +95,62 @@ struct RecommendationDetailView: View {
     /// model, so once true the day's pick is locked in.
     private var isCompletedToday: Bool { !loggedTitlesToday.isEmpty }
 
+    /// Same DayLoadState computation HomeView's readinessCard uses, kept in
+    /// sync so this sheet never contradicts what Home already showed
+    /// (item 2 fix).
+    private var dayLoadState: DayLoadState {
+        DayLoadState.resolve(
+            hasLoggedWorkout: isCompletedToday,
+            loggedKcal: todaysLoggedCalories,
+            target: recommendation.category.dayLoadTargetKcal
+        )
+    }
+
+    /// Same copy as HomeView.readinessHeadline, kept identical so the sheet
+    /// never contradicts the card it was opened from.
+    private var headerHeadline: String {
+        switch dayLoadState {
+        case .pending, .partiallyDone:
+            return recommendation.category.displayTitle
+        case .fulfilled:
+            return String(localized: "home.readiness.fulfilled.headline", defaultValue: "Done for today", comment: "Home: readiness card headline once today's logged activity has met the day's target")
+        case .overreached:
+            return String(localized: "home.readiness.overreached.headline", defaultValue: "Plenty today", comment: "Home: readiness card headline once today's logged activity is well past the day's target")
+        }
+    }
+
+    private var headerSubtitle: String {
+        switch dayLoadState {
+        case .pending:
+            return recommendation.message
+        case .partiallyDone:
+            let logged = todaysLoggedCalories ?? 0
+            let target = recommendation.category.dayLoadTargetKcal
+            return String(localized: "home.readiness.partiallyDone.subtitle", defaultValue: "You've logged \(logged) of \(target) kcal today. A light session would finish it off.", comment: "Home: readiness card subtitle once some, but not enough, of today's activity target is logged; both numbers are kcal")
+        case .fulfilled:
+            if let calories = todaysLoggedCalories, calories > 0 {
+                return String(localized: "home.readiness.fulfilled.subtitleWithCalories", defaultValue: "\(calories) kcal logged. Daily target met.", comment: "Home: readiness card subtitle once today's activity target is met, with a real calorie number")
+            }
+            return String(localized: "home.readiness.fulfilled.subtitle", defaultValue: "Today's activity is logged. Daily target met.", comment: "Home: readiness card subtitle once today's activity target is met, no calorie number available")
+        case .overreached:
+            return String(localized: "home.readiness.overreached.subtitle", defaultValue: "Today's already a lot. Tomorrow will be easier.", comment: "Home: readiness card subtitle once today's logged activity is well past the day's target")
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // 11a: this sheet had no visible dismiss affordance at all
-                // (swipe-down only) -- a back chevron + "TODAY" eyebrow row,
-                // same glass-circle recipe as the step pill/section icons.
-                topNavRow
-
                 // Guide 04 header sheet: serif category, ONE line of
                 // guidance, then a row pairing the "Why this?" disclosure
                 // with the step tracker pill. The prose that used to fill
                 // the top 40% of the screen now lives in the disclosure.
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(recommendation.category.displayTitle)
+                    Text(headerHeadline)
                         .font(SomaType.screenTitle)
-                    Text(recommendation.message)
+                    Text(headerSubtitle)
                         .font(.system(size: 14))
                         .foregroundStyle(SomaTokens.ink2)
-                        .lineLimit(2)
+                        .lineLimit(3)
                     SomaDisclosure {
                         whyDisclosureBody
                     } triggerAccessory: {
@@ -182,25 +226,51 @@ struct RecommendationDetailView: View {
 
                         if isCompletedToday {
                             // 13c: the house gel-gold-on-amber-surface
-                            // treatment, same recipe as the generation-limit
-                            // nudge below (rXL card, tinted fill) instead of
-                            // plain text -- this is the one badge on the
-                            // whole screen that reads "you're done," so it
-                            // gets a bit more visual weight than a caption.
+                            // treatment -- a 30pt amber gel disc (not a flat
+                            // system-yellow circle) on the amber nudge
+                            // surface, deep-amber text -- this is the one
+                            // badge on the whole screen that reads "you're
+                            // done," so it gets a bit more visual weight
+                            // than a caption.
                             HStack(spacing: 10) {
                                 Image(systemName: "crown.fill")
                                     .font(.system(size: 13, weight: .bold))
                                     .foregroundStyle(.white)
-                                    .frame(width: 28, height: 28)
-                                    .background(Circle().fill(Color.yellow.gradient))
+                                    .frame(width: 30, height: 30)
+                                    .background(
+                                        Circle()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color(red: 245 / 255, green: 205 / 255, blue: 120 / 255).opacity(0.95),
+                                                        SomaTokens.warn.opacity(0.95)
+                                                    ],
+                                                    startPoint: .top, endPoint: .bottom
+                                                )
+                                            )
+                                            .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 1))
+                                            .overlay(
+                                                Circle().strokeBorder(
+                                                    LinearGradient(
+                                                        stops: [
+                                                            .init(color: .white.opacity(0.6), location: 0),
+                                                            .init(color: .white.opacity(0), location: 0.5)
+                                                        ],
+                                                        startPoint: .top, endPoint: .bottom
+                                                    ),
+                                                    lineWidth: 1.5
+                                                )
+                                            )
+                                            .shadow(color: SomaTokens.warn.opacity(0.3), radius: 4.5, x: 0, y: 4)
+                                    )
                                 Text(String(localized: "recommendationDetail.completedBadge", defaultValue: "Workout completed today", comment: "Badge shown once today's workout has been marked complete"))
                                     .font(.system(size: 13.5, weight: .bold))
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(Color(red: 0x9A / 255, green: 0x6A / 255, blue: 0x15 / 255))
                                 Spacer(minLength: 0)
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 11)
-                            .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(Color.orange.opacity(0.12)))
+                            .background(amberSurface(cornerRadius: 18))
                             .padding(.top, 10)
 
                             if isFetchingAddons {
@@ -215,10 +285,11 @@ struct RecommendationDetailView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(String(localized: "recommendationDetail.addonSuggestions.title", defaultValue: "Ideas for next time, based on your feedback", comment: "Header above the list of follow-up workout ideas"))
                                         .font(.caption.bold())
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(SomaTokens.ink3)
                                     ForEach(addonSuggestions, id: \.self) { suggestion in
                                         Text(String(localized: "recommendationDetail.addonSuggestions.bullet", defaultValue: "• \(suggestion)", comment: "One bulleted follow-up workout idea; placeholder is the server-provided suggestion text"))
                                             .font(.caption)
+                                            .foregroundStyle(SomaTokens.inkParagraph)
                                     }
                                 }
                                 .padding(.top, 6)
@@ -233,10 +304,32 @@ struct RecommendationDetailView: View {
                             }
 
                             if addedToPlan {
-                                Label(String(localized: "recommendationDetail.addedToPlanBadge", defaultValue: "Added to today's plan", comment: "Badge confirming the AI plan was added to today's plan"), systemImage: "checkmark.circle.fill")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(.green)
-                                    .padding(.top, 4)
+                                // 13a: a 20pt green gel disc + success-toned
+                                // bold line, not a flat SF checkmark label.
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 9, weight: .heavy))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 20, height: 20)
+                                        .background(
+                                            Circle()
+                                                .fill(
+                                                    LinearGradient(
+                                                        colors: [
+                                                            Color(red: 94 / 255, green: 200 / 255, blue: 150 / 255).opacity(0.9),
+                                                            SomaTokens.success.opacity(0.92)
+                                                        ],
+                                                        startPoint: .top, endPoint: .bottom
+                                                    )
+                                                )
+                                                .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 1))
+                                                .shadow(color: SomaTokens.success.opacity(0.28), radius: 3.5, x: 0, y: 3)
+                                        )
+                                    Text(String(localized: "recommendationDetail.addedToPlanBadge", defaultValue: "Added to today's plan", comment: "Badge confirming the AI plan was added to today's plan"))
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(SomaTokens.success)
+                                }
+                                .padding(.top, 4)
                             } else if let addToPlanError {
                                 Text(addToPlanError)
                                     .font(.caption)
@@ -250,9 +343,15 @@ struct RecommendationDetailView: View {
                             // makes the field scroll its own text once full,
                             // which fights the outer ScrollView's drag when
                             // you touch down over the text itself.
-                            TextField(String(localized: "recommendationDetail.feedbackField.placeholder", defaultValue: "Feedback for next time (optional)", comment: "Placeholder for the optional post-workout feedback text field"), text: $feedbackText, axis: .vertical)
-                                .textFieldStyle(.roundedBorder)
-                                .lineLimit(2...)
+                            TextField(
+                                "",
+                                text: $feedbackText,
+                                prompt: Text(String(localized: "recommendationDetail.feedbackField.placeholder", defaultValue: "Feedback for next time (optional)", comment: "Placeholder for the optional post-workout feedback text field"))
+                                    .foregroundStyle(SomaTokens.inkPlaceholder),
+                                axis: .vertical
+                            )
+                            .lineLimit(2...)
+                            .glassInput(cornerRadius: SomaTokens.rRow)
                                 .padding(.top, 8)
                         }
                     } else if isLoadingAIPlan {
@@ -308,8 +407,22 @@ struct RecommendationDetailView: View {
                 }
             }
             .padding(20)
-            .padding(.bottom, 90)
+            // A fixed safety margin, not a value sized to clear bottomBar --
+            // bottomBar reserves its OWN exact space via the safeAreaInset
+            // below (and reserves none at all once isCompletedToday, when
+            // it renders nothing), so double-padding for its height here
+            // was pure guesswork that either wasted scroll distance or (once
+            // completed) left content sitting right at the edge.
+            .padding(.bottom, 24)
         }
+        // 11a: this sheet had no visible dismiss affordance at all (swipe-
+        // down only) -- a back chevron + "TODAY" eyebrow row, same glass-
+        // circle recipe as the step pill/section icons. Pinned via
+        // safeAreaInset(.top) rather than living inside the ScrollView's
+        // own VStack -- as scroll content, it used to scroll away instead
+        // of staying put like a real nav bar, which is what read as the
+        // previous screen's own header showing through on top.
+        .safeAreaInset(edge: .top) { topNavRow }
         .safeAreaInset(edge: .bottom) { bottomBar }
         .somaSheetBackground()
         .task {
@@ -337,6 +450,17 @@ struct RecommendationDetailView: View {
             Spacer()
             Color.clear.frame(width: 40, height: 40)
         }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .background {
+            LinearGradient(
+                colors: [SomaTokens.surface.opacity(0.98), SomaTokens.surface.opacity(0.98), SomaTokens.surface.opacity(0)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .padding(.bottom, -20)
+            .allowsHitTesting(false)
+        }
     }
 
     /// Small glass-circle icon badge -- same recipe as `topNavRow`'s
@@ -349,21 +473,42 @@ struct RecommendationDetailView: View {
             .glassLens(cornerRadius: SomaTokens.rPill)
     }
 
+    /// 13a/13c's amber nudge surface -- soft warn-toned gradient with an
+    /// inset amber hairline, never a flat system-orange fill.
+    private func amberSurface(cornerRadius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        SomaTokens.warnSoft,
+                        Color(red: 240 / 255, green: 190 / 255, blue: 100 / 255).opacity(0.08)
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color(red: 240 / 255, green: 190 / 255, blue: 100 / 255).opacity(0.25), lineWidth: 1)
+            )
+    }
+
     /// 13a: replaces the old plain-red error text for a generation-limit
     /// hit with a calm amber nudge + a real "Upgrade" action -- the server
     /// message itself is shown verbatim (it already spells out the current
-    /// tier's quota and reset timing), only the container changes.
+    /// tier's quota and reset timing), only the container changes. Icon
+    /// disc is solid `warn`, body copy the design's muted amber-brown --
+    /// system orange appears nowhere in this recipe.
     private func generationLimitNudge(_ message: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 20, height: 20)
-                .background(Circle().fill(.orange))
+                .background(Circle().fill(SomaTokens.warn))
                 .padding(.top, 1)
             Text(message)
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Color(red: 0x8A / 255, green: 0x75 / 255, blue: 0x50 / 255))
             Spacer(minLength: 8)
             Button {
                 Superwall.shared.register(placement: "view_premium")
@@ -376,7 +521,7 @@ struct RecommendationDetailView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(Color.orange.opacity(0.12)))
+        .background(amberSurface(cornerRadius: SomaTokens.rRow))
         .padding(.top, 4)
     }
 
@@ -392,6 +537,16 @@ struct RecommendationDetailView: View {
 
     private var whyDisclosureBody: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Item 4 fix: the collapsed message line above is capped short
+            // server-side and may have dropped the specific "why a cap
+            // applied" clause -- messageDetail is the uncapped version of
+            // that same sentence, so it still surfaces here rather than
+            // disappearing. Nil for rows written before this column
+            // existed, or when there was nothing more to add beyond the
+            // (already short) message itself.
+            if let messageDetail = recommendation.messageDetail, !messageDetail.isEmpty {
+                Text(messageDetail)
+            }
             Text(explanationText)
             Text(stepTargetText)
                 .font(.system(size: 12.5))
@@ -620,14 +775,27 @@ struct RecommendationDetailView: View {
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(SomaTokens.success)
                     .padding(.top, 1)
-                Text(isCompletedToday
-                    ? String(localized: "recommendationDetail.pickStatus.completed", defaultValue: "Today's pick, completed.", comment: "Pick-card status line once today's workout has been logged as complete")
-                    : aiPlan != nil
-                        ? String(localized: "recommendationDetail.pickStatus.planReady", defaultValue: "Exact sets, weights and how to do each one — ready below.", comment: "Pick-card status line once an AI plan has been generated")
-                        : String(localized: "recommendationDetail.pickStatus.planPending", defaultValue: "Exact sets, weights and how to do each one — built when you start.", comment: "Pick-card status line before an AI plan has been generated"))
+                Text(pickStatusText)
                     .font(.caption)
                     .foregroundStyle(SomaTokens.ink3)
             }
+        }
+    }
+
+    /// Extends the old binary isCompletedToday check with the graded
+    /// DayLoadState -- "completed" alone didn't distinguish "closed
+    /// today's quota" from "already went well past it" (item 2 fix).
+    private var pickStatusText: String {
+        guard isCompletedToday else {
+            return aiPlan != nil
+                ? String(localized: "recommendationDetail.pickStatus.planReady", defaultValue: "Exact sets, weights and how to do each one — ready below.", comment: "Pick-card status line once an AI plan has been generated")
+                : String(localized: "recommendationDetail.pickStatus.planPending", defaultValue: "Exact sets, weights and how to do each one — built when you start.", comment: "Pick-card status line before an AI plan has been generated")
+        }
+        switch dayLoadState {
+        case .overreached:
+            return String(localized: "recommendationDetail.pickStatus.overreached", defaultValue: "Today's pick, completed — and then some.", comment: "Pick-card status line once today's workout is logged well past the day's target")
+        default:
+            return String(localized: "recommendationDetail.pickStatus.completed", defaultValue: "Today's pick, completed.", comment: "Pick-card status line once today's workout has been logged as complete")
         }
     }
 
@@ -672,7 +840,7 @@ struct RecommendationDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
-        .glassCardFlat(cornerRadius: SomaTokens.rMD)
+        .glassCardFlat(cornerRadius: SomaTokens.rTile)
     }
 
     // MARK: - Alternatives (guide 04: single-line rows, choosing opens it)
@@ -994,7 +1162,8 @@ struct RecommendationDetailView: View {
                 feedback: trimmedFeedback.isEmpty ? nil : trimmedFeedback,
                 planSnapshot: aiPlan,
                 startedAt: planStartedAt,
-                endedAt: planStartedAt != nil ? Date() : nil
+                endedAt: planStartedAt != nil ? Date() : nil,
+                reasonSnapshot: WorkoutReasonResolver.impactNote(source: "ai_plan", dayLoadState: dayLoadState)
             )
             loggedTitlesToday.insert(selectedTitle)
             // The evening reminder exists to nudge an UNlogged workout --
@@ -1068,6 +1237,8 @@ struct RecommendationDetailView: View {
         injurySubstitutions = await injurySubstitutionsFetch
         let todaysLogs = await todaysLogsFetch
         loggedTitlesToday = Set(todaysLogs.map(\.title))
+        let todaysCalories = todaysLogs.compactMap(\.caloriesBurned)
+        todaysLoggedCalories = todaysCalories.isEmpty ? nil : todaysCalories.reduce(0, +)
         recentBodyPartCounts = await recentLogsFetch.compactMap { BodyPartFocus(rawValue: $0.bodyPart) }
             .reduce(into: [:]) { counts, bodyPart in counts[bodyPart, default: 0] += 1 }
 
@@ -1193,6 +1364,7 @@ private struct SeededGenerator: RandomNumberGenerator {
             date: "2026-07-21",
             category: .light,
             message: "Take it easier today — a short walk, mobility work, or light yoga (20-30 min) is ideal.",
+            messageDetail: nil,
             reason: .healthkitMedium,
             sleepCapApplied: false,
             injuryCapApplied: false,

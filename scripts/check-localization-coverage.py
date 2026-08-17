@@ -29,6 +29,22 @@ Usage:
   scripts/check-localization-coverage.py path1 path2 scope to specific files/dirs
 
 Exit code 1 if anything is missing/incomplete (for CI use later, per O-21).
+
+Third check (added after BUG-127, see docs/bug-log.md): a `String`-typed
+(not LocalizedStringKey) struct/property holding a hardcoded literal, later
+read back via `Text(x.field)`. `Text(String)` is SwiftUI's *verbatim*
+initializer -- it never does a catalog lookup, so no amount of fixing the
+.xcstrings file helps here; the field itself has to become
+LocalizedStringKey/String(localized:). Neither of the two checks above can
+see this (they only look at literals passed directly at a call site) --
+HowSomaWorksTourView.swift's whole Card.description/whereToFind text shipped
+in English-only for this exact reason and was invisible to both this
+script's original two checks and to the raw_string_return SwiftLint rule
+(that only flags `return "literal"`, not a struct field initializer).
+Flags only when all three co-occur in one file: a literal assigned to
+`name:` in some initializer, a `let/var name: String` declaration for that
+same field name, and a `Text(something.name)` call reading it back --
+keeps false positives low without any cross-file type tracking.
 """
 import json
 import re
@@ -47,7 +63,7 @@ POSITIONAL_CALLS = [
     "Picker", "SomaButton", "SomaChip", "ToolbarItem", "Toggle",
 ]
 NAMED_PARAMS = [
-    "title", "subtitle", "label", "headline", "eyebrow", "text", "sub",
+    "title", "subtitle", "subtext", "label", "headline", "eyebrow", "text", "sub",
     "prompt", "placeholder", "closedLabel", "openLabel", "ringUnit",
 ]
 
@@ -60,6 +76,12 @@ NAV_TITLE_RE = re.compile(r'\.navigationTitle\(\s*' + STRING_LIT + r'\)')
 NAMED_PARAM_RE = re.compile(
     r'\b(?:' + "|".join(NAMED_PARAMS) + r'):\s*' + STRING_LIT
 )
+
+# Third check: literal text stored in a String-typed field, later read back
+# through Text() -- see module docstring for why this needs its own check.
+STRING_FIELD_DECL_RE = re.compile(r'\b(?:let|var)\s+(\w+)\s*:\s*String\??(?!\s*\{)')
+ANY_NAMED_LITERAL_RE = re.compile(r'\b(\w+)\s*:\s*' + STRING_LIT)
+TEXT_OF_FIELD_RE = re.compile(r'\bText\(\s*\w+\.(\w+)\s*\)')
 
 SF_SYMBOL_RE = re.compile(r'^[a-z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)+$')  # "flame.fill"
 FORMAT_ONLY_RE = re.compile(r'^[%\d\s./:\-]+$')  # "%.1f", "%02d", "/ 8"
@@ -142,6 +164,29 @@ def scan_file(path, rel_path):
     return hits
 
 
+def scan_verbatim_text_fields(path):
+    """Third check -- see module docstring. Returns (field_name, literal, line_no)."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    text = strip_previews(text)
+    text = strip_interpolated(text)
+
+    declared_string_fields = {m.group(1) for m in STRING_FIELD_DECL_RE.finditer(text)}
+    text_field_reads = {m.group(1) for m in TEXT_OF_FIELD_RE.finditer(text)}
+    at_risk = declared_string_fields & text_field_reads
+
+    hits = []
+    for m in ANY_NAMED_LITERAL_RE.finditer(text):
+        name = m.group(1)
+        if name not in at_risk:
+            continue
+        literal = unescape(m.group(2))
+        if is_noise(literal) or " " not in literal:
+            continue
+        line_no = text.count("\n", 0, m.start()) + 1
+        hits.append((name, literal, line_no))
+    return hits
+
+
 def main():
     args = [a for a in sys.argv[1:] if a != "--json"]
     as_json = "--json" in sys.argv[1:]
@@ -159,6 +204,7 @@ def main():
         elif target.is_dir():
             swift_files.extend(sorted(target.rglob("*.swift")))
 
+    verbatim_hits = []  # (rel_path, field, literal, line_no)
     for path in swift_files:
         rel = path.relative_to(REPO_ROOT)
         if any(part in {"Tests", "SnapshotTests", "UITests", "DerivedData"} for part in rel.parts):
@@ -168,6 +214,8 @@ def main():
             entry["sites"].append(f"{rel}:{line_no}")
             if kind == "localized_call":
                 entry["kind"] = "localized_call"  # localized_call wins if seen via both paths
+        for field, literal, line_no in scan_verbatim_text_fields(path):
+            verbatim_hits.append((str(rel), field, literal, line_no))
 
     identifier_shaped = re.compile(r'^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)+$')
     for key, entry in findings.items():
@@ -194,7 +242,11 @@ def main():
 
     if as_json:
         out = {k: {**v, "missing_langs": sorted(v["missing_langs"]), "sites": v["sites"]} for k, v in problems.items()}
-        print(json.dumps(out, ensure_ascii=False, indent=2))
+        verbatim_out = [
+            {"file": f, "field": field, "literal": literal, "line": line_no}
+            for f, field, literal, line_no in verbatim_hits
+        ]
+        print(json.dumps({"catalog_gaps": out, "verbatim_text_fields": verbatim_out}, ensure_ascii=False, indent=2))
     else:
         if not problems:
             print(f"OK -- {len(findings)} distinct localizable strings checked, all fully translated.")
@@ -215,7 +267,16 @@ def main():
                     print(f"      {sites}{more}")
                 print()
 
-    sys.exit(1 if problems else 0)
+        if verbatim_hits:
+            print(f"=== VERBATIM TEXT FIELD ({len(verbatim_hits)}) ===")
+            print("Text() reads these back with NO catalog lookup at all -- fixing")
+            print("Localizable.xcstrings won't help; the field itself must become")
+            print("LocalizedStringKey or be built with String(localized:).\n")
+            for f, field, literal, line_no in sorted(verbatim_hits, key=lambda h: (h[0], h[3])):
+                print(f"  {f}:{line_no} .{field} = {literal!r}")
+            print()
+
+    sys.exit(1 if (problems or verbatim_hits) else 0)
 
 
 if __name__ == "__main__":

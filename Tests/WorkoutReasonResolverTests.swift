@@ -13,7 +13,7 @@ final class WorkoutReasonResolverTests: XCTestCase {
 
     private func recommendation(reason: RecommendationReason) -> DailyRecommendation {
         DailyRecommendation(
-            date: "2026-08-09", category: .moderate, message: "Test message", reason: reason,
+            date: "2026-08-09", category: .moderate, message: "Test message", messageDetail: nil, reason: reason,
             sleepCapApplied: false, injuryCapApplied: false, loadCapApplied: false,
             consecutiveDaysCapApplied: false, injuryProtocolCapApplied: false, injuryProtocolModerateCapApplied: false,
             pregnancyCapApplied: false, volumeCapApplied: false, hrvCapApplied: false, stressCapApplied: false,
@@ -26,56 +26,76 @@ final class WorkoutReasonResolverTests: XCTestCase {
 
     func testPersistedSnapshotWinsOutrightOverLiveRecommendation() {
         let entry = log(source: "ai_plan", reasonSnapshot: "Frozen from log time.")
-        let result = WorkoutReasonResolver.reason(for: entry, recommendation: recommendation(reason: .whoopHigh), snapshots: [])
+        let result = WorkoutReasonResolver.reason(for: entry, recommendation: recommendation(reason: .whoopHigh), snapshots: [], dayLoadState: .fulfilled)
         XCTAssertEqual(result, "Frozen from log time.")
     }
 
-    // MARK: - ai_plan uses the recommendation's own explanation, verbatim
+    // MARK: - ai_plan gets retrospective impact copy too (item 1,
+    // completed): prescriptive "why was this suggested" text never appears
+    // on a finished session, whatever its source.
 
-    func testAIPlanUsesRecommendationExplanationDirectly() {
+    func testAIPlanGetsImpactCopyNotThePrescriptiveExplanation() {
         let entry = log(source: "ai_plan")
-        let result = WorkoutReasonResolver.reason(for: entry, recommendation: recommendation(reason: .healthkitLow), snapshots: [])
-        XCTAssertEqual(result, RecommendationReason.healthkitLow.explanationTemplate)
+        let result = WorkoutReasonResolver.reason(for: entry, recommendation: recommendation(reason: .healthkitLow), snapshots: [], dayLoadState: .fulfilled)
+        XCTAssertFalse(result.contains(RecommendationReason.healthkitLow.explanation(snapshots: [])))
+        XCTAssertTrue(result.contains("daily target met"))
     }
 
-    // MARK: - manual/device_detected get the real readiness read PLUS an
-    // honest note that this specific session wasn't the suggested plan
+    func testAIPlanPartialGetsTheCountedTowardCopy() {
+        let entry = log(source: "ai_plan")
+        let result = WorkoutReasonResolver.reason(for: entry, recommendation: nil, snapshots: [], dayLoadState: .partiallyDone)
+        XCTAssertTrue(result.contains("Counted toward your weekly target"))
+    }
 
-    func testManualLogWithRecommendationAppendsOffPlanNote() {
+    // MARK: - manual/device_detected get retrospective impact copy, never
+    // the prescriptive "why was this suggested" explanation (item 1 fix --
+    // that explanation describes a DIFFERENT session these logs weren't).
+
+    func testManualLogNeverShowsThePrescriptiveExplanation() {
         let entry = log(source: "manual")
-        let result = WorkoutReasonResolver.reason(for: entry, recommendation: recommendation(reason: .healthkitLow), snapshots: [])
-        XCTAssertTrue(result.hasPrefix(RecommendationReason.healthkitLow.explanationTemplate))
-        XCTAssertTrue(result.contains("outside today's suggested plan"))
+        let result = WorkoutReasonResolver.reason(for: entry, recommendation: recommendation(reason: .healthkitLow), snapshots: [], dayLoadState: .fulfilled)
+        XCTAssertFalse(result.contains(RecommendationReason.healthkitLow.explanation(snapshots: [])))
+        XCTAssertTrue(result.contains("outside Soma's plan"))
     }
 
-    func testDeviceDetectedLogWithRecommendationAppendsOffPlanNote() {
+    func testDeviceDetectedFulfilledMentionsClosingTodaysQuota() {
         let entry = log(source: "device_detected")
-        let result = WorkoutReasonResolver.reason(for: entry, recommendation: recommendation(reason: .healthkitLow), snapshots: [])
+        let result = WorkoutReasonResolver.reason(for: entry, recommendation: recommendation(reason: .healthkitLow), snapshots: [], dayLoadState: .fulfilled)
+        XCTAssertFalse(result.contains(RecommendationReason.healthkitLow.explanation(snapshots: [])))
+        XCTAssertTrue(result.contains("closed today's quota"))
+    }
+
+    func testDeviceDetectedOverreachedAlsoGetsTheDoneCopy() {
+        let entry = log(source: "device_detected")
+        let result = WorkoutReasonResolver.reason(for: entry, recommendation: nil, snapshots: [], dayLoadState: .overreached)
+        XCTAssertTrue(result.contains("closed today's quota"))
+    }
+
+    func testDeviceDetectedPartiallyDoneGetsTheOffPlanNoteInstead() {
+        let entry = log(source: "device_detected")
+        let result = WorkoutReasonResolver.reason(for: entry, recommendation: nil, snapshots: [], dayLoadState: .partiallyDone)
         XCTAssertTrue(result.contains("Detected automatically from a connected device"))
+        XCTAssertFalse(result.contains("closed today's quota"))
     }
 
-    // MARK: - No recommendation row at all for that date -- never empty
+    // MARK: - manual/device_detected never depend on recommendation being
+    // present at all -- impact copy is derived purely from source + dayLoadState.
 
-    func testManualLogWithNoRecommendationGetsHonestFallback() {
+    func testManualLogWithNoRecommendationStillGetsHonestImpactCopy() {
         let entry = log(source: "manual")
-        let result = WorkoutReasonResolver.reason(for: entry, recommendation: nil, snapshots: [])
+        let result = WorkoutReasonResolver.reason(for: entry, recommendation: nil, snapshots: [], dayLoadState: .fulfilled)
         XCTAssertFalse(result.isEmpty)
-        XCTAssertTrue(result.contains("You logged this yourself"))
+        XCTAssertTrue(result.contains("outside Soma's plan"))
     }
 
-    func testDeviceDetectedLogWithNoRecommendationGetsHonestFallback() {
-        let entry = log(source: "device_detected")
-        let result = WorkoutReasonResolver.reason(for: entry, recommendation: nil, snapshots: [])
-        XCTAssertFalse(result.isEmpty)
-        XCTAssertTrue(result.contains("Detected automatically"))
-    }
+    // MARK: - ai_plan with no recommendation row at all -- never empty
 
     func testAIPlanWithNoRecommendationStillReturnsNonEmptyFallback() {
         // Not reachable in practice (an ai_plan log implies a
         // recommendation existed), but the resolver must never return an
         // empty string regardless of source.
         let entry = log(source: "ai_plan")
-        let result = WorkoutReasonResolver.reason(for: entry, recommendation: nil, snapshots: [])
+        let result = WorkoutReasonResolver.reason(for: entry, recommendation: nil, snapshots: [], dayLoadState: .fulfilled)
         XCTAssertFalse(result.isEmpty)
     }
 }

@@ -161,6 +161,44 @@ final class HealthKitManager {
         }
     }
 
+    /// Per-day step totals over a range -- feeds the history calendar's
+    /// "perfect day" crown, which needs to know whether the step goal was
+    /// hit on a *past* day, not just today. Keyed by "yyyy-MM-dd".
+    func fetchDailySteps(from start: Date, to end: Date) async -> [String: Double] {
+        guard Self.isAvailable, let stepType = HKObjectType.quantityType(forIdentifier: .stepCount) else {
+            return [:]
+        }
+        let calendar = Calendar.current
+        let anchor = calendar.startOfDay(for: start)
+        let predicate = HKQuery.predicateForSamples(withStart: anchor, end: end, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsCollectionQuery(
+                quantityType: stepType,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum,
+                anchorDate: anchor,
+                intervalComponents: DateComponents(day: 1)
+            )
+            query.initialResultsHandler = { _, results, _ in
+                guard let results else {
+                    continuation.resume(returning: [:])
+                    return
+                }
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd"
+                formatter.timeZone = .current
+                var byDate: [String: Double] = [:]
+                results.enumerateStatistics(from: anchor, to: end) { stats, _ in
+                    guard let sum = stats.sumQuantity() else { return }
+                    byDate[formatter.string(from: stats.startDate)] = sum.doubleValue(for: .count())
+                }
+                continuation.resume(returning: byDate)
+            }
+            store.execute(query)
+        }
+    }
+
     /// Today's workout sessions actually recorded in Apple Health -- feeds
     /// Home's workout timeline alongside the server-fetched Oura/Whoop
     /// sessions (HealthKit can only be read on-device, never from a

@@ -95,6 +95,21 @@ enum ExperienceLevel: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// One recurring weekly commitment (item 6: `UserProfile.anchorSessions`
+/// is a list of these, up to 5, stored as the `users.anchor_sessions`
+/// jsonb column -- not a normal snake_case table column, so these keys are
+/// the literal jsonb shape, not a wire-convention mapping). `days` reuses
+/// the 0=Sun..6=Sat (JS getUTCDay) convention every other schedule-days
+/// field in this app already uses. `timeOfDay` is optional free text
+/// ("morning"/"evening"/"7:00 AM") -- MVP scope deliberately doesn't parse
+/// or validate it beyond that.
+struct AnchorSession: Codable, Equatable, Identifiable {
+    var id: String
+    var name: String
+    var days: [Int]
+    var timeOfDay: String? = nil
+}
+
 /// Mirrors the profile-related columns on `users`. Contact email is
 /// display-only profile info -- the app still signs in only via Sign in
 /// with Apple, this never becomes a password/login credential.
@@ -211,15 +226,14 @@ struct UserProfile: Codable, Equatable {
     /// case here for anyone not yet analyzed).
     var bodyPhotoEmphasisTags: [GoalTag]? = nil
     var trainingEmphasis: TrainingEmphasis? = nil
-    /// A recurring class/activity (e.g. "Hot Yoga") the rest of the week
-    /// gets built around -- Phase 4 (see
-    /// docs/coaching-personalization-plan.md). Editable here, unlike
-    /// weightKg/desiredWeightKg above -- there's no reason to lock it once
-    /// set, same reasoning as heightCm. nil name = no anchor session set.
-    var anchorSessionName: String? = nil
-    /// 0=Sun..6=Sat (JS getUTCDay), same convention SportGoals'
-    /// scheduleDays already uses server-side.
-    var anchorSessionDays: [Int] = []
+    /// Up to 5 recurring classes/activities (e.g. "Hot Yoga") the rest of
+    /// the week gets built around -- Phase 4 (see
+    /// docs/coaching-personalization-plan.md). Item 6 fix: was a single
+    /// name/days pair; real feedback is that anyone with a weekly schedule
+    /// almost always has more than one recurring commitment. Editable
+    /// here, unlike weightKg/desiredWeightKg above -- there's no reason to
+    /// lock it once set, same reasoning as heightCm.
+    var anchorSessions: [AnchorSession] = []
     /// Read-only, server-assigned at account creation -- the journey
     /// "start date" the goal-progress bar counts elapsed days from. Not a
     /// plan-start date (there isn't a separate one), but close enough: for
@@ -265,8 +279,7 @@ struct UserProfile: Codable, Equatable {
         case createdAt = "created_at"
         case bodyPhotoEmphasisTags = "body_photo_emphasis_tags"
         case trainingEmphasis = "training_emphasis"
-        case anchorSessionName = "anchor_session_name"
-        case anchorSessionDays = "anchor_session_days"
+        case anchorSessions = "anchor_sessions"
     }
 
     /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.

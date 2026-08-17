@@ -36,7 +36,7 @@ import { describePregnancyGuidance } from "../_shared/pregnancyGuidance.ts";
 import { describeVolumeGuidance, type ExperienceLevel } from "../_shared/volumeLandmarks.ts";
 import { describeRirGuidance } from "./rirGuidance.ts";
 import { decideShapingGoalGuidance } from "./shapingGoalGuidance.ts";
-import { describeAnchorSession } from "./anchorSessionGuidance.ts";
+import { describeAnchorSessions } from "./anchorSessionGuidance.ts";
 import { describeSexAwareConsiderations, describeSexAwareGoalDoseConsideration } from "./sexAwareGuidance.ts";
 import { type CyclePhaseResult, deriveCyclePhase } from "../_shared/cyclePhaseGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
@@ -214,12 +214,11 @@ interface UserRow {
   /// is 42 degrees celsius, SOMA should not recommend a run outside."
   country: string | null;
   city: string | null;
-  /// Phase 4 (docs/coaching-personalization-plan.md): a recurring class/
-  /// activity the rest of the week gets built around, set at onboarding or
-  /// from ProfileView. Null name = no anchor session set. See
-  /// anchorSessionGuidance.ts for how these two feed the prompt.
-  anchor_session_name: string | null;
-  anchor_session_days: number[] | null;
+  /// Phase 4 (docs/coaching-personalization-plan.md): up to 5 recurring
+  /// classes/activities the rest of the week gets built around, set at
+  /// onboarding or from ProfileView (item 6 fix: was a single name/days
+  /// pair). See anchorSessionGuidance.ts for how this feeds the prompt.
+  anchor_sessions: { id: string; name: string; days: number[] }[] | null;
   /// Phase 5 (docs/coaching-personalization-plan.md): opt-in cycle-phase
   /// tracking, set only from ProfileView (never onboarding, same posture
   /// as pregnancy/pregnancy_week). Null date = not opted in. See
@@ -379,8 +378,21 @@ Deno.serve(async (req: Request) => {
     // goal-state change that arrived after the fact.
     const cachedGoalSignature =
       ((cached?.plan as { goal_signature?: string | null } | undefined)?.goal_signature) ?? null;
-    // Absent (pre-existing cached plans) is treated as compatible, same
-    // "don't know, allow it" rule as a null goal signature above.
+    // Unlike goal_signature/injury_signature below, a language mismatch is
+    // NEVER waved through by cachedSelectionLogged, and a null (pre-existing)
+    // cached language is NOT treated as compatible either -- those other
+    // fields default to "don't know, trust it" because an unknown goal/
+    // injury state has no clear right answer, but a plan in the wrong
+    // language is unambiguously wrong, full stop, logged or not. The app's
+    // own language switcher tells the user to force-quit and relaunch to
+    // "finish switching" (ProfileView's profile.language.restartAlert) --
+    // that promise has to hold for AI-generated content too, not just the
+    // static catalog strings a relaunch already picks up. In practice this
+    // only fires right after such a relaunch (the client doesn't change its
+    // request language mid-session), so it doesn't fight the "don't
+    // regenerate over a logged workout" protection the other two checks
+    // exist for. See generate-gym-workout's equipment_signature for the same
+    // fix baked directly into that cache's key instead.
     const cachedLanguage = ((cached?.plan as { language?: string | null } | undefined)?.language) ?? null;
     const cachedSelectionLogged = (existingLogs ?? []).some((log) => log.title === selection.title);
     // Deliberately stricter than the goal-signature null-passes rule above:
@@ -398,7 +410,7 @@ Deno.serve(async (req: Request) => {
       cached && cached.selected_title === selection.title &&
       (cachedSelectionLogged || !forceRegenerate) &&
       (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged) &&
-      (cachedLanguage === null || cachedLanguage === languageCode || cachedSelectionLogged) &&
+      cachedLanguage === languageCode &&
       injurySignatureOk
     ) {
       return jsonResponse({ date, category: cached.category, source: cached.source, ...cached.plan });
@@ -444,7 +456,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_session_name, anchor_session_days, last_period_start_date, typical_cycle_length_days")
+      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_sessions, last_period_start_date, typical_cycle_length_days")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -584,11 +596,7 @@ Deno.serve(async (req: Request) => {
     // independent of the goal-work machinery above (no user_goal row
     // needed), so it's computed here rather than inside that `if (goalRow)`
     // block.
-    const anchorSessionLine = describeAnchorSession({
-      name: (userRow as UserRow | null)?.anchor_session_name ?? null,
-      days: (userRow as UserRow | null)?.anchor_session_days ?? [],
-      date,
-    });
+    const anchorSessionLine = describeAnchorSessions((userRow as UserRow | null)?.anchor_sessions ?? [], date);
 
     // Phase 5 (docs/coaching-personalization-plan.md): null whenever the
     // user hasn't opted in (no last_period_start_date) or the projection

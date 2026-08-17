@@ -71,14 +71,14 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function callClaude(text: string, language: string): Promise<MealEstimate> {
+async function callClaude(text: string, _language: string): Promise<MealEstimate> {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
   const prompt = `A fitness app user just typed what they ate: "${text}"
 
 Estimate its nutrition as realistically as you can. When the user didn't give amounts, assume typical realistic portion sizes (e.g. "a chicken breast" ≈ 150g cooked, "a bowl of rice" ≈ 1 cup cooked, "a coffee with milk" ≈ a splash of milk, not a full cup). If they described multiple items, sum the whole meal into one total.
 
 Return:
-- label: a short, cleaned-up version of what they described (under 8 words, title case, no calorie/macro numbers in it), written in ${language} regardless of what language the user typed in -- unless it's a specific dish/brand name better left as-is
+- label: a short version of what they described (under 8 words, no calorie/macro numbers in it), keeping the user's own language, wording and capitalization -- never convert it to Title Case, never translate a name they typed themselves
 - calories: total kcal for the whole meal, whole number
 - proteinG, carbsG, fatG: total grams for the whole meal, whole numbers
 

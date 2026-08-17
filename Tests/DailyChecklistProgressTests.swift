@@ -108,7 +108,7 @@ final class DailyChecklistProgressTests: XCTestCase {
         var inputs = DailyChecklistProgress.OnboardingInputs(
             hasGoalsAndWeight: true, kitchenEquipmentAcknowledged: true, healthKitConnected: true,
             notificationsEnabled: true, hasReviewedFirstPlan: true, hasLoggedFirstWorkout: true,
-            hasLoggedFirstMeal: true, hasSeenHowSomaWorks: false
+            hasLoggedFirstMeal: true, hasSeenHowSomaWorks: false, hasChosenWidgets: true
         )
         XCTAssertFalse(DailyChecklistProgress.isOnboardingComplete(inputs))
         inputs.hasSeenHowSomaWorks = true

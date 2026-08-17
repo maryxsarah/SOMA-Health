@@ -401,7 +401,8 @@ struct DayDetailView: View {
                 title: plannedPlan.selectedTitle,
                 bodyPart: bodyPart,
                 category: plannedPlan.category,
-                planSnapshot: plannedPlan.plan
+                planSnapshot: plannedPlan.plan,
+                reasonSnapshot: WorkoutReasonResolver.impactNote(source: "ai_plan", dayLoadState: .pending)
             )
             await load()
         } catch {
