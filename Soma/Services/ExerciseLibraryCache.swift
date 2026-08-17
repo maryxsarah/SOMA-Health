@@ -70,6 +70,27 @@ extension SupabaseClient {
         return "name:\(name)"
     }
 
+    /// The exact PostgREST path fetchExerciseLibraryEntry requests -- pulled
+    /// out to its own testable, network-free function after a real bug
+    /// class showed up in it: real exercise_library names contain slashes
+    /// ("Adductor/Groin"), apostrophes ("Farmer's Walk"), and parentheses
+    /// ("Butt Lift (Bridge)"), none of which `.urlQueryAllowed` escapes
+    /// (they're all legal "sub-delims" in the generic URL query grammar),
+    /// so getting this wrong wouldn't throw -- it would silently 404-shaped
+    /// "no row found" for exactly the exercises whose names happen to need
+    /// it. Verified round-tripping through the real PostgREST endpoint for
+    /// all three character classes above (2026-08-15); see
+    /// ExerciseLibraryLookupTests for the coverage this doesn't re-fetch
+    /// live every run.
+    static func exerciseLibraryLookupPath(libraryId: String?, name: String) -> String {
+        if let libraryId, !libraryId.isEmpty {
+            let encodedId = libraryId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? libraryId
+            return "rest/v1/exercise_library?id=eq.\(encodedId)&select=*&limit=1"
+        }
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        return "rest/v1/exercise_library?name=eq.\(encodedName)&select=*&limit=1"
+    }
+
     /// Fire-and-forget prefetch for every exercise in a freshly-rendered
     /// plan -- called once from AIWorkoutPlanView.task so most detail-sheet
     /// opens hit a warm row+image cache instead of starting cold. Errors

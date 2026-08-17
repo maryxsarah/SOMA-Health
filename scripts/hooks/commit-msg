@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# commit-msg hook: enforce Conventional Commits on the subject line.
+#
+# Rejects any commit whose first line doesn't match:
+#
+#   type(scope?): subject
+#
+# where type is one of: feat fix refactor test docs chore perf build ci
+#
+# This is the checked-in source of truth. It's installed by symlinking it
+# into .git/hooks/commit-msg -- run scripts/install-hooks.sh once per clone
+# (.git/hooks/ isn't tracked by git, so this file has no effect until then).
+#
+# Plain POSIX sh on purpose: this repo has no Node/npm dependency and
+# git invokes hooks directly, so there's no need for one (e.g. husky).
+#
+# Bypass for a single commit when you really need to (merge conflicts
+# resolved by a tool, an emergency hotfix, etc.): git commit --no-verify
+
+commit_msg_file="$1"
+first_line=$(head -n 1 "$commit_msg_file")
+
+# Merge commits (git merge) and revert commits (git revert) are generated
+# by git itself in a fixed format that doesn't follow this convention --
+# don't block them.
+case "$first_line" in
+    "Merge "* | "Revert "*)
+        exit 0
+        ;;
+esac
+
+pattern='^(feat|fix|refactor|test|docs|chore|perf|build|ci)(\([a-zA-Z0-9_./-]+\))?: .+'
+
+if ! echo "$first_line" | grep -Eq "$pattern"; then
+    echo "commit-msg: rejected -- subject line must match 'type(scope?): subject'" >&2
+    echo "  type must be one of: feat fix refactor test docs chore perf build ci" >&2
+    echo "  got:                 $first_line" >&2
+    echo "" >&2
+    echo "  examples:" >&2
+    echo "    feat(sport-goals): add re-test flow to GoalHubView" >&2
+    echo "    fix(healthkit): stop double-counting overlapping sleep sources" >&2
+    echo "    docs: add deployment runbook" >&2
+    echo "" >&2
+    echo "  bypass for this one commit (use sparingly): git commit --no-verify" >&2
+    exit 1
+fi
+
+exit 0

@@ -575,6 +575,23 @@ final class SupabaseClient {
         return Self.parsePostgRESTDate(iso)
     }
 
+    /// The caller's personal share code -- fetch-or-create via the
+    /// get-referral-code Edge Function ("show + share" scope; no owner
+    /// reward is granted automatically yet).
+    struct MyReferralCode: Decodable {
+        let code: String
+        let bonusDays: Int
+        let redemptionCount: Int
+    }
+
+    func fetchMyReferralCode() async throws -> MyReferralCode {
+        var request = try await authorizedRequest(path: "functions/v1/get-referral-code", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [:])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode(MyReferralCode.self, from: data)
+    }
+
     /// Calls the redeem-referral-code Edge Function; returns the new
     /// referral_bonus_until on success.
     func redeemReferralCode(_ code: String) async throws -> Date {
@@ -592,6 +609,62 @@ final class SupabaseClient {
             throw SupabaseError.requestFailed(status: 0, message: "Invalid date in response")
         }
         return date
+    }
+
+    /// Plain read via RLS, same shape as fetchReferralBonusUntil above --
+    /// used to frequency-cap the exit-intent win-back offer (WinBackOfferManager).
+    func fetchExitOfferShownAt(id: String) async throws -> Date? {
+        let path = "rest/v1/users?id=eq.\(id)&select=exit_offer_shown_at&limit=1"
+        var request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+
+        struct Row: Decodable {
+            let exit_offer_shown_at: String?
+        }
+        let rows = try JSONDecoder().decode([Row].self, from: data)
+        guard let iso = rows.first?.exit_offer_shown_at else { return nil }
+        return Self.parsePostgRESTDate(iso)
+    }
+
+    /// Fire-and-forget, best-effort, same trust model as updateSubscriptionTier
+    /// above -- this is a frequency-cap soft limit, not a security boundary
+    /// (see the migration's own comment). Called the moment the offer paywall
+    /// actually presents, not merely when it's requested.
+    func markExitOfferShown() async throws {
+        guard let userId = currentUserID else { return }
+        var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "id": userId,
+            "exit_offer_shown_at": ISO8601DateFormatter().string(from: Date()),
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    /// Calls the sign-promotional-offer Edge Function; returns a compact
+    /// JWS suitable for `Product.PurchaseOption.promotionalOffer(_:compactJWS:)`.
+    /// See WinBackOfferManager -- this is deliberately NOT routed through
+    /// Superwall.shared.purchase() (SomaPurchaseController), since
+    /// SuperwallKit 4.16.1's own StoreKit 2 purchase path never inserts a
+    /// `.promotionalOffer`/`.winBackOffer` PurchaseOption (confirmed against
+    /// ProductPurchaserSK2.swift in the pinned SDK checkout).
+    /// `transactionId` is optional but Apple-recommended (their own
+    /// PromotionalOfferV2SignatureCreator accepts it even for a customer
+    /// who's never purchased anything, via AppTransaction's appTransactionID)
+    /// -- omit rather than guess if the caller couldn't obtain one.
+    func signPromotionalOffer(productID: String, offerID: String, transactionID: String?) async throws -> String {
+        var request = try await authorizedRequest(path: "functions/v1/sign-promotional-offer", method: "POST")
+        var body: [String: Any] = ["productId": productID, "offerId": offerID]
+        body["transactionId"] = transactionID
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+
+        struct Response: Decodable { let compactJWS: String }
+        return try JSONDecoder().decode(Response.self, from: data).compactJWS
     }
 
     private static func parsePostgRESTDate(_ string: String) -> Date? {
@@ -1068,13 +1141,18 @@ final class SupabaseClient {
     /// morning background pass, the widget, and the sheet share one
     /// generation. forceRegenerate ("New line") is bounded server-side to
     /// one manual regeneration a day on top of the automatic one.
-    func fetchOrGenerateDailyAffirmation(date: String, forceRegenerate: Bool = false) async throws -> DailyAffirmation {
+    /// `count` (1-10, 16b batch mode): still ONE generation request and one
+    /// quota unit -- the model returns all lines in a single call; the
+    /// first becomes today's line, the rest land in the user's list
+    /// server-side (source "generated").
+    func fetchOrGenerateDailyAffirmation(date: String, forceRegenerate: Bool = false, count: Int = 1) async throws -> DailyAffirmation {
         var request = try await authorizedRequest(path: "functions/v1/generate-affirmation", method: "POST", timeout: 120)
         var body: [String: Any] = [
             "date": date,
             "language": await currentAILanguageCode(),
         ]
         if forceRegenerate { body["forceRegenerate"] = true }
+        if count > 1 { body["count"] = min(count, 10) }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
@@ -1161,6 +1239,44 @@ final class SupabaseClient {
         let request = try await authorizedRequest(path: "rest/v1/user_affirmations?id=eq.\(id)", method: "DELETE")
         let (data, response) = try await urlSession.data(for: request)
         try assertSuccess(response, data: data)
+    }
+
+    // MARK: - Account deletion (App Review 5.1.1(v))
+
+    /// Identity providers on the current auth user ("apple", "google",
+    /// "email") -- DeleteAccountView uses this to decide whether Apple's
+    /// mandated token revocation (a fresh SIWA prompt) applies.
+    func fetchAuthProviders() async throws -> [String] {
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL)/auth/v1/user")!)
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        struct AuthUser: Decodable {
+            struct Identity: Decodable { let provider: String }
+            let identities: [Identity]?
+        }
+        return (try JSONDecoder().decode(AuthUser.self, from: data).identities ?? []).map(\.provider)
+    }
+
+    /// Full server-side erasure -- see supabase/functions/delete-account
+    /// for the order of operations (SIWA revocation, Storage, analytics,
+    /// DB, auth). The caller is resolved from the JWT server-side; the
+    /// only input is the fresh Apple authorization code (nil for
+    /// Google/email users). The caller MUST sign out locally on success --
+    /// the deleted account's JWT isn't instantly invalidated server-side.
+    func deleteAccount(appleAuthorizationCode: String?) async throws {
+        var request = try await authorizedRequest(path: "functions/v1/delete-account", method: "POST", timeout: 120)
+        var body: [String: Any] = [:]
+        if let appleAuthorizationCode { body["appleAuthorizationCode"] = appleAuthorizationCode }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        struct Response: Decodable { let deleted: Bool }
+        guard (try? JSONDecoder().decode(Response.self, from: data))?.deleted == true else {
+            throw SupabaseError.requestFailed(status: 500, message: "deletion not confirmed")
+        }
     }
 
     // MARK: - daily_recommendation
@@ -1487,10 +1603,16 @@ final class SupabaseClient {
         return Set(rows.map(\.date))
     }
 
-    /// Total AI generations logged for `date` across ALL sources -- mirrors
-    /// the server's tiered quota check (generationLimits.ts counts every row).
+    /// Count of gym-photo scans generated for `date` -- mirrors the
+    /// server's per-source quota (generationLimits.ts): each feature has
+    /// its OWN independent daily cap (1 workout suggestion + 1 gym-photo
+    /// workout + 1 affirmation regeneration; annual tier 3 for the workout
+    /// features). This drives Home's SCAN row lock only, so it counts
+    /// exactly the gym_photo source -- counting any other source here
+    /// re-creates the old shared-bucket bug where unrelated AI activity
+    /// locked the scan row for the day.
     func fetchTodaysGenerationCount(date: String) async throws -> Int {
-        let path = "rest/v1/ai_generation_log?date=eq.\(date)&select=id"
+        let path = "rest/v1/ai_generation_log?date=eq.\(date)&source=eq.gym_photo&select=id"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try assertSuccess(response, data: data)
@@ -1512,14 +1634,7 @@ final class SupabaseClient {
             return cached
         }
 
-        let path: String
-        if let libraryId, !libraryId.isEmpty {
-            let encodedId = libraryId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? libraryId
-            path = "rest/v1/exercise_library?id=eq.\(encodedId)&select=*&limit=1"
-        } else {
-            let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
-            path = "rest/v1/exercise_library?name=eq.\(encodedName)&select=*&limit=1"
-        }
+        let path = Self.exerciseLibraryLookupPath(libraryId: libraryId, name: name)
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try assertSuccess(response, data: data)

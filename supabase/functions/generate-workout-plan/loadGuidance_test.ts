@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
-import { buildLoadGuidance, loadFractionRange } from "./loadGuidance.ts";
+import { buildLoadGuidance, loadFractionRange, twoDumbbellLoadRangeKg } from "./loadGuidance.ts";
 
 Deno.test("no bodyweight on file -- omits any specific number", () => {
   const guidance = buildLoadGuidance(null, "moderate");
@@ -95,4 +95,87 @@ Deno.test("unknown experience level falls back to moderate, same as the rest of 
   // bands), even though the label in the sentence itself differs.
   const extractNumbers = (s: string) => s.match(/\d+-\d+kg/g);
   assertEquals(extractNumbers(guidance), extractNumbers(moderateGuidance));
+});
+
+// --- twoDumbbellLoadRangeKg / two-dumbbell squat-hinge prompt text ---
+
+Deno.test("REGRESSION: the real bug report -- a 60kg woman's two-dumbbell squat ceiling stays clearly under the reported 16-24kg-each", () => {
+  // BUG report: a 168cm/60kg woman was prescribed 16-24kg PER DUMBBELL
+  // (32-48kg total) for a two-dumbbell squat -- roughly double a sane
+  // number, because the barbell-equivalent TOTAL was used directly as a
+  // per-dumbbell figure. Checked at moderate AND advanced (the tiers
+  // closest to the reported numbers) since the bug report doesn't state
+  // which self-reported experience produced it.
+  for (const experience of ["moderate", "advanced"]) {
+    const { eachHighKg } = twoDumbbellLoadRangeKg("squat_pattern", 60, experience);
+    assert(eachHighKg < 16, `${experience}: per-dumbbell ceiling (${eachHighKg.toFixed(1)}kg) must be clearly under the reported unrealistic 16kg floor`);
+  }
+});
+
+Deno.test("two-dumbbell total is meaningfully lighter than the raw barbell-equivalent total, not just split in half", () => {
+  for (const pattern of ["squat_pattern", "hinge_pattern"] as const) {
+    for (const experience of ["newbie", "moderate", "advanced"]) {
+      const [barbellLowFrac, barbellHighFrac] = loadFractionRange(pattern, experience);
+      const barbellTotalHighKg = barbellHighFrac * 70;
+      const { totalHighKg } = twoDumbbellLoadRangeKg(pattern, 70, experience);
+      assert(
+        totalHighKg < barbellTotalHighKg * 0.5,
+        `${pattern}/${experience}: two-dumbbell total (${totalHighKg.toFixed(1)}kg) should be well under half the barbell total (${barbellTotalHighKg.toFixed(1)}kg), not just a straight half-split`,
+      );
+    }
+  }
+});
+
+Deno.test("two-dumbbell per-implement is always exactly half the two-dumbbell total", () => {
+  const { totalLowKg, totalHighKg, eachLowKg, eachHighKg } = twoDumbbellLoadRangeKg("squat_pattern", 70, "moderate");
+  assertEquals(eachLowKg, totalLowKg / 2);
+  assertEquals(eachHighKg, totalHighKg / 2);
+});
+
+Deno.test("higher experience levels get heavier two-dumbbell ranges too", () => {
+  for (const pattern of ["squat_pattern", "hinge_pattern"] as const) {
+    const newbie = twoDumbbellLoadRangeKg(pattern, 70, "newbie");
+    const moderate = twoDumbbellLoadRangeKg(pattern, 70, "moderate");
+    const advanced = twoDumbbellLoadRangeKg(pattern, 70, "advanced");
+    assert(newbie.eachHighKg < moderate.eachHighKg, `${pattern}: newbie should be lighter than moderate`);
+    assert(moderate.eachHighKg < advanced.eachHighKg, `${pattern}: moderate should be lighter than advanced`);
+  }
+});
+
+Deno.test("a known lift is used as the two-dumbbell base too, not just the population estimate", () => {
+  const withKnown = twoDumbbellLoadRangeKg("hinge_pattern", 80, "moderate", { hinge_pattern: 100 });
+  const withoutKnown = twoDumbbellLoadRangeKg("hinge_pattern", 80, "moderate");
+  assert(
+    withKnown.totalHighKg !== withoutKnown.totalHighKg,
+    "a stated known lift should change the two-dumbbell derived range, not be ignored",
+  );
+  // 100kg known lift -> +/-10% band (90-110kg) -> x0.4 derate -> 36-44kg total.
+  assertEquals(withKnown.totalLowKg.toFixed(1), (90 * 0.4).toFixed(1));
+  assertEquals(withKnown.totalHighKg.toFixed(1), (110 * 0.4).toFixed(1));
+});
+
+Deno.test("unknown experience level falls back to moderate for the two-dumbbell range too", () => {
+  const unknown = twoDumbbellLoadRangeKg("squat_pattern", 70, "some_unknown_value");
+  const moderate = twoDumbbellLoadRangeKg("squat_pattern", 70, "moderate");
+  assertEquals(unknown, moderate);
+});
+
+Deno.test("prompt text states the two-dumbbell squat/hinge numbers in the exact '2xNkg dumbbells' format, with a total AND a per-dumbbell figure", () => {
+  const guidance = buildLoadGuidance(60, "moderate");
+  assert(guidance.includes("TWO-DUMBBELL"), "must call out the two-dumbbell case explicitly");
+  assert(guidance.includes("2xNkg dumbbells"), "must instruct the exact parseable output format");
+  assert(guidance.toLowerCase().includes("dumbbell squat"), "must name a concrete two-dumbbell squat example");
+  assert(guidance.toLowerCase().includes("dumbbell romanian deadlift"), "must name a concrete two-dumbbell hinge example");
+  assert(guidance.includes("EACH dumbbell"), "must explicitly label the per-dumbbell figure");
+  const { totalLowKg, totalHighKg, eachLowKg, eachHighKg } = twoDumbbellLoadRangeKg("squat_pattern", 60, "moderate");
+  assert(guidance.includes(`${totalLowKg.toFixed(0)}-${totalHighKg.toFixed(0)}kg`), "must state the derated total range");
+  assert(guidance.includes(`${eachLowKg.toFixed(0)}-${eachHighKg.toFixed(0)}kg EACH`), "must state the derated per-dumbbell range");
+});
+
+Deno.test("prompt text explicitly warns against reusing the barbell-equivalent number as a per-dumbbell figure", () => {
+  const guidance = buildLoadGuidance(60, "moderate");
+  assert(
+    /never write the barbell-equivalent total/i.test(guidance),
+    "must explicitly warn against the exact mistake the bug report showed",
+  );
 });

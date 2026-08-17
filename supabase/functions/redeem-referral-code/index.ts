@@ -28,12 +28,15 @@ Deno.serve(async (req: Request) => {
 
     const { data: referral } = await supabase
       .from("referral_codes")
-      .select("code, bonus_days, max_redemptions, redemption_count, active")
+      .select("code, bonus_days, max_redemptions, redemption_count, active, owner_user_id")
       .eq("code", code)
       .maybeSingle();
 
     if (!referral || !referral.active) {
       return jsonResponse({ error: "Invalid or expired referral code." }, 404);
+    }
+    if (referral.owner_user_id === userId) {
+      return jsonResponse({ error: "That's your own code -- share it with a friend instead." }, 409);
     }
     if (referral.max_redemptions !== null && referral.redemption_count >= referral.max_redemptions) {
       return jsonResponse({ error: "This referral code has already been fully redeemed." }, 409);
@@ -41,9 +44,15 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow } = await supabase
       .from("users")
-      .select("referral_bonus_until")
+      .select("referral_bonus_until, referral_code_used")
       .eq("id", userId)
       .maybeSingle();
+
+    // One redemption per (user, code) -- re-entering the same code used to
+    // silently stack bonus_days onto the expiry every time.
+    if (userRow?.referral_code_used === code) {
+      return jsonResponse({ error: "You've already used this code." }, 409);
+    }
 
     const now = new Date();
     const currentBonusUntil = userRow?.referral_bonus_until ? new Date(userRow.referral_bonus_until) : null;

@@ -19,6 +19,7 @@ import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkFlatDailyLimit, logGeneration } from "../_shared/generationLimits.ts";
 import { languageName } from "../_shared/language.ts";
+import { effectiveCarbsTargetG } from "./recoveryDayAdjustment.ts";
 
 // A user asking "what can I make?" a few times while actually standing in
 // the kitchen deciding is the real use case -- generous like
@@ -100,6 +101,22 @@ Deno.serve(async (req: Request) => {
       .eq("user_id", userId)
       .maybeSingle();
 
+    // BUG report: this function had zero awareness of today's category --
+    // meal guidance was macro-target-only regardless of whether today was
+    // push_hard or rest. Same table generate-recommendation upserts every
+    // call, read here read-only. Best-effort: a missing row (no
+    // recommendation generated yet today) just means no category-specific
+    // framing, not an error -- the rest of this function already degrades
+    // gracefully with no daily_recommendation on file.
+    const { data: recommendationRow } = await supabase
+      .from("daily_recommendation")
+      .select("category")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .maybeSingle();
+    const category = (recommendationRow?.category as string | null) ?? null;
+    const isRecoveryDay = category === "rest" || category === "light";
+
     const { data: todaysMeals } = await supabase
       .from("meal_log")
       .select("calories, protein_g, carbs_g, fat_g")
@@ -155,13 +172,26 @@ Deno.serve(async (req: Request) => {
       { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 },
     );
 
+    // See recoveryDayAdjustment.ts for why this is a LOCAL-ONLY adjustment
+    // (never written back to the persisted nutrition_targets row).
+    const effectiveCarbsTarget = targetsRow ? effectiveCarbsTargetG(targetsRow.daily_carbs_g, isRecoveryDay) : null;
+
     const remainingLine = targetsRow
       ? `They have ${Math.max(0, targetsRow.daily_calories - consumed.calories)} kcal, ${
         Math.max(0, targetsRow.daily_protein_g - consumed.proteinG)
-      }g protein, ${Math.max(0, targetsRow.daily_carbs_g - consumed.carbsG)}g carbs, and ${
+      }g protein, ${Math.max(0, (effectiveCarbsTarget ?? targetsRow.daily_carbs_g) - consumed.carbsG)}g carbs, and ${
         Math.max(0, targetsRow.daily_fat_g - consumed.fatG)
       }g fat remaining in today's target (they've had ${consumed.calories} kcal so far today).`
       : "No daily nutrition target is on file for this user -- suggest a generally balanced, reasonably portioned meal instead.";
+
+    // Real coaching behavior, not just a calorie/macro number blind to
+    // training status -- BUG report: this function had zero awareness of
+    // today's category at all.
+    const recoveryLine = isRecoveryDay
+      ? `Today is a "${category}" recovery day (${
+        category === "rest" ? "no training" : "light active recovery"
+      } scheduled) -- lean the suggestion toward real recovery-day nutrition: protein-forward (muscle repair, satiety without excess calories), well-hydrating (water-rich ingredients, not just "drink water" advice), and anti-inflammatory where reasonable (e.g. oily fish, leafy greens, berries, olive oil, turmeric/ginger) over heavy/greasy comfort food. Carbs can run a little lighter than a hard-training day's -- today's target already reflects that.`
+      : "";
 
     const goalLine = userRow?.training_emphasis
       ? `Their current goal direction is "${userRow.training_emphasis}" (cut = losing fat, bulk = gaining size, recomp = both/composition change, maintain = staying steady).`
@@ -176,6 +206,7 @@ Deno.serve(async (req: Request) => {
       equipmentOptions,
       equipmentDescriptionForPrompt,
       remainingLine,
+      recoveryLine,
       goalLine,
       recentLine,
       language: languageName(body.language),
@@ -243,6 +274,10 @@ interface ClaudeInput {
   equipmentOptions: string[];
   equipmentDescriptionForPrompt: string;
   remainingLine: string;
+  /// Non-empty only on a rest/light recovery day -- steers framing toward
+  /// protein/hydration/anti-inflammatory coaching, real behavior a
+  /// category-blind macro-fill prompt can't produce.
+  recoveryLine: string;
   goalLine: string;
   recentLine: string;
   language: string;
@@ -258,6 +293,7 @@ async function callClaude(input: ClaudeInput): Promise<ClaudeRecommendation> {
 They have access to ONLY this kitchen equipment: ${input.equipmentDescriptionForPrompt}. Never write a step that requires equipment outside this list -- if a normal method would need something they don't have (e.g. an oven), find a real way to do it with what they DO have, or say plainly that what they listed can't be cooked with what's on hand rather than assuming equipment they don't own.
 
 ${input.remainingLine}
+${input.recoveryLine}
 ${input.goalLine}
 ${input.recentLine}
 

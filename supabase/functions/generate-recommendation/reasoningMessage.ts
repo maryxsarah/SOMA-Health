@@ -44,6 +44,11 @@ export interface ReasoningMessageCaps {
   injury: boolean;
   injuryModerate: boolean;
   injuryRest: boolean;
+  /// True when the proactive rest floor fired (computeProactiveRestCapApplied,
+  /// _shared/independentCaps.ts) -- a real, deliberate reason to cite, not a
+  /// fallback: the week simply had no bad signal at all, which is exactly
+  /// why this reads differently from every reactive cap above.
+  proactiveRest: boolean;
 }
 
 export interface ReasoningMessageInput {
@@ -104,6 +109,7 @@ interface Phrases {
     hrv: string;
     stress: string;
     mood: string;
+    proactiveRest: string;
   };
   consecutiveDaysRestEscalated: string;
   injuryRest: string;
@@ -145,6 +151,7 @@ const EN: Phrases = {
     hrv: "today's HRV is down from your usual baseline",
     stress: "today's stress load is elevated",
     mood: "you checked in feeling rough today",
+    proactiveRest: "you've had a full week of solid training with no real rest or light day, so today's building one in proactively",
   },
   consecutiveDaysRestEscalated: "you've pushed hard enough days in a row that your body needs a real reset, not just a lighter session",
   injuryRest: "your active injury protocol calls for full rest today, regardless of how your recovery data looks",
@@ -186,6 +193,7 @@ const RU: Phrases = {
     hrv: "сегодняшняя ВСР ниже твоего обычного уровня",
     stress: "сегодня повышенный уровень стресса",
     mood: "ты отметил(а) плохое самочувствие сегодня",
+    proactiveRest: "у тебя целая неделя плотных тренировок без настоящего отдыха или лёгкого дня, поэтому сегодня мы заранее ставим его сами",
   },
   consecutiveDaysRestEscalated: "ты тренировался(ась) интенсивно достаточно дней подряд, телу нужен настоящий отдых, а не просто облегчённая тренировка",
   injuryRest: "активный протокол травмы требует полного отдыха сегодня, независимо от показателей восстановления",
@@ -227,6 +235,7 @@ const ES: Phrases = {
     hrv: "tu VFC de hoy está por debajo de tu línea base habitual",
     stress: "tu nivel de estrés de hoy está elevado",
     mood: "hoy registraste que te sentías mal",
+    proactiveRest: "llevas una semana entera de entrenamiento sólido sin un día de descanso o suave de verdad, así que hoy lo añadimos de forma proactiva",
   },
   consecutiveDaysRestEscalated: "has entrenado fuerte suficientes días seguidos como para que tu cuerpo necesite un descanso real, no solo una sesión más ligera",
   injuryRest: "tu protocolo de lesión activo requiere descanso total hoy, sin importar cómo se vean tus datos de recuperación",
@@ -268,6 +277,7 @@ const FR: Phrases = {
     hrv: "ta VFC d'aujourd'hui est en dessous de ta base habituelle",
     stress: "ton niveau de stress est élevé aujourd'hui",
     mood: "tu as signalé te sentir mal aujourd'hui",
+    proactiveRest: "tu viens d'enchaîner une semaine complète d'entraînement soutenu sans vrai jour de repos ou léger, alors on en place un aujourd'hui de manière proactive",
   },
   consecutiveDaysRestEscalated: "tu t'es entraîné(e) intensément assez de jours d'affilée pour que ton corps ait besoin d'une vraie coupure, pas juste d'une séance plus légère",
   injuryRest: "ton protocole de blessure actif exige un repos complet aujourd'hui, quelles que soient tes données de récupération",
@@ -309,6 +319,7 @@ const IT: Phrases = {
     hrv: "la tua HRV di oggi è sotto la tua base abituale",
     stress: "il tuo livello di stress oggi è elevato",
     mood: "hai segnalato di sentirti giù oggi",
+    proactiveRest: "hai alle spalle una settimana intera di allenamento intenso senza un vero giorno di riposo o leggero, quindi oggi ne inseriamo uno in modo proattivo",
   },
   consecutiveDaysRestEscalated: "ti sei allenato/a intensamente per abbastanza giorni di fila da aver bisogno di un vero reset, non solo di una sessione più leggera",
   injuryRest: "il tuo protocollo infortunio attivo richiede riposo completo oggi, indipendentemente da come appaiono i tuoi dati di recupero",
@@ -350,6 +361,7 @@ const DE: Phrases = {
     hrv: "deine heutige HRV liegt unter deiner üblichen Baseline",
     stress: "deine heutige Stressbelastung ist erhöht",
     mood: "du hast dich heute schlecht gefühlt",
+    proactiveRest: "du hast eine ganze Woche solide trainiert, ohne echten Ruhe- oder leichten Tag – deshalb bauen wir heute proaktiv einen ein",
   },
   consecutiveDaysRestEscalated: "du hast an genug Tagen in Folge hart trainiert, dass dein Körper einen echten Reset braucht, nicht nur eine leichtere Einheit",
   injuryRest: "dein aktives Verletzungsprotokoll erfordert heute vollständige Ruhe, unabhängig von deinen Erholungsdaten",
@@ -391,6 +403,7 @@ const KA: Phrases = {
     hrv: "დღევანდელი HRV შენს ჩვეულ დონეზე დაბალია",
     stress: "დღეს სტრესის დონე მომატებულია",
     mood: "დღეს ცუდად გრძნობდი თავს",
+    proactiveRest: "მთელი კვირაა ინტენსიურად ვარჯიშობ ნამდვილი დასვენების ან მსუბუქი დღის გარეშე, ამიტომ დღეს წინასწარ ვამატებთ მას",
   },
   consecutiveDaysRestEscalated: "საკმარისი დღეების განმავლობაში ინტენსიურად ვარჯიშობდი და სხეულს ნამდვილი დასვენება სჭირდება, არა უბრალოდ მსუბუქი ვარჯიში",
   injuryRest: "აქტიური დაზიანების პროტოკოლი დღეს სრულ დასვენებას მოითხოვს, აღდგენის მონაცემების მიუხედავად",
@@ -432,6 +445,7 @@ const HY: Phrases = {
     hrv: "այսօրվա HRV-ն ցածր է քո սովորական մակարդակից",
     stress: "այսօր սթրեսի մակարդակը բարձրացված է",
     mood: "դու նշել ես, որ այսօր վատ ես զգում",
+    proactiveRest: "մի ամբողջ շաբաթ է՝ լուրջ մարզվում ես առանց իսկական հանգստի կամ թեթև օրվա, ուստի այսօր այն նախապես ավելացնում ենք",
   },
   consecutiveDaysRestEscalated: "դու բավականաչափ օրեր անընդմեջ ինտենսիվ ես մարզվել, և մարմինդ իսկական հանգիստ է պահանջում, ոչ թե պարզապես ավելի թեթև մարզում",
   injuryRest: "ակտիվ վնասվածքի արձանագրությունը այսօր լրիվ հանգիստ է պահանջում՝ անկախ վերականգնման տվյալներից",
@@ -473,6 +487,7 @@ const SR: Phrases = {
     hrv: "tvoj današnji HRV je ispod tvoje uobičajene osnovne linije",
     stress: "tvoj nivo stresa danas je povišen",
     mood: "prijavio/la si da se danas loše osećaš",
+    proactiveRest: "imaš celu nedelju ozbiljnih treninga bez pravog odmora ili laganog dana, pa danas proaktivno ubacujemo jedan",
   },
   consecutiveDaysRestEscalated: "treniraš intenzivno dovoljno dana zaredom da je tvom telu potreban pravi reset, ne samo lakši trening",
   injuryRest: "tvoj aktivni protokol povrede zahteva potpuni odmor danas, bez obzira na tvoje podatke o oporavku",
@@ -520,7 +535,7 @@ function referenceNumbers(t: Phrases, input: ReasoningMessageInput): string | nu
 /// Same left-to-right order as index.ts's light-tier OR-chain
 /// (consecutiveDaysCapApplied || injuryProtocolCapApplied ||
 /// volumeCapApplied || sleepCapApplied || hrvCapApplied || stressCapApplied
-/// || moodCapApplied) -- picks ONE explanation to name even when several
+/// || moodCapApplied || proactiveRestCapApplied) -- picks ONE explanation to name even when several
 /// caps are simultaneously true, for a readable sentence rather than a
 /// laundry list.
 function lightCapExplanation(t: Phrases, input: ReasoningMessageInput): string | null {
@@ -531,6 +546,7 @@ function lightCapExplanation(t: Phrases, input: ReasoningMessageInput): string |
   if (input.caps.hrv) return t.lightCap.hrv;
   if (input.caps.stress) return t.lightCap.stress;
   if (input.caps.mood) return t.lightCap.mood;
+  if (input.caps.proactiveRest) return t.lightCap.proactiveRest;
   return null;
 }
 

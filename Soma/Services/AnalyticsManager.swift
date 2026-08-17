@@ -107,10 +107,49 @@ final class AnalyticsManager {
         log(.subscriptionCancelled)
     }
 
+    /// A `register(placement:)` call errored before it could present --
+    /// e.g. the paywall webview failed to load. See SuperwallDiagnostics,
+    /// the sole call site for this and `paywallSkipped` below.
+    func paywallPresentationFailed(placement: String, error: Error) {
+        log(
+            .paywallPresentationFailed,
+            parameters: [
+                Parameter.placement: placement,
+                Parameter.errorDescription: String(describing: error),
+            ]
+        )
+    }
+
+    /// A `register(placement:)` call was skipped -- most often because the
+    /// placement isn't attached to any campaign on the Superwall dashboard
+    /// yet (`PaywallSkippedReason.placementNotFound`), which otherwise
+    /// looks identical to "user already has access." See SuperwallDiagnostics.
+    func paywallSkipped(placement: String, reason: String) {
+        log(.paywallSkipped, parameters: [Parameter.placement: placement, Parameter.reason: reason])
+    }
+
     // MARK: - Generic
 
     func featureUsed(name: String) {
         log(.featureUsed, parameters: [Parameter.featureName: name])
+    }
+
+    /// Fired right BEFORE the delete-account call -- after it succeeds the
+    /// local identifiers are reset, so this is the last attributable event.
+    func accountDeleted() {
+        log(.accountDeleted)
+    }
+
+    /// Client half of analytics erasure after a successful account
+    /// deletion (the server half -- PostHog person deletion -- lives in
+    /// the delete-account edge function): fresh anonymous PostHog
+    /// distinct_id + cleared Firebase app-instance data. Deliberately not
+    /// wrapped in `#if !DEBUG` -- resetting identifiers is state hygiene,
+    /// not event reporting, and must also happen in Debug.
+    func resetAfterAccountDeletion() {
+        PostHogSDK.shared.reset()
+        Analytics.resetAnalyticsData()
+        Analytics.setUserID(nil)
     }
 
     // MARK: - Private
@@ -137,7 +176,10 @@ final class AnalyticsManager {
         case trialStarted = "trial_started"
         case subscriptionStarted = "subscription_started"
         case subscriptionCancelled = "subscription_cancelled"
+        case paywallPresentationFailed = "paywall_presentation_failed"
+        case paywallSkipped = "paywall_skipped"
         case featureUsed = "feature_used"
+        case accountDeleted = "account_deleted"
     }
 
     private enum Parameter {
@@ -145,6 +187,9 @@ final class AnalyticsManager {
         static let featureName = "feature_name"
         static let provider = "provider"
         static let surface = "surface"
+        static let placement = "placement"
+        static let reason = "reason"
+        static let errorDescription = "error_description"
     }
 
     private static let hasSubmittedFirstPromptKey = "com.soma.analytics.hasSubmittedFirstPrompt"

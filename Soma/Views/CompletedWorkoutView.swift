@@ -32,6 +32,10 @@ struct CompletedWorkoutView: View {
     @State private var isLoading = true
     @State private var showEditSheet = false
     @State private var showRepeatSheet = false
+    /// Drives ExerciseDetailView's `.sheet(item:)` -- same pattern
+    /// AIWorkoutPlanSections.swift's aiExerciseRow uses, so a past logged
+    /// workout gets the same tap-for-media affordance as a live plan.
+    @State private var selectedExercise: AIExercise?
     @State private var repeatRecommendation: DailyRecommendation?
     @State private var isLoadingRepeat = false
     /// Resolved "why this workout today" text -- always non-empty once
@@ -91,6 +95,9 @@ struct CompletedWorkoutView: View {
                     seededBodyPart: log.bodyPart
                 )
             }
+        }
+        .sheet(item: $selectedExercise) { exercise in
+            ExerciseDetailView(exercise: exercise)
         }
     }
 
@@ -332,16 +339,40 @@ struct CompletedWorkoutView: View {
             Text(String(localized: "completedWorkout.whatYouDid", defaultValue: "What you did", comment: "Section header listing the blocks/exercises actually completed"))
                 .font(.system(size: 15, weight: .bold))
             ForEach(Array(plan.blocks.enumerated()), id: \.offset) { index, block in
-                HStack {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(SomaTokens.accent)
-                    Text(block.name)
-                        .font(.system(size: 14, weight: .semibold))
-                    Spacer()
-                    Text(String(localized: "completedWorkout.blockDurationMinutes", defaultValue: "\(block.exercises.reduce(0) { $0 + $1.durationMinutes }) min", comment: "Minutes spent on one completed workout block, e.g. '12 min'"))
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(SomaTokens.ink3)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(SomaTokens.accent)
+                        Text(block.name)
+                            .font(.system(size: 14, weight: .semibold))
+                        Spacer()
+                        Text(String(localized: "completedWorkout.blockDurationMinutes", defaultValue: "\(block.exercises.reduce(0) { $0 + $1.durationMinutes }) min", comment: "Minutes spent on one completed workout block, e.g. '12 min'"))
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(SomaTokens.ink3)
+                    }
+                    // Per-exercise tap, same affordance/pattern as
+                    // AIWorkoutPlanSections.swift's aiExerciseRow -- lets a
+                    // past logged workout open ExerciseDetailView too, not
+                    // just a live plan.
+                    ForEach(block.exercises) { exercise in
+                        Button {
+                            selectedExercise = exercise
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(exercise.name)
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(SomaTokens.ink2)
+                                Image(systemName: "photo.circle")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.leading, 19)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .staggerReveal(index)
             }

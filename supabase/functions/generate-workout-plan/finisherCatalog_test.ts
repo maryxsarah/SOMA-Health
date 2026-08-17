@@ -67,3 +67,44 @@ Deno.test("REGRESSION: a cut-redirected cardio finisher still detects yesterday'
   assertEquals(decision.definition?.focusArea, "cardio");
   assertEquals(decision.exceptional, false, "split conflict on the real body part must still block the exceptional tier");
 });
+
+// --- hasCardioEquipment (BUG report: "sprints on the treadmill" style
+// finisher was never reachable -- no equipment signal reached selectFinisher
+// at all, regardless of what the user owned) ---
+
+Deno.test("REGRESSION: decideFinisher can select a treadmill-flavored (cardio) finisher when equipment includes one", () => {
+  // Acceptance check: cardio equipment on a full_body day selects the
+  // cardio/sprint_interval concept, not the generic full_body one.
+  const decision = decideFinisher("moderate", "full_body", false, [], noRecentLogs, "2026-08-03", null, true);
+  assertEquals(decision.include, true);
+  assertEquals(decision.definition?.focusArea, "cardio");
+  assertEquals(decision.definition?.modality, "sprint_interval");
+});
+
+Deno.test("without cardio equipment, a full_body day keeps the generic full_body finisher (unchanged default)", () => {
+  const decision = decideFinisher("moderate", "full_body", false, [], noRecentLogs, "2026-08-03", null, false);
+  assertEquals(decision.definition?.focusArea, "full_body");
+  assertEquals(decision.definition?.modality, "metabolic_conditioning");
+});
+
+Deno.test("hasCardioEquipment defaults to false when omitted (existing call sites keep their old behavior)", () => {
+  const decision = decideFinisher("moderate", "full_body", false, [], noRecentLogs, "2026-08-03", null);
+  assertEquals(decision.definition?.focusArea, "full_body");
+});
+
+Deno.test("cardio equipment does NOT override a body-part-specific finisher outside full_body -- leg day keeps its own finisher", () => {
+  // Deliberately scoped: equipment nudges the generic full_body slot only,
+  // it doesn't displace a deliberately different upper/lower/core finisher.
+  const decision = decideFinisher("moderate", "lower_body", false, [], noRecentLogs, "2026-08-03", null, true);
+  assertEquals(decision.definition?.focusArea, "lower_body");
+});
+
+Deno.test("a cut emphasis still redirects to cardio even without cardio equipment (the two triggers are independent)", () => {
+  const decision = decideFinisher("moderate", "lower_body", false, [], noRecentLogs, "2026-08-03", "cut", false);
+  assertEquals(decision.definition?.focusArea, "cardio");
+});
+
+Deno.test("a cardio-equipment-redirected full_body finisher still respects injury exclusion keywords, same as the cut redirect", () => {
+  const decision = decideFinisher("moderate", "full_body", false, ["sprint"], noRecentLogs, "2026-08-03", null, true);
+  assert(!decision.exceptional);
+});

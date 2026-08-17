@@ -84,12 +84,11 @@ struct GoalBodyProgressView: View {
                         .foregroundStyle(SomaTokens.ink)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(SomaTokens.accent)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .glassLens(cornerRadius: SomaTokens.rPill)
+                    // Plain toolbar button, same as every other sheet's
+                    // Done -- the custom .glassLens() chrome stacked on
+                    // top of the system toolbar capsule and read as a
+                    // bulky double-ringed pill.
+                    Button(String(localized: "profile.doneButton", defaultValue: "Done", comment: "Toolbar button dismissing a settings screen or sheet")) { dismiss() }
                 }
             }
         }
@@ -117,41 +116,82 @@ struct GoalBodyProgressView: View {
             Text("See exactly how you'll get there.")
                 .font(Theme.display)
             Text("Add a photo of the body you're working toward and a photo of where you are today. Soma builds your plan around closing that gap, and shows you real progress along the way.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 16) {
-                emptyPhotoSlot(title: "Goal body", isUploading: isUploadingGoal, selection: $goalPhotoItem)
-                emptyPhotoSlot(title: "Current body", isUploading: isUploadingCurrent, selection: $currentPhotoItem)
+                .font(.system(size: 14))
+                .foregroundStyle(SomaTokens.ink2)
+            HStack(alignment: .top, spacing: 16) {
+                emptyPhotoSlot(isGoal: true, title: "Goal body", isUploading: isUploadingGoal, selection: $goalPhotoItem)
+                emptyPhotoSlot(isGoal: false, title: "Current body", isUploading: isUploadingCurrent, selection: $currentPhotoItem)
             }
             // Constraint 8, same copy as the onboarding step: never a
             // "you will look exactly like this" promise.
             Text("This is a training direction, not a guarantee -- genetics differ, goal photos are sometimes edited or filtered, and real results take time.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11))
+                .foregroundStyle(SomaTokens.ink3)
         }
     }
 
-    private func emptyPhotoSlot(title: LocalizedStringKey, isUploading: Bool, selection: Binding<PhotosPickerItem?>) -> some View {
+    /// Empty slot in the same visual key as the filled compareSlot -- the
+    /// same 3:4 shape, the same violet/blue tint pair and Goal/Current
+    /// badges, so uploading a photo fills the tile in place instead of
+    /// swapping a gray placeholder for a completely different card. The
+    /// dashed ring + lens plus is the house "add" affordance (11b/16b).
+    private func emptyPhotoSlot(isGoal: Bool, title: LocalizedStringKey, isUploading: Bool, selection: Binding<PhotosPickerItem?>) -> some View {
         VStack(spacing: 8) {
             PhotosPicker(selection: selection, matching: .images) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.clear)
-                        .frame(height: 160)
-                        .glassCard(cornerRadius: 16)
-                    if isUploading {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "plus")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: isGoal
+                                    ? [Color(red: 0.906, green: 0.886, blue: 0.965).opacity(0.55), Color(red: 0.784, green: 0.737, blue: 0.918).opacity(0.55)]
+                                    : [Color(red: 0.863, green: 0.906, blue: 0.973).opacity(0.55), Color(red: 0.718, green: 0.800, blue: 0.925).opacity(0.55)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                    Group {
+                        if isUploading {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(SomaTokens.accent)
+                                .frame(width: 38, height: 38)
+                                .glassLens()
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    Group {
+                        if isGoal {
+                            Text("Goal")
+                                .font(.system(size: 11, weight: .bold))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 5)
+                                .glassGel(.blue, cornerRadius: SomaTokens.rPill)
+                        } else {
+                            Text("Current")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(SomaTokens.ink)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 5)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+                        }
+                    }
+                    .padding(10)
                 }
+                .aspectRatio(3 / 4, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(SomaTokens.accentSoft22, style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                )
             }
+            .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
             Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11.5))
+                .foregroundStyle(SomaTokens.ink3)
         }
     }
 

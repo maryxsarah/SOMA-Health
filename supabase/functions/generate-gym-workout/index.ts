@@ -194,7 +194,7 @@ Deno.serve(async (req: Request) => {
 
     // Only a genuinely new generation reaches here (a cache hit already
     // returned above) -- check the daily cap before paying for one.
-    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier);
+    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier, "gym_photo");
     if (!limitCheck.allowed) {
       return jsonResponse({ date, generation_limit_reached: true, message: GENERATION_LIMIT_MESSAGE });
     }
