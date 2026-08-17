@@ -184,6 +184,7 @@ final class NotificationManager {
         await scheduleMiddayMovementNudge(for: date, streak: resolvedStreak)
         await scheduleEveningWorkoutReminder(for: date, streak: resolvedStreak)
         await scheduleProgressCheckIn(for: date, dayNumber: await dayNumber, workoutsThisWeek: await workoutsThisWeek)
+        await scheduleAffirmationReminders()
     }
 
     /// Generic movement copy when there's no active streak to reference;
@@ -437,6 +438,183 @@ final class NotificationManager {
         content.sound = .default
         content.userInfo = ["checklistDeepLink": deepLink.rawValue]
         await scheduleToday(hour: hour, minute: minute, identifier: identifier, content: content)
+    }
+
+    // MARK: - Affirmation reminders (16c)
+    //
+    // Off by default, like quiet hours -- nobody gets new pushes until
+    // they opt in (16c's toggle, reachable from Profile > Notifications
+    // and the Affirmations sheet's bell). All prefs are local device
+    // state, same posture as quiet hours: plain UserDefaults, no sync.
+
+    private let affirmationEnabledKey = "com.soma.app.affirmationRemindersEnabled"
+    private let affirmationPerDayKey = "com.soma.app.affirmationRemindersPerDay"
+    private let affirmationSlotMinuteKeys = [
+        "com.soma.app.affirmationSlot0Minute",
+        "com.soma.app.affirmationSlot1Minute",
+        "com.soma.app.affirmationSlot2Minute",
+    ]
+    private let affirmationSourceKey = "com.soma.app.affirmationSource"
+    private let affirmationRecentLinesKey = "com.soma.app.affirmationRecentLines"
+    /// 16c defaults: 08:30 / 15:00 / 20:00 (minute-of-day, same encoding
+    /// as quiet hours). The stagger pass below shifts any that land within
+    /// an hour of another Soma push, so these stay the *user-visible*
+    /// times while never double-firing next to a fixed slot.
+    static let affirmationDefaultSlotMinutes = [8 * 60 + 30, 15 * 60, 20 * 60]
+
+    /// Where reminder lines come from (16c "Draw lines from") -- today's
+    /// generated line, the user's own kept list, or both interleaved.
+    enum AffirmationSource: String {
+        case generated, list, both
+    }
+
+    var affirmationRemindersEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: affirmationEnabledKey) }
+        set { UserDefaults.standard.set(newValue, forKey: affirmationEnabledKey) }
+    }
+
+    /// 1-3 pushes a day; mockup default is 2.
+    var affirmationRemindersPerDay: Int {
+        get { min(max(UserDefaults.standard.object(forKey: affirmationPerDayKey) as? Int ?? 2, 1), 3) }
+        set { UserDefaults.standard.set(min(max(newValue, 1), 3), forKey: affirmationPerDayKey) }
+    }
+
+    func affirmationSlotMinute(_ index: Int) -> Int {
+        guard affirmationSlotMinuteKeys.indices.contains(index) else { return Self.affirmationDefaultSlotMinutes[0] }
+        return UserDefaults.standard.object(forKey: affirmationSlotMinuteKeys[index]) as? Int
+            ?? Self.affirmationDefaultSlotMinutes[index]
+    }
+
+    func setAffirmationSlotMinute(_ minute: Int, at index: Int) {
+        guard affirmationSlotMinuteKeys.indices.contains(index) else { return }
+        UserDefaults.standard.set(minute, forKey: affirmationSlotMinuteKeys[index])
+    }
+
+    var affirmationSource: AffirmationSource {
+        get { AffirmationSource(rawValue: UserDefaults.standard.string(forKey: affirmationSourceKey) ?? "") ?? .both }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: affirmationSourceKey) }
+    }
+
+    /// Schedules today's affirmation pushes -- joins the same daily pass as
+    /// the engagement notifications (called at the end of
+    /// scheduleTodaysEngagementNotifications, plus directly whenever 16b/16c
+    /// change what should fire). Always clears today's three potential slots
+    /// first, so toggling off or dropping 3x -> 1x removes stale pendings.
+    /// The payload is just the line itself -- no title, no "tap to open"
+    /// filler, per 16c's preview.
+    func scheduleAffirmationReminders() async {
+        let date = todayKey()
+        let identifiers = (0..<3).map { "affirmation-\($0)-\(date)" }
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        guard affirmationRemindersEnabled else { return }
+
+        let lines = await affirmationCandidateLines(for: date)
+        guard !lines.isEmpty else { return }
+        let picked = pickAffirmationLines(from: lines, count: affirmationRemindersPerDay)
+
+        let calendar = Calendar.current
+        for (index, line) in picked.enumerated() {
+            var components = calendar.dateComponents([.year, .month, .day], from: Date())
+            let minute = affirmationSlotMinute(index)
+            components.hour = minute / 60
+            components.minute = minute % 60
+            guard let slotDate = calendar.date(from: components) else { continue }
+            let content = UNMutableNotificationContent()
+            content.body = line
+            content.sound = .default
+            await schedule(at: staggeredPastFixedSlots(slotDate), identifier: identifiers[index], content: content)
+        }
+        recordAffirmationUse(picked, on: date)
+    }
+
+    /// Candidate pool per the 16c source setting. Passive reads only --
+    /// scheduling must never trigger (and thus never burn) a generation.
+    private func affirmationCandidateLines(for date: String) async -> [String] {
+        let source = affirmationSource
+        var generated: [String] = []
+        if source != .list, let today = try? await SupabaseClient.shared.fetchTodaysAffirmation(date: date) {
+            generated = [today.text]
+        }
+        var list: [String] = []
+        if source != .generated {
+            list = ((try? await SupabaseClient.shared.fetchAffirmationLines()) ?? [])
+                .filter(\.inRotation)
+                .map(\.text)
+        }
+        // "Both interleaves" -- today's line leads (it's today's), then the list.
+        return generated + list
+    }
+
+    /// 16c: "never repeating a line within 3 days." Lines used in the last
+    /// 3 days are skipped while enough unused ones remain; with a pool
+    /// smaller than that, reuse beats silence. Never duplicates a line
+    /// within the same day -- with fewer distinct lines than slots, later
+    /// slots simply don't fire.
+    private func pickAffirmationLines(from lines: [String], count: Int) -> [String] {
+        let recent = affirmationRecentUse()
+        let calendar = Calendar.current
+        let cutoff = calendar.date(byAdding: .day, value: -3, to: Date()) ?? Date()
+        let fresh = lines.filter { line in
+            guard let usedKey = recent[line], let used = dateFromKey(usedKey) else { return true }
+            return used < cutoff
+        }
+        let pool = fresh.isEmpty ? lines : fresh
+        var picked: [String] = []
+        for line in pool where picked.count < count {
+            if !picked.contains(line) { picked.append(line) }
+        }
+        return picked
+    }
+
+    /// 16c: affirmation pushes stagger >= 60 min from any other fixed Soma
+    /// slot so mornings (and evenings) never double-fire. Walks forward
+    /// past each conflict; bounded so a pathological config can't loop.
+    private func staggeredPastFixedSlots(_ date: Date) -> Date {
+        let fixedMinutes = [
+            Self.checklistBreakfastHour * 60,
+            Self.middayMovementHour * 60,
+            Self.checklistStepsHour * 60,
+            Self.eveningWorkoutHour * 60 + Self.eveningWorkoutMinute,
+            Self.progressCheckInHour * 60,
+            Self.checklistEveningRecapHour * 60 + Self.checklistEveningRecapMinute,
+        ]
+        let calendar = Calendar.current
+        var result = date
+        for _ in 0..<12 {
+            let minuteOfDay = calendar.component(.hour, from: result) * 60 + calendar.component(.minute, from: result)
+            guard let conflict = fixedMinutes.first(where: { abs($0 - minuteOfDay) < 60 }) else { break }
+            result = calendar.date(byAdding: .minute, value: (conflict + 60) - minuteOfDay, to: result) ?? result
+        }
+        return result
+    }
+
+    /// [line text: yyyy-MM-dd last scheduled] -- local-only usage memory
+    /// backing the 3-day no-repeat rule, pruned past 7 days so it can't
+    /// grow unbounded. Recorded at schedule time (delivery isn't
+    /// observable for a local notification), which is the right
+    /// approximation: a line scheduled today shouldn't be re-picked
+    /// tomorrow whether or not the user saw it.
+    private func affirmationRecentUse() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: affirmationRecentLinesKey) as? [String: String] ?? [:]
+    }
+
+    private func recordAffirmationUse(_ lines: [String], on date: String) {
+        var recent = affirmationRecentUse()
+        for line in lines { recent[line] = date }
+        let calendar = Calendar.current
+        let pruneCutoff = calendar.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        recent = recent.filter { _, value in
+            guard let used = dateFromKey(value) else { return false }
+            return used >= pruneCutoff
+        }
+        UserDefaults.standard.set(recent, forKey: affirmationRecentLinesKey)
+    }
+
+    private func dateFromKey(_ key: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        return formatter.date(from: key)
     }
 
     // MARK: - "Already sent today" flag

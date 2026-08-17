@@ -67,6 +67,11 @@ final class HistoryCalendarUITests: XCTestCase {
         let closeButton = app.buttons["historyCalendar.closeButton"]
         XCTAssertTrue(closeButton.waitForExistence(timeout: 10), "Tapping the calendar icon should open the History screen")
 
+        // Data actually arrived, not just the shell -- the current month's
+        // section only renders after the fixture logs/recommendations load.
+        let monthTitle = app.staticTexts["August"]
+        XCTAssertTrue(monthTitle.waitForExistence(timeout: 10), "The current month grid should render once history data loads")
+
         let screenshot = app.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = "history-calendar-screen"

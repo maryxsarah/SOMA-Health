@@ -16,6 +16,9 @@ enum SomaType {
     static let screenTitle = Font.system(size: 34, weight: .bold, design: .serif).italic()
     /// Widget values ("6.3 h", "3 / 8", "Good").
     static let widgetValue = Font.system(size: 23, weight: .bold, design: .serif).italic()
+    /// Affirmation widget line (16a) -- the quote itself is the hero and
+    /// runs up to 3 rows, so it sits well below `widgetValue`'s size.
+    static let widgetQuote = Font.system(size: 15.5, weight: .bold, design: .serif).italic()
     /// Big metrics (dashboard hero number, baseline picker) -- bold, size varies by call site.
     static func metric(_ size: CGFloat) -> Font {
         .system(size: size, weight: .bold, design: .serif).italic()

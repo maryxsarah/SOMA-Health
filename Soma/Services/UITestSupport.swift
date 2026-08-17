@@ -101,6 +101,7 @@ enum UITestSupport {
         defaults.set(true, forKey: "dashboardWidget.nutrition")
         defaults.set(true, forKey: "dashboardWidget.sportGoal")
         defaults.set(false, forKey: "dashboardWidget.photoProgress")
+        defaults.set(true, forKey: "dashboardWidget.affirmation")
     }
     #else
     static let isActive = false
@@ -916,12 +917,40 @@ final class FixtureURLProtocol: URLProtocol {
             return (filterByDate(seeded + Self.loggedWorkouts, query: query), 200)
 
         // Paywall bypass: far-future referral bonus means the detail sheet
-        // never routes through Superwall in tests.
+        // never routes through Superwall in tests. date_of_birth feeds the
+        // history calendar's recurring birthday badge (Aug 20). The empty
+        // collection keys are UserProfile's non-optional fields -- without
+        // them fetchProfile's decode throws and try? call sites see nil.
         case path.hasSuffix("/rest/v1/users") && method == "GET":
-            return ([["referral_bonus_until": "2099-01-01T00:00:00Z"]], 200)
+            return ([[
+                "referral_bonus_until": "2099-01-01T00:00:00Z",
+                "date_of_birth": "1999-08-20",
+                "goals": [], "equipment": [], "household_equipment": [],
+                "injury_tags": [], "injury_severity": [:], "injury_type": [:],
+                "injury_pain_level": [:], "anchor_sessions": [],
+            ] as [String: Any]], 200)
 
         case path.hasSuffix("/functions/v1/generate-recommendation"):
             return (FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory), 200)
+
+        // Affirmation widget (16a) -- a fixed line so the tile renders
+        // deterministically; the passive daily_affirmation read falls
+        // through to the generic empty-GET case below, which is what
+        // routes the client here.
+        case path.hasSuffix("/functions/v1/generate-affirmation"):
+            return ([
+                "text": "You don't need a perfect day -- just ten honest minutes.",
+                "generatedAt": FixtureData.iso(daysAgo: 0),
+                "regenerationAvailable": true,
+            ] as [String: Any], 200)
+
+        // Deterministic fake translation (real endpoint calls Claude) --
+        // enough for a test to assert the swap actually happens.
+        case path.hasSuffix("/functions/v1/translate-exercise-guide"):
+            return ([
+                "name": "Прыжок на тумбу",
+                "instructions": ["Встаньте перед тумбой.", "Запрыгните, мягко приземлитесь.", "Сойдите по одной ноге."],
+            ] as [String: Any], 200)
 
         // Real row (matches the seeded DB exactly) so ExerciseDetailView's
         // image fetch -- unstubbed, goes over real network -- loads a real photo.

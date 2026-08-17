@@ -1049,6 +1049,120 @@ final class SupabaseClient {
         try assertSuccess(response, data: data)
     }
 
+    // MARK: - Affirmations (16a/16b)
+
+    /// Passive read via RLS -- nil when nothing has been generated today.
+    /// Never triggers generation, so NotificationManager's reminder
+    /// scheduling and plain widget refreshes can't burn the daily quota.
+    func fetchTodaysAffirmation(date: String) async throws -> DailyAffirmation? {
+        struct Row: Decodable { let text: String; let generated_at: String? }
+        let path = "rest/v1/daily_affirmation?date=eq.\(date)&select=text,generated_at&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([Row].self, from: data)
+        return rows.first.map { DailyAffirmation(text: $0.text, generatedAt: $0.generated_at, regenerationAvailable: nil) }
+    }
+
+    /// Server-cached per (user, date) like the AI workout plan, so the
+    /// morning background pass, the widget, and the sheet share one
+    /// generation. forceRegenerate ("New line") is bounded server-side to
+    /// one manual regeneration a day on top of the automatic one.
+    func fetchOrGenerateDailyAffirmation(date: String, forceRegenerate: Bool = false) async throws -> DailyAffirmation {
+        var request = try await authorizedRequest(path: "functions/v1/generate-affirmation", method: "POST", timeout: 120)
+        var body: [String: Any] = [
+            "date": date,
+            "language": await currentAILanguageCode(),
+        ]
+        if forceRegenerate { body["forceRegenerate"] = true }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+
+        // Same 200-with-a-flag convention as generate-workout-plan --
+        // being limited is a normal outcome, checked before the decode
+        // that would otherwise mask it as a generic failure.
+        struct LimitResponse: Decodable { let generation_limit_reached: Bool; let message: String? }
+        if let limit = try? JSONDecoder().decode(LimitResponse.self, from: data), limit.generation_limit_reached {
+            throw SupabaseError.generationLimitReached(message: limit.message ?? String(localized: "supabase.affirmation.generationLimitFallback", defaultValue: "Today's new line is used up -- a fresh one arrives tomorrow morning.", comment: "Fallback message when the daily affirmation regeneration quota is spent and the server sends no message of its own"))
+        }
+        return try JSONDecoder().decode(DailyAffirmation.self, from: data)
+    }
+
+    /// 16b "Edit" -- rewrites today's generated line in place. Update-only
+    /// by design: the table has no client insert policy, so editing can
+    /// never conjure a row generation didn't create. `edited: true` is
+    /// what later auto-promotes this line into the list if a regeneration
+    /// replaces it ("your words are never discarded").
+    func updateTodaysAffirmationText(date: String, text: String) async throws {
+        var request = try await authorizedRequest(path: "rest/v1/daily_affirmation?date=eq.\(date)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "edited": true])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    /// 16b "Recent · kept 7 days" -- past days' generated lines, newest
+    /// first. Purely a windowed read of old daily_affirmation rows;
+    /// "expiry" is just this query's lower bound.
+    func fetchRecentAffirmations(before date: String, days: Int = 7) async throws -> [RecentAffirmation] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        guard let today = formatter.date(from: date),
+              let start = Calendar.current.date(byAdding: .day, value: -days, to: today)
+        else { return [] }
+        let path = "rest/v1/daily_affirmation?date=lt.\(date)&date=gte.\(formatter.string(from: start))&select=date,text&order=date.desc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode([RecentAffirmation].self, from: data)
+    }
+
+    /// The user's own kept/written lines, newest first.
+    func fetchAffirmationLines() async throws -> [AffirmationLine] {
+        let path = "rest/v1/user_affirmations?select=id,text,source,in_rotation,created_at&order=created_at.desc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode([AffirmationLine].self, from: data)
+    }
+
+    /// 16b "Keep" (source "generated") and "Write your own" (source
+    /// "custom") -- returns the created row so the list can show it with
+    /// its real server id immediately.
+    func addAffirmationLine(text: String, source: String) async throws -> AffirmationLine {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/user_affirmations", method: "POST")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId, "text": text, "source": source,
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        guard let line = try JSONDecoder().decode([AffirmationLine].self, from: data).first else {
+            throw SupabaseError.requestFailed(status: 200, message: "empty insert response")
+        }
+        return line
+    }
+
+    /// The row heart (16b) -- in or out of the reminder rotation, never a delete.
+    func setAffirmationLineRotation(id: String, inRotation: Bool) async throws {
+        var request = try await authorizedRequest(path: "rest/v1/user_affirmations?id=eq.\(id)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["in_rotation": inRotation])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    /// Swipe-left delete (16b).
+    func deleteAffirmationLine(id: String) async throws {
+        let request = try await authorizedRequest(path: "rest/v1/user_affirmations?id=eq.\(id)", method: "DELETE")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
     // MARK: - daily_recommendation
 
     /// Plain read via RLS -- used by HomeView on appear so opening the app
@@ -1416,6 +1530,25 @@ final class SupabaseClient {
         return rows.first
     }
 
+    struct ExerciseGuideTranslation: Decodable {
+        let name: String
+        let instructions: [String]
+    }
+
+    /// The library entry's name + how-to steps in the user's UI language,
+    /// via translate-exercise-guide's shared per-exercise cache. Returns
+    /// nil for English (the row itself is already English) so callers keep
+    /// the original untouched.
+    func translateExerciseGuide(exerciseId: String) async throws -> ExerciseGuideTranslation? {
+        let language = await currentAILanguageCode()
+        guard language != "en" else { return nil }
+        var request = try await authorizedRequest(path: "functions/v1/translate-exercise-guide", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["exerciseId": exerciseId, "language": language])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode(ExerciseGuideTranslation.self, from: data)
+    }
+
     /// Today's actual recorded workout sessions from connected wearables
     /// (Oura/Whoop) -- distinct from workout_log (what the user told Soma
     /// they did). HealthKit's own workouts are read separately, on-device,
@@ -1540,7 +1673,23 @@ final class SupabaseClient {
         // activityType == nil, i.e. isWalk == false: an honest "we don't
         // know" rather than a false positive that would wrongly block a
         // real workout from being auto-logged for another device's entries.
-        let path = "rest/v1/healthkit_workout_sync?select=source,title,start_time,duration_minutes,calories&start_time=gte.\(date)T00:00:00&start_time=lt.\(date)T23:59:59.999&order=start_time.asc"
+        //
+        // Window is the LOCAL day converted to UTC instants -- a bare
+        // "\(date)T00:00:00" read as UTC pulled yesterday evening's
+        // session into today for any user west of UTC (BUG-134).
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        dayFormatter.timeZone = .current
+        let iso = ISO8601DateFormatter()
+        let (windowStart, windowEnd): (String, String)
+        if let day = dayFormatter.date(from: date) {
+            let start = Calendar.current.startOfDay(for: day)
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
+            (windowStart, windowEnd) = (iso.string(from: start), iso.string(from: end))
+        } else {
+            (windowStart, windowEnd) = ("\(date)T00:00:00", "\(date)T23:59:59.999")
+        }
+        let path = "rest/v1/healthkit_workout_sync?select=source,title,start_time,duration_minutes,calories&start_time=gte.\(windowStart)&start_time=lt.\(windowEnd)&order=start_time.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try assertSuccess(response, data: data)
