@@ -40,6 +40,15 @@ enum UITestSupport {
         ProcessInfo.processInfo.environment["UITEST_ONBOARDING_SURVEY_STEP"]
     }
 
+    /// Boots straight into PostSetupFlowView (value names the step, e.g.
+    /// "paywall") -- the onboarding-paywall matrix would otherwise need
+    /// ~8 scripted taps through connect/notifications/consent to reach it.
+    /// Requires --ui-test-onboarding-demo-resume (signed in, onboarding
+    /// incomplete).
+    static var postSetupStartStep: String? {
+        ProcessInfo.processInfo.environment["UITEST_POSTSETUP"]
+    }
+
     /// Mocked StoreKit entitlement for fixture runs -- the simulator has
     /// no real purchases, so subscription-dependent UI (trial banner,
     /// Subscription row, quota locks, Superwall gating) is otherwise
@@ -126,6 +135,7 @@ enum UITestSupport {
     static let onboardingSurveyStartStep: String? = nil
     static let stubbedSession: URLSession? = nil
     static let subscriptionMock: (isSubscribed: Bool, tier: String, isInTrial: Bool)? = nil
+    static let postSetupStartStep: String? = nil
     static func bootstrapIfNeeded() {}
     #endif
 }
@@ -1107,21 +1117,27 @@ final class FixtureURLProtocol: URLProtocol {
         case path.hasSuffix("/rest/v1/users") && method == "GET":
             // The promo-chip scenario wants a REAL countdown ("5 DAYS"),
             // not the year-2099 paywall bypass every other scenario uses.
-            let bonusISO: String
-            if ProcessInfo.processInfo.environment["UITEST_SUBSCRIPTION"] == "free" {
-                bonusISO = FixtureData.iso(daysAgo: -5)
-            } else {
-                bonusISO = "2099-01-01T00:00:00Z"
-            }
-            return ([[
-                "referral_bonus_until": bonusISO,
+            var userRow: [String: Any] = [
                 "date_of_birth": "1999-08-16",
                 "contact_email": "fixture@soma4health.com",
                 "country": "US", "city": "New York",
                 "goals": [], "equipment": [], "household_equipment": [],
                 "injury_tags": [], "injury_severity": [:], "injury_type": [:],
                 "injury_pain_level": [:], "anchor_sessions": [],
-            ] as [String: Any]], 200)
+            ]
+            // Onboarding-paywall matrix suppresses the bonus entirely (it
+            // would short-circuit presentOnboardingPaywall before
+            // Superwall ever runs); the "free" chip scenario gets a real
+            // 5-day countdown; everything else keeps the 2099 bypass.
+            // Never `nil as Any` in this dict -- an Optional inside a
+            // JSON object fails serialization and the whole stub row
+            // silently degrades.
+            if ProcessInfo.processInfo.environment["UITEST_NO_REFERRAL_BONUS"] == nil {
+                userRow["referral_bonus_until"] = ProcessInfo.processInfo.environment["UITEST_SUBSCRIPTION"] == "free"
+                    ? FixtureData.iso(daysAgo: -5)
+                    : "2099-01-01T00:00:00Z"
+            }
+            return ([userRow], 200)
 
         // Account deletion: identities say "email" so no SIWA prompt runs
         // in tests; the function stub just confirms.

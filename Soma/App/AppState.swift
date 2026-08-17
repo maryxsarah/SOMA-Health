@@ -64,7 +64,11 @@ final class AppState: ObservableObject {
             // straight on the survey at a specific question instead (see
             // UITestSupport.onboardingSurveyStartStep) -- nil in Release,
             // so this is always .connectDevice outside of DEBUG test runs.
-            screen = UITestSupport.onboardingSurveyStartStep != nil ? .survey : .connectDevice
+            if UITestSupport.postSetupStartStep != nil {
+                screen = .postSetup
+            } else {
+                screen = UITestSupport.onboardingSurveyStartStep != nil ? .survey : .connectDevice
+            }
         }
 
         // A dead refresh token has no local recovery -- bounce to sign-in

@@ -79860,6 +79860,66 @@
         }
       }
     },
+    "home.widget.nutrition.loggedNoTarget" : {
+      "comment" : "Home: nutrition widget caption when meals are logged but no daily target exists yet",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kcal erfasst · Ziel in Ernährung festlegen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kcal logged · set a target in Nutrition"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kcal registradas · fija un objetivo en Nutrición"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kcal enregistrées · fixe un objectif dans Nutrition"
+          }
+        },
+        "hy" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "գրանցված կկալ · նշիր նպատակ Սնուցման մեջ"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kcal registrate · imposta un obiettivo in Nutrizione"
+          }
+        },
+        "ka" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ჩაწერილი კკალ · დასახე მიზანი კვებაში"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ккал записано · задай цель в «Питании»"
+          }
+        },
+        "sr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "забележено kcal · постави циљ у Исхрани"
+          }
+        }
+      }
+    },
     "home.widget.nutrition.macroValue" : {
       "comment" : "Home: nutrition widget macro cell value, consumed vs target grams",
       "extractionState" : "manual",
