@@ -183,13 +183,25 @@ export async function fetchCandidateExerciseNames(
   const cardioEquipmentValues = Array.from(new Set([...equipmentValues, ...extraCardioLibraryEquipment]));
   // deno-lint-ignore no-explicit-any
   const withCardioEquipmentFilter = (query: any) => query.or(equipmentOrClause(cardioEquipmentValues));
+  // Structural guarantee, not just a lucky property of today's data: every
+  // name this function can hand the LLM must resolve to a real reference
+  // photo client-side (ExerciseDetailView / SupabaseClient.fetchExercise-
+  // LibraryEntry). A real query against the linked project confirmed 0 of
+  // 874 exercise_library rows currently have a null/empty image_paths --
+  // this filter is what keeps that true if a future Free Exercise DB
+  // re-import ever lands a name-only stub row, rather than relying on the
+  // import staying perfect forever. Folded into withoutPartnerRequired
+  // below (applied at every one of this function's ~10 query call sites)
+  // instead of its own wrapper, since the two are always applied together.
+  // deno-lint-ignore no-explicit-any
+  const withImageCoverage = (query: any) => query.not("image_paths", "is", null).not("image_paths", "eq", "{}");
   // Excluded from every tier below, same "assume the more restrictive
   // case by default" posture as equipment (assume you don't have gear you
   // didn't list) -- most users train alone, and a suggestion that needs a
   // second person with no solo alternative isn't actually usable. See the
   // requires_partner migration for how this was classified.
   // deno-lint-ignore no-explicit-any
-  const withoutPartnerRequired = (query: any) => query.eq("requires_partner", false);
+  const withoutPartnerRequired = (query: any) => withImageCoverage(query.eq("requires_partner", false));
 
   let mainNames: string[] = [];
   if (bodyPart !== "cardio" && bodyPart !== "recovery") {

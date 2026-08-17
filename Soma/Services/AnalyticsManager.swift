@@ -107,6 +107,27 @@ final class AnalyticsManager {
         log(.subscriptionCancelled)
     }
 
+    /// A `register(placement:)` call errored before it could present --
+    /// e.g. the paywall webview failed to load. See SuperwallDiagnostics,
+    /// the sole call site for this and `paywallSkipped` below.
+    func paywallPresentationFailed(placement: String, error: Error) {
+        log(
+            .paywallPresentationFailed,
+            parameters: [
+                Parameter.placement: placement,
+                Parameter.errorDescription: String(describing: error),
+            ]
+        )
+    }
+
+    /// A `register(placement:)` call was skipped -- most often because the
+    /// placement isn't attached to any campaign on the Superwall dashboard
+    /// yet (`PaywallSkippedReason.placementNotFound`), which otherwise
+    /// looks identical to "user already has access." See SuperwallDiagnostics.
+    func paywallSkipped(placement: String, reason: String) {
+        log(.paywallSkipped, parameters: [Parameter.placement: placement, Parameter.reason: reason])
+    }
+
     // MARK: - Generic
 
     func featureUsed(name: String) {
@@ -137,6 +158,8 @@ final class AnalyticsManager {
         case trialStarted = "trial_started"
         case subscriptionStarted = "subscription_started"
         case subscriptionCancelled = "subscription_cancelled"
+        case paywallPresentationFailed = "paywall_presentation_failed"
+        case paywallSkipped = "paywall_skipped"
         case featureUsed = "feature_used"
     }
 
@@ -145,6 +168,9 @@ final class AnalyticsManager {
         static let featureName = "feature_name"
         static let provider = "provider"
         static let surface = "surface"
+        static let placement = "placement"
+        static let reason = "reason"
+        static let errorDescription = "error_description"
     }
 
     private static let hasSubmittedFirstPromptKey = "com.soma.analytics.hasSubmittedFirstPrompt"

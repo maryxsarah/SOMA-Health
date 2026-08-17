@@ -136,8 +136,15 @@ struct PostSetupFlowView: View {
             return
         }
         paywallError = nil
-        let handler = PaywallPresentationHandler()
-        handler.onError { _ in
+        // Diagnostics handler (onSkip logging/analytics) + this screen's
+        // own retry UI. onError REPLACES the diagnostics one (the handler
+        // stores a single block), so re-report the failure to analytics
+        // here alongside setting the visible error state. No win-back
+        // onDismiss here on purpose -- onboarding_paywall is not a
+        // dismissible-decline placement (see WinBackOfferManager).
+        let handler = SuperwallDiagnostics.handler(placement: "onboarding_paywall")
+        handler.onError { error in
+            AnalyticsManager.shared.paywallPresentationFailed(placement: "onboarding_paywall", error: error)
             paywallError = String(localized: "postSetup.paywall.error", defaultValue: "Couldn't load the checkout screen. Check your connection and try again.", comment: "Shown when Superwall's onboarding paywall fails to present, with a retry button below it")
         }
         Superwall.shared.register(placement: "onboarding_paywall", handler: handler) {

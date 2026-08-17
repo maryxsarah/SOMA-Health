@@ -1177,7 +1177,11 @@ final class ProfileStore: ObservableObject {
     /// placements -- someone who explicitly taps in to see premium options
     /// should see them regardless.
     func presentPremiumPaywall() {
-        Superwall.shared.register(placement: "view_premium")
+        let handler = SuperwallDiagnostics.handler(placement: "view_premium")
+        handler.onDismiss { _, result in
+            WinBackOfferManager.maybePresentAfterDecline(result: result)
+        }
+        Superwall.shared.register(placement: "view_premium", handler: handler)
     }
 
     func connectDevice(_ provider: Provider, appState: AppState) {

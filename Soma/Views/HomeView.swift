@@ -83,8 +83,11 @@ struct HomeView: View {
     @State private var scanStreak = 0
     /// Raw scan dates -- feeds the scan streak.
     @State private var scanDates: Set<String> = []
-    /// All AI generations logged today (any source) -- compared against the
-    /// tier's daily limit to drive the scan row's `locked` state.
+    /// Actual AI *workout* generations logged today (suggestion + gym_photo
+    /// sources only, matching the server's WORKOUT_GENERATION_SOURCES) --
+    /// compared against the tier's daily limit to drive the scan row's
+    /// `locked` state. Must stay source-filtered -- see
+    /// SupabaseClient.fetchTodaysGenerationCount's doc comment.
     @State private var todaysGenerationCount = 0
     /// Profile's weekly session target -- the week card's progress bar and
     /// streak pill must agree with Profile (guide 03, SELF-CHECK).
@@ -532,7 +535,14 @@ struct HomeView: View {
             action()
             return
         }
-        Superwall.shared.register(placement: "detail_access", feature: action)
+        let handler = SuperwallDiagnostics.handler(placement: "detail_access")
+        // Dismissible placement -- eligible for the exit-intent win-back
+        // offer on a genuine decline. onboarding_paywall deliberately
+        // does NOT get this (see PostSetupFlowView.presentOnboardingPaywall).
+        handler.onDismiss { _, result in
+            WinBackOfferManager.maybePresentAfterDecline(result: result)
+        }
+        Superwall.shared.register(placement: "detail_access", handler: handler, feature: action)
     }
 
     /// The single routing decision for "what does today's workout look
@@ -1400,7 +1410,11 @@ struct HomeView: View {
     private var trialUpgradeBanner: some View {
         Button {
             AnalyticsManager.shared.featureUsed(name: "trial_upgrade_banner")
-            Superwall.shared.register(placement: "view_premium")
+            let handler = SuperwallDiagnostics.handler(placement: "view_premium")
+            handler.onDismiss { _, result in
+                WinBackOfferManager.maybePresentAfterDecline(result: result)
+            }
+            Superwall.shared.register(placement: "view_premium", handler: handler)
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "sparkles")
@@ -1449,7 +1463,11 @@ struct HomeView: View {
             scanUnavailableReason = .workoutSet
         case .locked:
             if SubscriptionManager.shared.tier != "annual" {
-                Superwall.shared.register(placement: "view_premium")
+                let handler = SuperwallDiagnostics.handler(placement: "view_premium")
+                handler.onDismiss { _, result in
+                    WinBackOfferManager.maybePresentAfterDecline(result: result)
+                }
+                Superwall.shared.register(placement: "view_premium", handler: handler)
             } else {
                 // Annual tier, quota spent for today: no paywall to show,
                 // but still owes the tap an explanation rather than silence.

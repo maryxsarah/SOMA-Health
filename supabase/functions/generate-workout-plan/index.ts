@@ -43,8 +43,11 @@ import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { decideFinisher, type FinisherDecision } from "./finisherCatalog.ts";
 import type { TrainingEmphasis } from "../_shared/nutritionTargets.ts";
-import { findDuplicateExerciseNames } from "./planValidation.ts";
+import { coolDownRepeatsYesterday, findDuplicateExerciseNames, finisherMissing } from "./planValidation.ts";
+import { findWeightCeilingViolations } from "./weightValidation.ts";
+import { reconcileExerciseDurations } from "./durationValidation.ts";
 import { buildLoadGuidance } from "./loadGuidance.ts";
+import { buildWorkoutSchema } from "./workoutSchema.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
 import { resolveFreeTextEquipment } from "../_shared/equipment.ts";
 import { fetchOutdoorSafetyForCity, isOutdoorCardioExerciseName } from "../_shared/weatherSafety.ts";
@@ -76,91 +79,11 @@ const MODEL = "claude-haiku-4-5";
 // cardio is a small slice of any given candidate pool.
 const MIN_CANDIDATES_AFTER_WEATHER_EXCLUSION = 5;
 
-// Exercise `name` is constrained to a request-scoped closed vocabulary
-// (see _shared/exerciseLibraryMatch.ts) via a JSON-schema enum so every
-// name the model can possibly return has real, correctly matched media --
-// same "deterministic vocabulary, never free text" pattern already used
-// for equipment/goal tags elsewhere in this codebase.
-function buildExerciseSchema(candidateNames: string[]) {
-  return {
-    type: "object",
-    properties: {
-      name: { type: "string", enum: candidateNames },
-      sets: { type: "integer" },
-      reps: { type: "string" },
-      weight_guidance: { type: "string" },
-      intensity: { type: "string" },
-      duration_minutes: { type: "integer" },
-      // How long to rest AFTER this exercise (between sets/before the next
-      // item) in seconds -- 0 for anything with no meaningful rest (a
-      // stretch, a warm-up cardio item). Informational/display-only:
-      // duration_minutes above already includes rest in its total, so this
-      // is never separately summed into the session duration.
-      rest_seconds: { type: "integer" },
-      instructions: { type: "string" },
-    },
-    required: [
-      "name",
-      "sets",
-      "reps",
-      "weight_guidance",
-      "intensity",
-      "duration_minutes",
-      "rest_seconds",
-      "instructions",
-    ],
-    additionalProperties: false,
-  };
-}
-
-function buildBlockSchema(exerciseSchema: ReturnType<typeof buildExerciseSchema>) {
-  return {
-    type: "object",
-    properties: {
-      // e.g. "Block 1", "Superset A", "Block 3 - Optional Finisher"
-      name: { type: "string" },
-      // How many times to cycle through this block's exercises -- 1 for a
-      // straight-through block, >1 for a circuit/superset.
-      rounds: { type: "integer" },
-      rest_between_rounds: { type: "string" },
-      exercises: { type: "array", items: exerciseSchema },
-      // True only for the optional finisher block, if one is included today
-      // -- an explicit flag rather than string-matching the block name, so
-      // the client can reliably show the "optional finisher" badge.
-      is_finisher: { type: "boolean" },
-    },
-    required: ["name", "rounds", "rest_between_rounds", "exercises", "is_finisher"],
-    additionalProperties: false,
-  };
-}
-
-function buildWorkoutSchema(candidateNames: string[]) {
-  // The exercise schema (dominated by the candidate-name enum) is defined
-  // once via $defs and referenced 3x via $ref, rather than embedded 3
-  // separate times -- Anthropic's structured-output schema compiler rejects
-  // an inlined-3x version of this schema at candidate counts as low as ~130
-  // with "Schema is too complex for compilation", even though the enum
-  // itself is well within any documented size limit. $ref alone roughly
-  // halves the compiled cost; MAIN/STRETCH_CANDIDATE_LIMIT in
-  // exerciseLibraryMatch.ts additionally caps candidates so the deduped
-  // list stays well under the empirically-found ~115-130 ceiling.
-  const exerciseRef = { "$ref": "#/$defs/exercise" };
-  const blockSchema = buildBlockSchema(exerciseRef as unknown as ReturnType<typeof buildExerciseSchema>);
-  return {
-    "$defs": {
-      exercise: buildExerciseSchema(candidateNames),
-    },
-    type: "object",
-    properties: {
-      focus: { type: "string" },
-      warm_up: { type: "array", items: exerciseRef },
-      blocks: { type: "array", items: blockSchema },
-      cool_down: { type: "array", items: exerciseRef },
-    },
-    required: ["focus", "warm_up", "blocks", "cool_down"],
-    additionalProperties: false,
-  };
-}
+// buildExerciseSchema/buildBlockSchema/buildWorkoutSchema live in
+// workoutSchema.ts (pure, no dependency on anything else in this file) --
+// pulled out specifically so they're directly unit-testable (importing
+// index.ts itself for a test would run its top-level Deno.serve as a side
+// effect). See that file for buildWorkoutSchema's minItems guarantee.
 
 interface Selection {
   title: string;
@@ -511,6 +434,11 @@ Deno.serve(async (req: Request) => {
       ? { title: `${bodyPartDisplayName(resolvedBodyPart)} (adjusted for your noted injury)`, bodyPart: resolvedBodyPart }
       : selection;
 
+    // Moved up from where it used to be computed (further down, alongside
+    // candidate-exercise filtering) so the finisher decision below can see
+    // it too -- depends only on userRow, already fetched, so there's no
+    // ordering hazard in moving it earlier.
+    const freeTextEquipment = resolveFreeTextEquipment((userRow as UserRow | null)?.other_equipment_notes ?? null);
     // Deterministic finisher decision -- whether one appears at all today,
     // and whether it's the exceptional max-effort version. Never left to
     // the LLM: gated on category, readiness, injury contraindications, and
@@ -519,6 +447,18 @@ Deno.serve(async (req: Request) => {
       (userRow as UserRow | null)?.injury_tags ?? [],
       ((userRow as UserRow | null)?.injury_severity ?? {}) as Record<string, InjurySeverityLevel>,
     );
+    // BUG report: decideFinisher had no equipment signal at all, so a
+    // "sprints on the treadmill" style finisher could never be selected
+    // even for a user who owns one -- see finisherCatalog.ts's
+    // selectFinisher for how this is used (full_body day + real cardio
+    // equipment -> prefers the cardio/sprint_interval concept). Free text
+    // is the only source specific enough to mean "the user has a
+    // treadmill/bike/rower/etc" (unlocksCardio); "bike" is the one
+    // structured EquipmentTag preset that's equally unambiguous -- the
+    // others (gym, crossfit, ...) only make cardio-machine access
+    // plausible, not confirmed, so they're deliberately left out.
+    const hasCardioEquipment = freeTextEquipment.unlocksCardio ||
+      ((userRow as UserRow | null)?.equipment ?? []).includes("bike");
     const finisherDecision = decideFinisher(
       category,
       resolvedBodyPart,
@@ -527,6 +467,7 @@ Deno.serve(async (req: Request) => {
       (recentLogs ?? []) as WorkoutLogRow[],
       addDays(date, -1),
       (userRow as UserRow | null)?.training_emphasis ?? null,
+      hasCardioEquipment,
     );
 
     // Same closed-vocabulary keyword exclusions used to keep the finisher
@@ -608,6 +549,11 @@ Deno.serve(async (req: Request) => {
       date,
     );
 
+    // Same fallback formula buildPrompt uses internally for its own copy
+    // of this (loadGuidance's prompt text) -- needed again out here so
+    // the weight-ceiling retry below checks the model's output against
+    // the EXACT SAME ceiling the prompt just told it about.
+    const experience = (userRow as UserRow | null)?.experience_level ?? "moderate";
     const prompt = buildPrompt(
       category,
       resolvedSelection,
@@ -635,11 +581,18 @@ Deno.serve(async (req: Request) => {
     // structured EquipmentTag resolution, and specifically unlocks a
     // small cardio slice (see WARMUP_CARDIO_LIMIT) so warm-up can
     // actually name a real treadmill/bike/etc item when the user has one.
-    const freeTextEquipment = resolveFreeTextEquipment((userRow as UserRow | null)?.other_equipment_notes ?? null);
+    // (freeTextEquipment itself is now computed earlier, alongside the
+    // finisher decision above, which also needs it -- kept here only as
+    // the point where it's actually consumed for candidate filtering.)
     // Same suggestion title picked in the last 2 days -- BUG report: the
-    // same workout, day after day. Soft-excluded, see
+    // same workout, day after day (now also covers cool_down -- BUG
+    // report: cool_down never varies). Soft-excluded, see
     // MIN_CANDIDATES_AFTER_FRESHNESS_EXCLUSION.
     const recentExerciseNames = await fetchRecentExerciseNames(supabase, userId, selection.title, date);
+    // Exact single-day comparison for the deterministic cool_down-repeat
+    // check below -- see fetchYesterdaysCoolDownNames's own doc comment
+    // for why this is separate from recentExerciseNames above.
+    const yesterdaysCoolDownNames = await fetchYesterdaysCoolDownNames(supabase, userId, selection.title, date);
     let candidateExerciseNames = await fetchCandidateExerciseNames(
       supabase,
       resolvedBodyPart,
@@ -669,7 +622,12 @@ Deno.serve(async (req: Request) => {
     }
     const workoutSchema = buildWorkoutSchema(candidateExerciseNames);
 
-    let plan = await callClaude(prompt, workoutSchema);
+    // Every callClaude result below is immediately reconciled against its
+    // own deterministic per-exercise time estimate (BUG report: a plan
+    // self-reported "~47 min total" that actually took 30-35 min -- see
+    // durationValidation.ts) before anything downstream reads its
+    // duration_minutes or computes a total from it.
+    let plan = reconcileExerciseDurations(await callClaude(prompt, workoutSchema));
     let actualDurationMinutes = computeTotalDuration(plan);
 
     // One bounded retry when a target was given and the total misses by
@@ -690,7 +648,7 @@ Deno.serve(async (req: Request) => {
         actualDurationMinutes > targetDurationRange.max + durationTolerance)
     ) {
       const gapPrompt = `${prompt}\n\nYour previous attempt totaled ~${actualDurationMinutes} min but the target is ${targetDurationRange.min}-${targetDurationRange.max} min -- ${actualDurationMinutes < targetDurationRange.min ? "add 1-2 more working sets or an extra exercise to close the gap" : "trim a set or exercise to fit the target"}, don't just pad or shrink rest periods.`;
-      const retryPlan = await callClaude(gapPrompt, workoutSchema);
+      const retryPlan = reconcileExerciseDurations(await callClaude(gapPrompt, workoutSchema));
       const retryDuration = computeTotalDuration(retryPlan);
       const targetMid = (targetDurationRange.min + targetDurationRange.max) / 2;
       if (Math.abs(retryDuration - targetMid) < Math.abs(actualDurationMinutes - targetMid)) {
@@ -709,7 +667,7 @@ Deno.serve(async (req: Request) => {
     const duplicateNames = findDuplicateExerciseNames(plan);
     if (duplicateNames.length > 0) {
       const dedupPrompt = `${prompt}\n\nYour previous attempt used the exact same exercise more than once in this session: ${duplicateNames.join(", ")}. Every named exercise must appear AT MOST ONCE across the whole session (warm_up + every block + cool_down combined) -- replace each repeat with a different candidate exercise that targets a different specific muscle or movement pattern within the same body part, exactly as instructed above.`;
-      const dedupRetryPlan = await callClaude(dedupPrompt, workoutSchema);
+      const dedupRetryPlan = reconcileExerciseDurations(await callClaude(dedupPrompt, workoutSchema));
       const retryDuplicates = findDuplicateExerciseNames(dedupRetryPlan);
       if (retryDuplicates.length < duplicateNames.length) {
         plan = dedupRetryPlan;
@@ -722,6 +680,74 @@ Deno.serve(async (req: Request) => {
       const remainingDuplicates = retryDuplicates.length < duplicateNames.length ? retryDuplicates : duplicateNames;
       if (remainingDuplicates.length > 0) {
         console.warn(`generate-workout-plan: plan still repeats exercises after retry: ${remainingDuplicates.join(", ")}`);
+      }
+    }
+
+    // One bounded retry when cool_down is the EXACT same set of exercises
+    // as yesterday's for this same suggestion title (BUG report: cool_down
+    // never varies) -- the prompt already instructs body-part-specific
+    // cooldowns, and fetchRecentExerciseNames above now soft-excludes
+    // cool_down names from the candidate pool too, but neither is a
+    // guarantee, so this is the deterministic backstop, same retry
+    // mechanism as the duplicate-name check right above.
+    if (coolDownRepeatsYesterday(plan, yesterdaysCoolDownNames)) {
+      const coolDownPrompt = `${prompt}\n\nYour previous attempt used the EXACT SAME cool_down as yesterday's "${selection.title}" session: ${(yesterdaysCoolDownNames ?? []).join(", ")}. Today's cool_down must be different -- pick different stretches/mobility work (still appropriate to today's body part and intensity), not the identical set again.`;
+      const coolDownRetryPlan = reconcileExerciseDurations(await callClaude(coolDownPrompt, workoutSchema));
+      if (!coolDownRepeatsYesterday(coolDownRetryPlan, yesterdaysCoolDownNames)) {
+        plan = coolDownRetryPlan;
+        actualDurationMinutes = computeTotalDuration(plan);
+      } else {
+        // Keep the (still-repeating) retry's other improvements are moot
+        // here -- there's nothing "less wrong" about a second exact repeat,
+        // so just keep the original and log loud, same posture as the
+        // duplicate-name check when a retry doesn't fully land.
+        console.warn(`generate-workout-plan: cool_down still matches yesterday's exactly after retry (title="${selection.title}")`);
+      }
+    }
+
+    // One bounded retry when decideFinisher says a finisher block should be
+    // present but the generated plan doesn't have one (BUG report:
+    // "finisher rarely shows"). A real query against ai_workout_plan ruled
+    // out the eligibility gate as the cause -- it's already permissive
+    // (include=true for every moderate/push_hard plan); the gap is prompt
+    // adherence, same "instruction is a request, not a guarantee" posture
+    // as every other check in this section.
+    if (finisherMissing(plan, finisherDecision.include)) {
+      const finisherPrompt = `${prompt}\n\nYour previous attempt did not include a finisher block, even though one is required today (see the finisher instructions above). Add exactly one finisher as the LAST block, named "Block N - Optional Finisher" (is_finisher: true, every other block is_finisher: false), following the finisher guidance already given above.`;
+      const finisherRetryPlan = reconcileExerciseDurations(await callClaude(finisherPrompt, workoutSchema));
+      if (!finisherMissing(finisherRetryPlan, finisherDecision.include)) {
+        plan = finisherRetryPlan;
+        actualDurationMinutes = computeTotalDuration(plan);
+      } else {
+        console.warn(`generate-workout-plan: plan still missing its required finisher block after retry (title="${selection.title}")`);
+      }
+    }
+
+    // One bounded retry when a two-dumbbell squat/hinge exercise's stated
+    // weight_guidance exceeds the derated per-dumbbell ceiling (BUG
+    // report: a 168cm/60kg woman prescribed 16-24kg PER DUMBBELL, ~double
+    // a sane number) -- buildLoadGuidance's prompt already states this
+    // ceiling explicitly (see loadGuidance.ts), but same "instruction is
+    // a request, not a guarantee" posture as the duplicate-name check
+    // right above, reusing that exact retry mechanism rather than a new
+    // one.
+    const weightViolations = findWeightCeilingViolations(plan, userRow?.weight_kg ?? null, experience, userRow?.known_lifts ?? null);
+    if (weightViolations.length > 0) {
+      const violationList = weightViolations.map((v) => `${v.exerciseName} (stated ${v.statedPerImplementKg}kg each, ceiling is ${v.ceilingPerImplementKg.toFixed(0)}kg each)`).join("; ");
+      const weightPrompt = `${prompt}\n\nYour previous attempt prescribed too much weight PER DUMBBELL on a two-dumbbell exercise -- this is the barbell-equivalent TOTAL used as if it were a single dumbbell's weight, which is roughly double the safe amount: ${violationList}. Fix these specific exercises using the two-dumbbell guidance above -- state weight_guidance as "2xNkg dumbbells" with N at or under the ceiling given for that exercise, exactly as instructed above.`;
+      const weightRetryPlan = reconcileExerciseDurations(await callClaude(weightPrompt, workoutSchema));
+      const retryViolations = findWeightCeilingViolations(weightRetryPlan, userRow?.weight_kg ?? null, experience, userRow?.known_lifts ?? null);
+      if (retryViolations.length < weightViolations.length) {
+        plan = weightRetryPlan;
+        actualDurationMinutes = computeTotalDuration(plan);
+      }
+      // Keep whichever attempt had fewer violations rather than silently
+      // pretending the first (possibly worse) one was fine -- log loud
+      // instead of failing the whole request, an imperfect plan still
+      // beats no plan at all.
+      const remainingViolations = retryViolations.length < weightViolations.length ? retryViolations : weightViolations;
+      if (remainingViolations.length > 0) {
+        console.warn(`generate-workout-plan: plan still exceeds the two-dumbbell weight ceiling after retry: ${remainingViolations.map((v) => v.exerciseName).join(", ")}`);
       }
     }
 
@@ -1007,6 +1033,16 @@ function buildPrompt(
     ? `This target was already redirected server-side to a safe body part given the user's noted injury (their original selection conflicted with it) -- build the plan around "${selection.bodyPart}" as given, do not try to reintroduce the original focus area.`
     : `Build today's plan as a detailed breakdown of exactly this workout -- do not substitute a different type of workout or body part focus. If equipment or injuries below force a change to a specific exercise, keep it a close, safe variant of the same movement pattern rather than switching focus areas.`;
 
+  // Verified real gap (2026-08-15): the schema's blocks array had no
+  // minItems, so a technically-valid response with blocks: [] (nothing
+  // but warm_up/cool_down) was legal -- exactly the "sparse/empty-feeling
+  // rest day" risk. minItems: 1 (workoutSchema.ts's buildWorkoutSchema) is
+  // the hard guarantee; this is the explicit instruction backing it up,
+  // since a schema minimum alone doesn't tell the model WHAT to put there.
+  const restLightContentLine = category === "rest" || category === "light"
+    ? ` Low intensity does NOT mean low content -- even on a "${category}" day, blocks must still contain at least one real block of genuine, well-explained content (gentle mobility work, an easy walk, light stretching), never an empty or near-empty plan just because today isn't a hard training day.`
+    : "";
+
   return `You are a certified strength & conditioning coach writing a single day's workout plan for a fitness app user.
 
 The user has already chosen today's workout from the app's suggestion list: "${selection.title}" (target: ${selection.bodyPart}). ${substitutionLine}
@@ -1040,7 +1076,7 @@ ${
   }
 Return the full session as:
 - warm_up: 2-3 items that specifically prepare the body for THIS workout and adjust to today's health data above (e.g. lighter/shorter if recovery or sleep was poor) -- concrete named items like "5 min incline treadmill walk", "2x10 arm circles", "shoulder rolls", not a generic "warm up" placeholder. If the user has cardio equipment (treadmill, bike, etc. -- see equipment above) and today's intensity allows it, a brief cardio warm-up item is a great choice, not just static stretches.
-- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). VARIETY IS REQUIRED: use each specific named exercise AT MOST ONCE across the ENTIRE session (warm_up + every block + cool_down combined) -- never repeat the same exercise in multiple blocks or rounds of a superset. Like a real strength coach programming a session, deliberately spread the work across different specific muscles within the target body part (e.g. a lower-body day should mix quad-, hamstring-, glute-, and calf-dominant movements, not four variations of the same squat pattern) and different movement patterns (push/pull/hinge/squat/carry/isolation as relevant), not near-duplicates of one exercise. ${finisherInstruction}${goalInstruction}
+- blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). VARIETY IS REQUIRED: use each specific named exercise AT MOST ONCE across the ENTIRE session (warm_up + every block + cool_down combined) -- never repeat the same exercise in multiple blocks or rounds of a superset. Like a real strength coach programming a session, deliberately spread the work across different specific muscles within the target body part (e.g. a lower-body day should mix quad-, hamstring-, glute-, and calf-dominant movements, not four variations of the same squat pattern) and different movement patterns (push/pull/hinge/squat/carry/isolation as relevant), not near-duplicates of one exercise.${restLightContentLine} ${finisherInstruction}${goalInstruction}
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
 For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, rest_seconds (integer, real prescriptive rest AFTER this exercise before the next -- roughly 0 for a stretch/warm-up cardio item, 30-60s for lighter accessory/circuit work, 60-90s for standard working sets, 120-180s for heavy compound lifts near the top of the day's intensity; scale it with today's intensity and the user's experience level like a real coach would, don't default to the same number every time), and instructions -- 2-3 plain, easy-to-follow sentences giving EXACT form/technique PLUS one concrete, specific coaching cue for this exact movement (e.g. "brace your core like you're about to be punched in the stomach" or "drive through your mid-foot, not your toes" or "keep your ribs stacked over your hips throughout"). A generic filler cue that could apply to any exercise (e.g. "maintain good form", "focus on technique", "go at your own pace") is NOT acceptable -- the cue must be specific enough that it wouldn't make sense pasted onto a different exercise. Also give a one-line "focus" summarizing today's session.
@@ -1456,19 +1492,26 @@ async function fetchRecentGoalBlocks(supabase: any, userId: string, date: string
     .filter((r): r is GoalBlockHistoryEntry => typeof r.text === "string");
 }
 
-/// Main-block exercise names from the last 2 days' plans for this SAME
-/// suggestion title (e.g. "Leg Day" again) -- soft-excluded from today's
-/// candidate pool so picking the same suggestion two days running doesn't
-/// hand back an identical (or near-identical) exercise list (BUG report:
-/// the same workout, day after day). Deliberately scoped to `selected_title`
-/// rather than a stored body-part column (ai_workout_plan doesn't have
-/// one) -- matching the exact suggestion the user picked is both simpler
-/// and a closer match to the actual reported symptom than trying to infer
+/// Main-block AND cool_down exercise names from the last 2 days' plans for
+/// this SAME suggestion title (e.g. "Leg Day" again) -- soft-excluded from
+/// today's candidate pool so picking the same suggestion two days running
+/// doesn't hand back an identical (or near-identical) exercise list (BUG
+/// report: the same workout, day after day -- and separately, cool_down
+/// never varies at all). Deliberately scoped to `selected_title` rather
+/// than a stored body-part column (ai_workout_plan doesn't have one) --
+/// matching the exact suggestion the user picked is both simpler and a
+/// closer match to the actual reported symptom than trying to infer
 /// body-part equivalence some other way.
 ///
-/// Deliberately warm_up/cool_down are NOT included -- repeating the same
-/// warm-up stretch or mobility drill day to day is normal and often
-/// correct, unlike repeating the same main lift.
+/// Deliberately warm_up is still NOT included -- repeating the same warm-up
+/// stretch/mobility drill day to day is normal and often correct, unlike
+/// repeating the same main lift OR the same cool_down (the latter WAS
+/// excluded here too, on the same "normal to repeat" reasoning, until a
+/// real user report directly contradicted that for cool_down specifically
+/// -- warm_up has no equivalent report). This is a soft nudge only (it
+/// just removes these names from the candidate enum); see
+/// planValidation.ts's coolDownRepeatsYesterday for the deterministic
+/// backstop that actually enforces cool_down varying day to day.
 // deno-lint-ignore no-explicit-any
 async function fetchRecentExerciseNames(supabase: any, userId: string, title: string, date: string): Promise<string[]> {
   const { data, error } = await supabase
@@ -1481,14 +1524,39 @@ async function fetchRecentExerciseNames(supabase: any, userId: string, title: st
     .limit(3);
   if (error || !data) return [];
   const names = new Set<string>();
-  for (const row of data as { plan: { blocks?: { exercises?: { name?: string }[] }[] } | null }[]) {
+  for (const row of data as { plan: { blocks?: { exercises?: { name?: string }[] }[]; cool_down?: { name?: string }[] } | null }[]) {
     for (const block of row.plan?.blocks ?? []) {
       for (const exercise of block.exercises ?? []) {
         if (exercise.name) names.add(exercise.name);
       }
     }
+    for (const exercise of row.plan?.cool_down ?? []) {
+      if (exercise.name) names.add(exercise.name);
+    }
   }
   return Array.from(names);
+}
+
+/// EXACTLY yesterday's cool_down exercise names for this same suggestion
+/// title, or null when there's nothing to compare against (no plan
+/// yesterday, or it named no cool_down at all) -- distinct from
+/// fetchRecentExerciseNames above, which flattens up to 2 days into one
+/// soft-exclusion set with no per-day structure. This needs the exact
+/// single most-recent day's list, unflattened, for
+/// planValidation.ts's coolDownRepeatsYesterday to compare against.
+// deno-lint-ignore no-explicit-any
+async function fetchYesterdaysCoolDownNames(supabase: any, userId: string, title: string, date: string): Promise<string[] | null> {
+  const { data, error } = await supabase
+    .from("ai_workout_plan")
+    .select("plan")
+    .eq("user_id", userId)
+    .eq("selected_title", title)
+    .eq("date", addDays(date, -1))
+    .maybeSingle();
+  if (error || !data) return null;
+  const row = data as { plan: { cool_down?: { name?: string }[] } | null };
+  const names = (row.plan?.cool_down ?? []).map((e) => e.name).filter((n): n is string => Boolean(n));
+  return names.length > 0 ? names : null;
 }
 
 /// The coach's session as a plan block. workout_text lands in instructions

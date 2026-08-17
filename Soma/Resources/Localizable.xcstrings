@@ -51591,6 +51591,186 @@
         }
       }
     },
+    "exerciseDetail.noMedia.breathingMobility" : {
+      "comment" : "Media placeholder caption for a breathing/mobility exercise with no reference photo",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein Referenzfoto – folge dem Atem-/Mobilitätshinweis oben"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No reference photo — follow the breathing/mobility cue above"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin foto de referencia: sigue la indicación de respiración/movilidad de arriba"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas de photo de référence — suis la consigne de respiration/mobilité ci-dessus"
+          }
+        },
+        "hy" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Հղումային լուսանկար չկա. հետևիր վերևի շնչառության/շարժունակության հուշմանը"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nessuna foto di riferimento: segui l'indicazione di respirazione/mobilità qui sopra"
+          }
+        },
+        "ka" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "სარეფერენსო ფოტო არ არის — მიჰყევი ზემოთ მოცემულ სუნთქვის/მობილობის მითითებას"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Без референс-фото — следуй подсказке по дыханию/мобильности выше"
+          }
+        },
+        "sr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нема референтне фотографије — прати упутство за дисање/покретљивост изнад"
+          }
+        }
+      }
+    },
+    "exerciseDetail.noMedia.cardio" : {
+      "comment" : "Media placeholder caption for a cardio exercise with no reference photo",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein Referenzfoto – hier zählen Tempo und Einsatz, keine Position zum Nachmachen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No reference photo — this one's about pace and effort, not a position to copy"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin foto de referencia: aquí importan el ritmo y el esfuerzo, no una postura que copiar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas de photo de référence — ici c'est le rythme et l'effort qui comptent, pas une position à copier"
+          }
+        },
+        "hy" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Հղումային լուսանկար չկա. այստեղ կարևորը տեմպն ու ջանքն են, ոչ թե կրկնօրինակելու դիրքը"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nessuna foto di riferimento: qui contano ritmo e sforzo, non una posizione da copiare"
+          }
+        },
+        "ka" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "სარეფერენსო ფოტო არ არის — აქ მთავარია ტემპი და ძალისხმევა, და არა პოზა"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Без референс-фото — здесь важны темп и усилие, а не поза, которую нужно повторить"
+          }
+        },
+        "sr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нема референтне фотографије — овде су битни темпо и труд, а не положај који се копира"
+          }
+        }
+      }
+    },
+    "exerciseDetail.photoRetry" : {
+      "comment" : "Placeholder button shown when the exercise photo lookup failed; tapping retries",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Foto konnte nicht geladen werden – zum Wiederholen tippen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't load photo, tap to retry"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo cargar la foto; toca para reintentar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de charger la photo, touche pour réessayer"
+          }
+        },
+        "hy" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Լուսանկարը չհաջողվեց բեռնել. հպիր՝ նորից փորձելու համար"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossibile caricare la foto, tocca per riprovare"
+          }
+        },
+        "ka" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ფოტო ვერ ჩაიტვირთა — შეეხე ხელახლა საცდელად"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось загрузить фото — нажми, чтобы повторить"
+          }
+        },
+        "sr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Фотографија није учитана — додирни да покушаш поново"
+          }
+        }
+      }
+    },
     "exerciseDetail.rpeExplainer" : {
       "comment" : "Explainer for RPE shown when an exercise's intensity mentions RPE",
       "extractionState" : "manual",

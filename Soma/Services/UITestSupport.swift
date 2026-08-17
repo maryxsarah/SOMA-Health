@@ -570,6 +570,90 @@ enum FixtureData {
         "image_paths": ["exercises/Front_Box_Jump/0.jpg", "exercises/Front_Box_Jump/1.jpg"],
     ]
 
+    /// Real exercise_library rows, verbatim from the live seeded DB
+    /// (2026-08-15, matching generate-gym-workout/templates.ts's newly
+    /// hand-audited library_id mappings) -- lets todaysAIPlan below
+    /// exercise a *gym-photo-shaped* plan (library_id + target_area set
+    /// per exercise, exactly how generate-gym-workout emits them) with
+    /// more than one distinct real photo, plus genuinely no-match cases,
+    /// instead of every exercise silently resolving to the same fixture
+    /// row regardless of which one was tapped. See exerciseLibraryRow
+    /// above for the pre-existing name-lookup (AI-plan path) case.
+    static let buttLiftBridgeRow: [String: Any] = [
+        "id": "Butt_Lift_Bridge",
+        "name": "Butt Lift (Bridge)",
+        "force": "push",
+        "level": "beginner",
+        "mechanic": "isolation",
+        "equipment": "body only",
+        "primary_muscles": ["glutes"],
+        "secondary_muscles": ["hamstrings"],
+        "instructions": [
+            "Lie flat on the floor on your back with the hands by your side and your knees bent. Your feet should be placed around shoulder width. This will be your starting position.",
+            "Pushing mainly with your heels, lift your hips off the floor while keeping your back straight. Breathe out as you perform this part of the motion and hold at the top for a second.",
+            "Slowly go back to the starting position as you breathe in.",
+        ],
+        "category": "strength",
+        "image_paths": ["exercises/Butt_Lift_Bridge/0.jpg", "exercises/Butt_Lift_Bridge/1.jpg"],
+    ]
+
+    static let farmersWalkRow: [String: Any] = [
+        "id": "Farmers_Walk",
+        "name": "Farmer's Walk",
+        "force": NSNull(),
+        "level": "intermediate",
+        "mechanic": "compound",
+        "equipment": "other",
+        "primary_muscles": ["forearms"],
+        "secondary_muscles": ["abdominals", "glutes", "hamstrings", "lower back", "quadriceps", "traps"],
+        "instructions": [
+            "There are various implements that can be used for the farmers walk. These can also be performed with heavy dumbbells or short bars if these implements aren't available. Begin by standing between the implements.",
+            "After gripping the handles, lift them up by driving through your heels, keeping your back straight and your head up.",
+            "Walk taking short, quick steps, and don't forget to breathe. Move for a given distance, typically 50-100 feet, as fast as possible.",
+        ],
+        "category": "strongman",
+        "image_paths": ["exercises/Farmers_Walk/0.jpg", "exercises/Farmers_Walk/1.jpg"],
+    ]
+
+    /// Keyed by exercise_library.id -- the exercise_library route below
+    /// looks a request's `id=eq.X`/`name=eq.X` filter up here directly,
+    /// same shape PostgREST would actually resolve it to. Absent = a
+    /// genuine no-match, same as the real table (e.g. any of
+    /// CONFIRMED_NO_LIBRARY_EQUIVALENT's names).
+    static let exerciseLibraryRowsById: [String: [String: Any]] = [
+        "Front_Box_Jump": exerciseLibraryRow,
+        "Butt_Lift_Bridge": buttLiftBridgeRow,
+        "Farmers_Walk": farmersWalkRow,
+    ]
+
+    static let exerciseLibraryRowsByName: [String: [String: Any]] = [
+        "Front Box Jump": exerciseLibraryRow,
+        "Butt Lift (Bridge)": buttLiftBridgeRow,
+        "Farmer's Walk": farmersWalkRow,
+    ]
+
+    /// A gym-photo-shaped exercise entry -- library_id + target_area set,
+    /// exactly like generate-gym-workout emits (never both nil the way
+    /// the plain AI-plan path's `planExercise` is), so ExerciseDetailView
+    /// exercises its id-first lookup and (for the no-match cases) its
+    /// target_area-driven fallback categorization.
+    static func gymExercise(name: String, libraryId: String?, targetArea: String) -> [String: Any] {
+        var row: [String: Any] = [
+            "name": name,
+            "sets": 1,
+            "reps": "10",
+            "weight_guidance": "bodyweight",
+            "intensity": "RPE 6/10",
+            "duration_minutes": 2,
+            "instructions": "",
+            "target_area": targetArea,
+        ]
+        // Omitted entirely when nil, matching how templates.ts itself never
+        // guesses a library_id -- the field is genuinely absent, not null.
+        if let libraryId { row["library_id"] = libraryId }
+        return row
+    }
+
     /// ai_workout_plan row for J2 -- the plan genuinely carries the
     /// goal_block marker, so the GOAL BLOCK eyebrow is earned (BUG-77).
     static var todaysAIPlan: [[String: Any]] {
@@ -585,7 +669,21 @@ enum FixtureData {
                     "name": "Block 1",
                     "rounds": 1,
                     "rest_between_rounds": "90s",
-                    "exercises": [planExercise],
+                    // planExercise covers the plain AI-plan (name-only
+                    // lookup) media path; the four gymExercise entries
+                    // below are library_id + target_area shaped exactly
+                    // like generate-gym-workout emits them, covering: a
+                    // second real photo (proves lookup isn't just always
+                    // resolving to the one fixture row), and one fallback
+                    // case per MediaFallbackCategory bucket.
+                    "exercises": [
+                        planExercise,
+                        FixtureData.gymExercise(name: "Glute bridge", libraryId: "Butt_Lift_Bridge", targetArea: "Glutes, hamstrings"),
+                        FixtureData.gymExercise(name: "Dumbbell farmer's hold", libraryId: "Farmers_Walk", targetArea: "Grip, core"),
+                        FixtureData.gymExercise(name: "Wall sit", libraryId: nil, targetArea: "Quads"),
+                        FixtureData.gymExercise(name: "Burpee", libraryId: nil, targetArea: "Full body, cardio"),
+                        FixtureData.gymExercise(name: "Box breathing", libraryId: nil, targetArea: "Nervous system -- brings heart rate back down"),
+                    ],
                 ]],
                 "cool_down": [planExercise],
                 "goal_block": ["kind": "preset", "text": "plyo: box jumps, low dose"],
@@ -613,6 +711,33 @@ enum FixtureData {
                 "cool_down": [planExercise],
             ],
         ]]
+    }
+
+    /// A completed AI-plan workout from yesterday, `plan_snapshot` included
+    /// -- lets CompletedWorkoutView's "What you did" per-exercise tap
+    /// wiring (see ExerciseDetailView, and the CompletedWorkoutView.swift
+    /// change that added it) be exercised in a UI test/manual run without
+    /// needing to interactively complete today's workout first. Reuses
+    /// todaysAIPlan's own exercise set, so the same real-photo/fallback-
+    /// category coverage documented on that fixture applies here too.
+    static var pastAIWorkoutLog: [String: Any] {
+        [
+            "id": "wl-seed-past-ai",
+            "date": day(fromNow: -1),
+            "title": "Lower body strength",
+            "body_part": "lower_body",
+            "category": "moderate",
+            "source": "ai_plan",
+            "completed_at": iso(daysAgo: 1),
+            "plan_snapshot": (todaysAIPlan.first?["plan"]) as Any,
+            // WorkoutLogEntry.caloriesEstimated is non-optional (default
+            // `false` only covers Swift's memberwise init, not synthesized
+            // Decodable -- a missing key here throws, silently failing the
+            // whole [WorkoutLogEntry] array decode via callers' `try?` and
+            // leaving DayDetailView/CompletedWorkoutView looking at an
+            // empty log list instead of this row).
+            "calories_estimated": false,
+        ]
     }
 
     /// Same shape as todaysAIPlan, framed as a coach's verbatim block --
@@ -725,6 +850,21 @@ final class FixtureURLProtocol: URLProtocol {
             data.append(buffer, count: read)
         }
         return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
+    /// PostgREST-style single `eq.` filter value for one field
+    /// ("id=eq.Farmers_Walk" -> "Farmers_Walk"). `query` is already
+    /// percent-decoded once by `startLoading` above; the `&`-split here
+    /// only breaks on a literal ampersand, so a decoded value that itself
+    /// contained `&`, `=`, or `+` would still misparse -- no exercise_library
+    /// name does (verified against the real table), so that's a known,
+    /// harmless limit of this fixture parser, not of the app's own encoding.
+    private func queryFilterValue(_ query: String, field: String) -> String? {
+        let prefix = "\(field)=eq."
+        for param in query.components(separatedBy: "&") where param.hasPrefix(prefix) {
+            return String(param.dropFirst(prefix.count))
+        }
+        return nil
     }
 
     /// PostgREST-style day filtering ("date=eq.X", "date=gte.A&date=lte.B").
@@ -899,8 +1039,14 @@ final class FixtureURLProtocol: URLProtocol {
             return (FixtureData.recommendation(scenario: scenario, requested: Self.requestedCategory), 200)
 
         // Workout log: writes recorded, reads day-filtered like PostgREST.
+        // Carries plan_snapshot through when the caller sent one (real
+        // AI-plan completions always do, see SupabaseClient.logWorkout) --
+        // otherwise a completed-AI-plan round trip in this harness would
+        // always decode a nil planSnapshot and CompletedWorkoutView could
+        // never exercise its real "What you did" / per-exercise-tap path
+        // in a UI test, only its manual/device-detected fallback.
         case path.hasSuffix("/rest/v1/workout_log") && method == "POST":
-            Self.loggedWorkouts.append([
+            var row: [String: Any] = [
                 "id": "wl-\(Self.loggedWorkouts.count + 1)",
                 "date": requestBody["date"] as? String ?? FixtureData.today,
                 "title": requestBody["title"] as? String ?? "Workout",
@@ -909,11 +1055,23 @@ final class FixtureURLProtocol: URLProtocol {
                 "source": requestBody["source"] as? String ?? "ai_plan",
                 "calories_estimated": false,
                 "completed_at": FixtureData.iso(daysAgo: 0),
-            ])
+            ]
+            if let planSnapshot = requestBody["plan_snapshot"] {
+                row["plan_snapshot"] = planSnapshot
+            }
+            Self.loggedWorkouts.append(row)
             return ([:] as [String: Any], 201)
         case path.contains("/rest/v1/workout_log"):
-            // Custom-goal journeys keep exactly 3 seeded logs ("3 of 16").
-            let seeded = scenario == .customGoalWeek2 ? FixtureData.customGoalPastLogs : FixtureData.pastWorkoutLogs
+            // Custom-goal journeys keep exactly 3 seeded logs ("3 of 16");
+            // activeGoalWeek2 additionally seeds yesterday's completed
+            // AI-plan log (plan_snapshot included) so CompletedWorkoutView's
+            // per-exercise tap is reachable without completing a workout.
+            let seeded: [[String: Any]]
+            switch scenario {
+            case .customGoalWeek2: seeded = FixtureData.customGoalPastLogs
+            case .activeGoalWeek2: seeded = FixtureData.pastWorkoutLogs + [FixtureData.pastAIWorkoutLog]
+            default: seeded = FixtureData.pastWorkoutLogs
+            }
             return (filterByDate(seeded + Self.loggedWorkouts, query: query), 200)
 
         // Paywall bypass: far-future referral bonus means the detail sheet
@@ -952,10 +1110,21 @@ final class FixtureURLProtocol: URLProtocol {
                 "instructions": ["Встаньте перед тумбой.", "Запрыгните, мягко приземлитесь.", "Сойдите по одной ноге."],
             ] as [String: Any], 200)
 
-        // Real row (matches the seeded DB exactly) so ExerciseDetailView's
-        // image fetch -- unstubbed, goes over real network -- loads a real photo.
+        // Query-aware: resolves `id=eq.X` (generate-gym-workout's path) or
+        // `name=eq.X` (generate-workout-plan's path) the same way PostgREST
+        // actually would, against the small real-row fixture set above --
+        // matched exercises load a real photo (unstubbed, over real
+        // network); anything else returns [], the same genuine no-match
+        // shape as the real table, so ExerciseDetailView's fallback
+        // illustration is reachable in tests too, not just the happy path.
         case path.contains("/rest/v1/exercise_library"):
-            return ([FixtureData.exerciseLibraryRow], 200)
+            if let id = queryFilterValue(query, field: "id"), let row = FixtureData.exerciseLibraryRowsById[id] {
+                return ([row], 200)
+            }
+            if let name = queryFilterValue(query, field: "name"), let row = FixtureData.exerciseLibraryRowsByName[name] {
+                return ([row], 200)
+            }
+            return ([], 200)
 
         // Everything else: harmless empties in the right container shape.
         case method == "GET" && path.contains("/rest/v1/"):

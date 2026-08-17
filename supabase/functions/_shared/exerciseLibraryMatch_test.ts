@@ -76,6 +76,11 @@ interface Row {
   primary_muscles: string[];
   level: string;
   requires_partner: boolean;
+  /// Defaults to a non-empty placeholder path below for every fixture row
+  /// except the ones deliberately testing image-coverage exclusion -- see
+  /// "REGRESSION: a row with no reference photo never enters the
+  /// candidate vocabulary".
+  image_paths: string[];
 }
 
 /// Chainable thenable mimicking the small slice of postgrest-js the
@@ -115,6 +120,19 @@ class MockQuery {
     this.#rows = this.#rows.filter((r) => r.equipment === null || values.includes(r.equipment));
     return this;
   }
+  // Understands only the two .not() calls withImageCoverage generates:
+  // not("image_paths", "is", null) and not("image_paths", "eq", "{}").
+  not(col: keyof Row, op: "is" | "eq", value: unknown) {
+    if (op === "is" && value === null) {
+      this.#rows = this.#rows.filter((r) => r[col] !== null);
+      return this;
+    }
+    if (op === "eq" && value === "{}") {
+      this.#rows = this.#rows.filter((r) => !(Array.isArray(r[col]) && (r[col] as unknown[]).length === 0));
+      return this;
+    }
+    throw new Error(`unsupported not() call: not(${String(col)}, ${op}, ${JSON.stringify(value)})`);
+  }
   then(resolve: (v: { data: Row[] }) => void) {
     resolve({ data: this.#rows.slice(0, this.#limit) });
   }
@@ -124,7 +142,11 @@ function mockSupabase(rows: Row[]) {
   return { from: (_table: string) => new MockQuery(rows) };
 }
 
-const LIBRARY: Row[] = [
+// Every row gets a non-empty placeholder image_paths by default (added by
+// the .map() below) -- individual tests override it back to [] on a copy
+// of a single row to exercise the image-coverage filter itself, rather
+// than every other test having to spell out image_paths by hand.
+const LIBRARY: Row[] = ([
   { id: "bodyweight-flyes", name: "Bodyweight Flyes", category: "strength", equipment: "e-z curl bar", primary_muscles: ["chest"], level: "intermediate", requires_partner: false },
   { id: "pushups", name: "Pushups", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "beginner", requires_partner: false },
   { id: "barbell-bench-press", name: "Barbell Bench Press", category: "strength", equipment: "barbell", primary_muscles: ["chest"], level: "beginner", requires_partner: false },
@@ -144,7 +166,7 @@ const LIBRARY: Row[] = [
   // Real data uses "machine" for both cardio and strength machines --
   // see the extraCardioLibraryEquipment tests below.
   { id: "leg-press", name: "Leg Press", category: "strength", equipment: "machine", primary_muscles: ["quadriceps"], level: "beginner", requires_partner: false },
-];
+] as Omit<Row, "image_paths">[]).map((r) => ({ ...r, image_paths: [`exercises/${r.id}/0.jpg`] }));
 
 Deno.test("REGRESSION: floor-only user never sees the EZ-bar 'Bodyweight Flyes'", async () => {
   for (const equipment of [[], ["bodyweight_only"]]) {
@@ -152,6 +174,61 @@ Deno.test("REGRESSION: floor-only user never sees the EZ-bar 'Bodyweight Flyes'"
     assertFalse(names.includes("Bodyweight Flyes"), `leaked for equipment=${JSON.stringify(equipment)}`);
     assertFalse(names.includes("Barbell Bench Press"));
     assert(names.includes("Pushups"));
+  }
+});
+
+// --- image coverage (every candidate name must have a real reference photo) ---
+//
+// The whole point of exerciseLibraryMatch.ts is guaranteeing every name it
+// can hand the LLM resolves to real media client-side (see the file's own
+// top-of-file comment). A real query against the linked Supabase project
+// confirmed 0 of 874 exercise_library rows currently have a null/empty
+// image_paths, so this isn't closing an active data gap -- it's pinning
+// the guarantee structurally (withImageCoverage's .not() filters) so a
+// future data import can't silently reopen it.
+
+Deno.test("REGRESSION: a row with no reference photo never enters the candidate vocabulary", async () => {
+  const withImagelessRow = [
+    ...LIBRARY,
+    { id: "no-photo-row", name: "No Photo Row", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "beginner", requires_partner: false, image_paths: [] },
+  ];
+  const names = await fetchCandidateExerciseNames(mockSupabase(withImagelessRow), "upper_body", [], []);
+  assertFalse(names.includes("No Photo Row"), "a row with empty image_paths must never join the candidate vocabulary");
+  assert(names.includes("Pushups"), "rows with real image_paths should still join normally");
+});
+
+Deno.test("REGRESSION: an image-less row is excluded even when it's the only equipment/level match (fallback tiers too)", async () => {
+  // Isolate to a single body-only beginner strength row with no photo --
+  // every fallback tier (equipment-only, then broad bodyweight-beginner)
+  // must still exclude it rather than resurrect it once other candidates
+  // run out.
+  const onlyImagelessMatch = [
+    { id: "no-photo-row", name: "No Photo Row", category: "strength", equipment: "body only", primary_muscles: ["chest"], level: "beginner", requires_partner: false, image_paths: [] },
+  ];
+  await assertRejects(
+    () => fetchCandidateExerciseNames(mockSupabase(onlyImagelessMatch), "upper_body", [], []),
+    Error,
+    "no library exercises remain after safety exclusions",
+  );
+});
+
+Deno.test("every name INVARIANT: every real query call site in fetchCandidateExerciseNames applies the image-coverage filter", async () => {
+  // Broad sweep across body parts/tiers (main, cardio, stretch, warm-up
+  // cardio, goal union, safe fallback) with an image-less row unioned into
+  // every one of them -- none of the ~10 call sites should be the one that
+  // forgot the filter.
+  const imagelessId = "no-photo-row";
+  const imageless = { id: imagelessId, name: "No Photo Row", category: "strength", equipment: "body only", primary_muscles: ["chest", "quadriceps"], level: "beginner", requires_partner: false, image_paths: [] };
+  const withImageless = [...LIBRARY, imageless];
+  const scenarios: Array<[string, string[], string[], string | null, string[]]> = [
+    ["upper_body", [], [], null, []],
+    ["lower_body", [], [], null, []],
+    ["cardio", [], [], null, []],
+    ["upper_body", ["gym"], [], null, [imagelessId]], // goal union path
+  ];
+  for (const [bodyPart, equipment, excluded, experience, goalIds] of scenarios) {
+    const names = await fetchCandidateExerciseNames(mockSupabase(withImageless), bodyPart, equipment, excluded, experience, goalIds);
+    assertFalse(names.includes("No Photo Row"), `leaked for bodyPart=${bodyPart}`);
   }
 });
 

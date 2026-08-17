@@ -68,3 +68,45 @@ export function computeMoodCapApplied(
     todaysMoodRating <= LOW_MOOD_RATING_THRESHOLD &&
     (bandCategory === "moderate" || bandCategory === "push_hard");
 }
+
+/// Real, self-reported training frequency (Soma/Models/OnboardingSurveyModels.swift's
+/// WorkoutFrequency enum, mirrored server-side in generate-workout-plan/
+/// index.ts's workoutsPerWeekLabel) below which this cap never applies --
+/// that population's natural cadence already includes plenty of rest, so a
+/// forced "you need a rest day" reads as patronizing rather than useful.
+const SKIP_PROACTIVE_REST_BELOW = "zero_to_two";
+/// Below this many real daily_recommendation rows in the trailing window,
+/// there isn't enough data to say "no rest day all week" -- a user who
+/// only opens the app 2-3x/week simply has no row (not a "moderate" row)
+/// on the days they didn't check in, so an empty/sparse window must never
+/// be read as "a solid week of nothing but hard training".
+export const PROACTIVE_REST_MIN_RECOMMENDATIONS = 5;
+
+/**
+ * True when the trailing window (generate-recommendation/index.ts passes
+ * the last 7 days of daily_recommendation.category, excluding today) shows
+ * real recommendation history with NOT ONE rest/light day in it -- BUG:
+ * every existing cap in this file is reactive (fires off a bad signal);
+ * nothing ever proactively guarantees a calendar-based recovery day when
+ * the wearable signals simply look fine all week, which isn't how real
+ * hypertrophy/general-fitness programming works.
+ *
+ * Independent of every other cap (same "any one can fire" pattern as the
+ * rest of this file) -- this only ever caps to "light" (the floor), never
+ * escalates to "rest" the way the consecutive-days/severe-injury paths do.
+ * Skipped on an exceptional-readiness day, same bar the consecutive-days
+ * and volume caps already use to skip -- a genuinely great week isn't
+ * forced down, only a week that's simply had no bad signal at all.
+ */
+export function computeProactiveRestCapApplied(
+  workoutsPerWeek: string | null,
+  recommendationCategoriesInWindow: Category[],
+  exceptionalReadinessToday: boolean,
+  bandCategory: Category,
+): boolean {
+  if (workoutsPerWeek === SKIP_PROACTIVE_REST_BELOW) return false;
+  if (exceptionalReadinessToday) return false;
+  if (bandCategory !== "moderate" && bandCategory !== "push_hard") return false;
+  if (recommendationCategoriesInWindow.length < PROACTIVE_REST_MIN_RECOMMENDATIONS) return false;
+  return !recommendationCategoriesInWindow.some((c) => c === "rest" || c === "light");
+}

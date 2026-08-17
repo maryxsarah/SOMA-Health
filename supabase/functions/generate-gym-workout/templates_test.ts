@@ -5,7 +5,7 @@
 // bugs that made it exactly that.
 
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert";
-import { GYM_WORKOUT_TEMPLATES, selectTemplate } from "./templates.ts";
+import { CONFIRMED_NO_LIBRARY_EQUIVALENT, GYM_WORKOUT_TEMPLATES, selectTemplate } from "./templates.ts";
 import { EQUIPMENT_VOCABULARY } from "../_shared/equipment.ts";
 
 const CATEGORIES = ["rest", "light", "moderate", "push_hard"] as const;
@@ -57,6 +57,24 @@ Deno.test("selection prefers the template using the most equipment", () => {
   assertEquals(template.id, "light_dumbbells_full_body");
 });
 
+Deno.test("REGRESSION: confirming a treadmill actually selects a treadmill template", () => {
+  // BUG report: "treadmill" was a real, recognized EQUIPMENT_VOCABULARY
+  // entry, but no template's requiredEquipment ever named it, so
+  // confirming one in the gym-photo flow had zero effect on selection.
+  const template = selectTemplate("moderate", new Set(["treadmill"]), []);
+  assertEquals(template.id, "moderate_treadmill_intervals");
+  assert(template.requiredEquipment.includes("treadmill"));
+});
+
+Deno.test("the treadmill template is excluded (as high-impact) for a noted injury", () => {
+  // Running/sprinting is repeated-impact work, unlike the low-impact
+  // bike/rower cardio-machine templates -- an injured user with treadmill
+  // access must still fall back to something low-impact, not this one.
+  const template = selectTemplate("moderate", new Set(["treadmill"]), [], true);
+  assertEquals(template.highImpact, false);
+  assert(template.id !== "moderate_treadmill_intervals");
+});
+
 Deno.test("an injury excludes high-impact templates in every category", () => {
   for (const category of CATEGORIES) {
     for (const equipment of [new Set<string>(), FULL_GYM]) {
@@ -97,6 +115,48 @@ Deno.test("goals break ties between equally specific templates", () => {
 
 Deno.test("an unknown category throws rather than guessing", () => {
   assertThrows(() => selectTemplate("not_a_category", new Set(), []));
+});
+
+Deno.test("REGRESSION: every image-less template entry has been hand-audited, not silently unmatched", () => {
+  // BUG report: 43 of 84 template entries had no library_id, and every one
+  // of them turned out to return zero exact matches against the real
+  // exercise_library table -- roughly half of every gym-photo-generated
+  // workout had no media, by construction. 23 of those 43 turned out to
+  // have a real equivalent under a different name and are now wired in
+  // above; the remaining 20 genuinely have none (see
+  // CONFIRMED_NO_LIBRARY_EQUIVALENT's own comment for why, split by
+  // reason). This test is the enforcement: any exercise missing a
+  // library_id must be explicitly on that allowlist -- a *new* image-less
+  // entry that isn't on it means someone added an exercise without doing
+  // the lookup, which is exactly how this bug happened the first time.
+  const allNames = GYM_WORKOUT_TEMPLATES.flatMap((t) => [
+    ...t.warm_up,
+    ...t.blocks.flatMap((b) => b.exercises),
+    ...t.cool_down,
+  ]);
+
+  const unmatched = allNames.filter((e) => !e.library_id);
+  for (const exercise of unmatched) {
+    assert(
+      CONFIRMED_NO_LIBRARY_EQUIVALENT.has(exercise.name),
+      `"${exercise.name}" has no library_id and is not on CONFIRMED_NO_LIBRARY_EQUIVALENT -- ` +
+        `look it up against exercise_library and either wire in the real match or add it to the ` +
+        `allowlist with a reason`,
+    );
+  }
+
+  // And the reverse: every allowlisted name must still actually be
+  // image-less in the templates today, so the list can't silently drift
+  // stale (e.g. a later edit adds a library_id but forgets to remove the
+  // now-wrong allowlist entry).
+  const unmatchedNames = new Set(unmatched.map((e) => e.name));
+  for (const name of CONFIRMED_NO_LIBRARY_EQUIVALENT) {
+    assert(
+      unmatchedNames.has(name),
+      `"${name}" is on CONFIRMED_NO_LIBRARY_EQUIVALENT but now has a library_id (or no longer ` +
+        `appears in any template) -- remove it from the allowlist`,
+    );
+  }
 });
 
 Deno.test("every exercise is performable with the declared equipment", () => {

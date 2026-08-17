@@ -82,21 +82,32 @@ const FINISHER_CATALOG: FinisherDefinition[] = [
 /// full-body metabolic-conditioning entry if there's no exact match
 /// (e.g. an injury-substituted body part this catalog doesn't cover yet).
 ///
-/// On a "cut" training_emphasis (from the goal-photo comparison), the
-/// cardio/sprint_interval entry is preferred over the body-part match --
-/// e.g. leg day would otherwise always get a strength-flavored "complex"
-/// finisher (see FINISHER_CATALOG's lower_body entry) with nothing that
-/// actually raises heart rate, even for someone whose stated direction is
-/// leaning out. bulk/recomp/maintain/unknown keep the existing body-part
-/// match unchanged -- this is deliberately a "cut" override, not a general
-/// rebalancing, since more compound/heavy work is exactly right for bulk.
-/// Equipment isn't checked here: the cardio concept's concrete exercises
-/// are still elaborated under the prompt's existing "ONLY the user's
-/// available equipment" constraint (index.ts's finisherEquipmentConstraint),
-/// so a bodyweight-only user gets bodyweight cardio (e.g. high knees,
-/// mountain climbers), not an assumed treadmill.
-function selectFinisher(bodyPart: string, trainingEmphasis: TrainingEmphasis | null): FinisherDefinition {
-  if (trainingEmphasis === "cut") {
+/// Overridden to the cardio/sprint_interval entry in two cases:
+/// - "cut" training_emphasis (from the goal-photo comparison) -- e.g. leg
+///   day would otherwise always get a strength-flavored "complex" finisher
+///   (see FINISHER_CATALOG's lower_body entry) with nothing that actually
+///   raises heart rate, even for someone whose stated direction is leaning
+///   out. bulk/recomp/maintain/unknown keep the existing body-part match
+///   unchanged -- this is deliberately a "cut" override, not a general
+///   rebalancing, since more compound/heavy work is exactly right for bulk.
+/// - `hasCardioEquipment` on a full_body day specifically (BUG report:
+///   "sprints on the treadmill" style finisher was never reachable --
+///   nothing passed an equipment signal into this function at all, so it
+///   literally could not happen regardless of what the user owned).
+///   Deliberately scoped to full_body only, not every body part: the
+///   full_body slot already maps to a cardio-adjacent
+///   "metabolic_conditioning" concept, so swapping in the more specific
+///   "sprint_interval" concept there is a natural upgrade, not a
+///   replacement of a deliberately different upper/lower/core finisher a
+///   user on those days would otherwise get. Equipment IS checked here
+///   now (unlike the exercises themselves, which still stay elaborated
+///   under the prompt's existing "ONLY the user's available equipment"
+///   constraint, index.ts's finisherEquipmentConstraint) -- this is what
+///   makes the cardio concept reachable at all when it wasn't before;
+///   which concrete cardio implement gets named is still the elaboration
+///   step's job, same as before.
+function selectFinisher(bodyPart: string, trainingEmphasis: TrainingEmphasis | null, hasCardioEquipment: boolean): FinisherDefinition {
+  if (trainingEmphasis === "cut" || (hasCardioEquipment && bodyPart === "full_body")) {
     const cardio = FINISHER_CATALOG.find((f) => f.focusArea === "cardio");
     if (cardio) return cardio;
   }
@@ -149,13 +160,14 @@ export function decideFinisher(
   recentLogs: { date: string; body_part: string; category: string }[],
   yesterday: string,
   trainingEmphasis: TrainingEmphasis | null = null,
+  hasCardioEquipment: boolean = false,
 ): FinisherDecision {
   const eligibleCategory = category === "moderate" || category === "push_hard";
   if (!eligibleCategory) {
     return { include: false, exceptional: false, definition: null };
   }
 
-  const candidate = selectFinisher(bodyPart, trainingEmphasis);
+  const candidate = selectFinisher(bodyPart, trainingEmphasis, hasCardioEquipment);
   const safeFromInjury = isFinisherSafeGivenInjuries(candidate, excludedKeywords);
   const safeFromSplit = !conflictsWithRecentSplit(bodyPart, recentLogs, yesterday);
   return {

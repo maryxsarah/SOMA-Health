@@ -22,6 +22,26 @@ without a full Xcode install and your own accounts/credentials.
   (`deno` is already installed on this machine and was used to type-check
   the Edge Functions during the build.)
 
+## 0b. Git commit hooks (Conventional Commits)
+
+Run once per clone:
+
+```
+scripts/install-hooks.sh
+```
+
+This symlinks `scripts/hooks/commit-msg` into `.git/hooks/commit-msg`
+(`.git/hooks/` isn't tracked by git, so every clone needs this) and points
+the clone's `commit.template` at `.gitmessage`, so a plain `git commit`
+(no `-m`) opens with the format reminder pre-loaded.
+
+The hook rejects any commit whose subject line doesn't match
+`type(scope?): subject`, where `type` is one of `feat fix refactor test
+docs chore perf build ci`. Merge and revert commits are exempt (git
+generates those itself). Bypass for a single commit when you really need
+to: `git commit --no-verify`. Plain POSIX `sh` on purpose — no Node/npm
+dependency for this, matching the rest of `scripts/`.
+
 ## 1. Generate the Xcode project
 
 **Use the pinned XcodeGen 2.42.0 binary at `.xcodegen-2.42.0/bin/xcodegen`,
