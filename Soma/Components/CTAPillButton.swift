@@ -136,6 +136,16 @@ struct CTAPillButton: View {
                 .init(color: Color(red: 140 / 255, green: 175 / 255, blue: 255 / 255).opacity(0.95), location: 0.11),
                 .init(color: SomaTokens.accent.opacity(0.5), location: 0.19),
                 .init(color: SomaTokens.accent.opacity(0), location: 0.31),
+                // Faint counter-highlight opposite the comet -- with 69% of
+                // the sweep fully transparent the rim went dark for ~3s of
+                // every 4s cycle, which read as the button blinking rather
+                // than a highlight traveling (reported on the referral
+                // step's lone Skip CTA). A whisper of light on the far side
+                // keeps the rim alive between passes without a second comet.
+                .init(color: SomaTokens.accent.opacity(0.16), location: 0.55),
+                .init(color: Color(red: 140 / 255, green: 175 / 255, blue: 255 / 255).opacity(0.28), location: 0.64),
+                .init(color: SomaTokens.accent.opacity(0.1), location: 0.74),
+                .init(color: SomaTokens.accent.opacity(0), location: 0.86),
                 .init(color: SomaTokens.accent.opacity(0), location: 1)
             ],
             center: .center

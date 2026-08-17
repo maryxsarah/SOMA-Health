@@ -100,12 +100,21 @@ final class SubscriptionManager: ObservableObject {
         mirrorSubscriptionStatusToSuperwall()
     }
 
-    /// A single "premium" entitlement identifier covers both plans --
+    /// A single "pro" entitlement identifier covers both plans --
     /// which plan (monthly vs annual) is tracked separately in Supabase's
     /// `subscription_tier`, not duplicated into Superwall's entitlement
     /// set, since Superwall's own paywall gating only needs "paid or not."
     private func mirrorSubscriptionStatusToSuperwall() {
-        Superwall.shared.subscriptionStatus = isSubscribed ? .active([Entitlement(id: "premium")]) : .inactive
+        // "pro" matches the dashboard's Products & Entitlements identifier
+        // exactly -- a mismatched id ("premium") makes entitlement-based
+        // audience filters silently never match.
+        Superwall.shared.subscriptionStatus = isSubscribed ? .active([Entitlement(id: "pro")]) : .inactive
+        // Trial is .active above, so dashboard audiences can't see it via
+        // subscription status -- expose it as user attributes instead.
+        Superwall.shared.setUserAttributes([
+            "is_in_trial": isInTrial,
+            "trial_ends_at": isInTrial ? (expirationDate?.timeIntervalSince1970 ?? 0) : 0
+        ])
     }
 
     /// Fire-and-forget, best-effort -- see SupabaseClient.updateSubscriptionTier's

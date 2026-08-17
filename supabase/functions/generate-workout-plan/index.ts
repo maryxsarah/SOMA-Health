@@ -283,11 +283,14 @@ Deno.serve(async (req: Request) => {
     // unique(user_id, date) on workout_log), and maybeSingle errors on 2+
     // rows -- with the error unread, `data` came back null and the lock
     // silently disengaged on exactly the days it was written for.
+    // device_detected excluded: an auto-logged wearable session must not
+    // count as "today's workout is done" for locking purposes.
     const { data: existingLogs, error: logReadError } = await supabase
       .from("workout_log")
       .select("title")
       .eq("user_id", userId)
-      .eq("date", date);
+      .eq("date", date)
+      .neq("source", "device_detected");
     if (logReadError) {
       throw new Error(`could not check today's workout log: ${logReadError.message}`);
     }

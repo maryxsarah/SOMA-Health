@@ -70,6 +70,10 @@ struct HomeView: View {
     // of a broken row" way the goal-progress row handles no photos yet.
     @State private var nutritionTarget: NutritionTargets?
     @State private var nutritionProgress: NutritionDayProgress?
+    /// Today's consumed kcal when meals are logged but no target has been
+    /// computed yet -- the tile shows the real total instead of "No
+    /// target yet" pretending nothing happened.
+    @State private var nutritionConsumedNoTarget: Int?
     @State private var showNutrition = false
     @State private var showSeededDetail = false
     @State private var pendingGymPlan: (AIWorkoutPlan, String, String)?
@@ -234,7 +238,7 @@ struct HomeView: View {
                     }
                 }
 
-                if todaysWorkoutLog == nil, let todaysAIPlan, todaysAIPlan.addedToPlan {
+                if deliberateWorkoutLogToday == nil, let todaysAIPlan, todaysAIPlan.addedToPlan {
                     aiGeneratedWorkoutCard(todaysAIPlan)
                 }
 
@@ -1291,7 +1295,10 @@ struct HomeView: View {
 
     private var scanState: ScanState {
         // A committed or completed workout removes the row entirely.
-        if todaysWorkoutLog != nil || todaysAIPlan?.addedToPlan == true { return .hidden }
+        // A device-detected auto-log is background noise for this gate --
+        // the user still deserves their scan (matches the server's own
+        // .neq("source", "device_detected") lock exclusion).
+        if deliberateWorkoutLogToday != nil || todaysAIPlan?.addedToPlan == true { return .hidden }
         // Lock only when today's quota is actually spent -- one scan must not
         // lock out an annual subscriber who still has generations left.
         if todaysGenerationCount >= dailyGenerationLimit { return .locked }
@@ -1355,9 +1362,12 @@ struct HomeView: View {
                             Button {
                                 Task { await logMood(rating) }
                             } label: {
+                                // Feedback: 20pt faces were hard to hit --
+                                // bigger glyph, full-height cell hit area.
                                 MoodFaceIcon(rating: rating)
-                                    .frame(width: 20, height: 20)
-                                    .frame(maxWidth: .infinity)
+                                    .frame(width: 26, height: 26)
+                                    .frame(maxWidth: .infinity, minHeight: 40)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(Text(rating.displayName))
@@ -1554,6 +1564,13 @@ struct HomeView: View {
     /// already fetched here for the calendar strip's crown badges) -- reuses
     /// ProfileStore's pure streak-counting function instead of duplicating it.
     private var currentStreak: Int { ProfileStore.streak(from: completedDates) }
+
+    /// Today's log ONLY if the user actually chose to train (manual or an
+    /// AI plan) -- device_detected auto-logs don't count as "workout done"
+    /// for generation/scan gating, mirroring the server-side lock.
+    private var deliberateWorkoutLogToday: WorkoutLogEntry? {
+        todaysWorkoutLog.flatMap { $0.source == "device_detected" ? nil : $0 }
+    }
 
     private var streakWidgetTile: some View {
         // Tappable (real feedback: "Streak not clickable -- needs to be,
@@ -1793,6 +1810,18 @@ struct HomeView: View {
                             nutritionMacroCell(title: String(localized: "home.widget.nutrition.fat", defaultValue: "Fat", comment: "Home: nutrition widget macro column title"), consumed: progress.consumedFatG, target: progress.targetFatG)
                         }
                         .padding(.top, 8)
+                    } else if let consumed = nutritionConsumedNoTarget {
+                        Text(consumed.formatted())
+                            .font(Theme.display)
+                            .fontWidth(.condensed)
+                            .padding(.top, 3)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Text(String(localized: "home.widget.nutrition.loggedNoTarget", defaultValue: "kcal logged · set a target in Nutrition", comment: "Home: nutrition widget caption when meals are logged but no daily target exists yet"))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(SomaTokens.ink5)
+                            .padding(.top, 2)
+                            .lineLimit(2)
                     } else {
                         Text(String(localized: "home.widget.nutrition.noTargetHeadline", defaultValue: "No target yet", comment: "Home: nutrition widget headline before a calorie target has been computed"))
                             .font(.system(size: 14.5, weight: .semibold))
@@ -1879,13 +1908,14 @@ struct HomeView: View {
                     UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey())
                 } label: {
                     Image(systemName: index <= waterGlassesToday ? "drop.fill" : "drop")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(
                             waterGoalReached
                                 ? SomaTokens.success
                                 : SomaTokens.accent.opacity(index <= waterGlassesToday ? 1 : 0.3)
                         )
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -2043,15 +2073,18 @@ struct HomeView: View {
                             Button {
                                 Task { await logSleep(bucket) }
                             } label: {
+                                // Feedback: the tiny chips were hard to
+                                // hit -- taller pill + full-cell hit area.
                                 Text(bucket.chipLabel)
-                                    .font(.system(size: 11.5, weight: .bold))
+                                    .font(.system(size: 12.5, weight: .bold))
                                     .foregroundStyle(SomaTokens.accent)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                                     .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, minHeight: 34)
                                     .glassLens(cornerRadius: 999)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier(Self.sleepChipAccessibilityID(bucket))
@@ -2746,13 +2779,19 @@ struct HomeView: View {
     /// CTA instead of hiding entirely, same posture as goalProgressRow's
     /// own "add your goal photo" state.
     private func loadNutritionState() async {
+        let entries = (try? await SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
         guard let target = try? await SupabaseClient.shared.fetchNutritionTargets() else {
             nutritionTarget = nil
             nutritionProgress = nil
+            // Logged food must never be invisible just because no calorie
+            // target exists yet (real feedback: log a meal first, widget
+            // still shows the empty set-up state) -- surface the consumed
+            // total on its own.
+            nutritionConsumedNoTarget = entries.isEmpty ? nil : entries.reduce(0) { $0 + $1.calories }
             return
         }
         nutritionTarget = target
-        let entries = (try? await SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
+        nutritionConsumedNoTarget = nil
         nutritionProgress = NutritionDayProgress.compute(entries: entries, target: target)
     }
 

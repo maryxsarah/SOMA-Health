@@ -271,6 +271,10 @@ final class SupabaseClient {
     }
 
     private func performRefreshSession() async throws {
+        try await performRefreshSession(allowRetry: true)
+    }
+
+    private func performRefreshSession(allowRetry: Bool) async throws {
         guard let current = keychain.load() else {
             throw SupabaseError.notSignedIn
         }
@@ -296,10 +300,26 @@ final class SupabaseClient {
             // Supabase's own rejection of the refresh token, not a dropped
             // connection -- a URLError (timeout, offline) skips this catch
             // entirely and surfaces to the caller as-is, retryable next
-            // time. This is the dead end: no request from this refresh
-            // token will ever succeed again. Hopped onto the main actor
-            // explicitly -- this method itself isn't @MainActor, but
-            // `onSessionExpired` (AppState.signOut) is.
+            // time.
+            //
+            // One deliberate second chance before the nuclear sign-out:
+            // tokens rotate on every exchange and the rotated one is saved
+            // only AFTER the network call, so a kill in that window (or a
+            // racing parallel refresh) leaves a just-consumed token on
+            // disk -- and Supabase's reuse interval (~10s) means an
+            // immediate retry with it can legitimately succeed. Prod
+            // incident 2026-08-15: a single such 400 signed the tester
+            // out; they re-registered via email and their Apple-account
+            // data "disappeared". A second definitive rejection is a real
+            // dead session. Hopped onto the main actor explicitly --
+            // `onSessionExpired` (AppState.signOut) is @MainActor.
+            if allowRetry {
+                try? await Task.sleep(for: .seconds(1))
+                if keychain.load() != nil {
+                    try await performRefreshSession(allowRetry: false)
+                    return
+                }
+            }
             let expired = onSessionExpired
             Task { @MainActor in expired?() }
             throw SupabaseError.requestFailed(status: status, message: message)

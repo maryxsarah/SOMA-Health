@@ -175,11 +175,15 @@ Deno.serve(async (req: Request) => {
     // the error unread, `data` came back null and the lock silently
     // disengaged on exactly the days it was written for. The read error is
     // also surfaced now: a guard that fails open on error isn't a guard.
+    // Auto-detected device workouts (a walk the watch logged on its own)
+    // must not lock generation -- the user hasn't "done their workout",
+    // their wearable just noticed movement. Only deliberate logs count.
     const { data: existingLogs, error: logReadError } = await supabase
       .from("workout_log")
       .select("title")
       .eq("user_id", userId)
       .eq("date", date)
+      .neq("source", "device_detected")
       .limit(1);
     if (logReadError) {
       throw new Error(`could not check today's workout log: ${logReadError.message}`);

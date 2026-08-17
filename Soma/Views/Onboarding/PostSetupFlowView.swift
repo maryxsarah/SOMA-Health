@@ -20,7 +20,13 @@ private enum PostSetupStep: Int {
 struct PostSetupFlowView: View {
     @EnvironmentObject private var appState: AppState
 
-    @State private var step: PostSetupStep = .referralCode
+    @State private var step: PostSetupStep = {
+        // Fixture shortcut for the onboarding-paywall matrix -- see
+        // UITestSupport.postSetupStartStep. Always .referralCode in
+        // Release (the accessor is nil there).
+        if UITestSupport.postSetupStartStep == "paywall" { return .paywall }
+        return .referralCode
+    }()
     /// Fails closed (false) until the profile fetch below actually confirms
     /// an 18+ date_of_birth -- an in-flight fetch or a fetch failure must
     /// never show the photo-comparison step to an unconfirmed user.
@@ -135,6 +141,17 @@ struct PostSetupFlowView: View {
             appState.markOnboardingComplete()
             return
         }
+        Task { await presentOnboardingPaywallAfterEntitlementSync() }
+    }
+
+    /// Superwall PERSISTS subscriptionStatus across launches, and our
+    /// mirror lands asynchronously at startup -- registering the paywall
+    /// against a stale persisted status (e.g. a previous account's active
+    /// entitlement on this device) silently skips the audience and eats
+    /// the paywall. Await a fresh entitlement read first, then register.
+    @MainActor
+    private func presentOnboardingPaywallAfterEntitlementSync() async {
+        await SubscriptionManager.shared.refreshEntitlement()
         paywallError = nil
         // Diagnostics handler (onSkip logging/analytics) + this screen's
         // own retry UI. onError REPLACES the diagnostics one (the handler
