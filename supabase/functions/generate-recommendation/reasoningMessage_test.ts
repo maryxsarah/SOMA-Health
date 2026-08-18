@@ -162,8 +162,8 @@ Deno.test("sleep hours are rounded to 2dp, never the raw seconds/3600 float (Our
     readinessScore: 79,
     sleepHours: 27330 / 3600, // 7.591666666666667 -- the exact repro from the bug report
   }));
-  assert(msg.includes("7.59h sleep"), msg);
-  assert(!msg.includes("7.591666"), msg);
+  assert(msg.summary.includes("7.59h sleep"), msg.summary);
+  assert(!msg.summary.includes("7.591666"), msg.summary);
 });
 
 Deno.test("sleep hours in the light-tier cap explanation are also rounded to 2dp", () => {
@@ -174,8 +174,8 @@ Deno.test("sleep hours in the light-tier cap explanation are also rounded to 2dp
     sleepHours: 27330 / 3600,
     caps: { ...NO_CAPS, sleep: true },
   }));
-  assert(msg.includes("7.59h"), msg);
-  assert(!msg.includes("7.591666"), msg);
+  assert(msg.detail.includes("7.59h"), msg.detail);
+  assert(!msg.detail.includes("7.591666"), msg.detail);
 });
 
 Deno.test("moderate-tier injury cap is cited distinctly from the light-tier injury cap", () => {
