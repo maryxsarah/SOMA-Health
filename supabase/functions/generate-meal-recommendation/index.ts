@@ -18,6 +18,7 @@
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkFlatDailyLimit, logGeneration } from "../_shared/generationLimits.ts";
+import { languageName } from "../_shared/language.ts";
 import { effectiveCarbsTargetG } from "./recoveryDayAdjustment.ts";
 
 // A user asking "what can I make?" a few times while actually standing in
@@ -139,19 +140,27 @@ Deno.serve(async (req: Request) => {
     const equipmentKeys: string[] = (userRow?.household_equipment ?? []).length > 0
       ? (userRow!.household_equipment as string[])
       : SKIP_DEFAULT_KEYS;
-    const equipmentLabels = equipmentKeys
-      .filter((k) => k !== "other")
-      .map((k) => EQUIPMENT_LABELS[k])
-      .filter((label): label is string => Boolean(label));
+    const knownEquipmentKeys = equipmentKeys.filter((k) => k !== "other" && EQUIPMENT_LABELS[k]);
     const otherEquipment = equipmentKeys.includes("other")
       ? (userRow?.other_household_equipment_notes ?? "").split(",").map((s: string) => s.trim()).filter(Boolean)
       : [];
-    let allEquipmentLabels = [...equipmentLabels, ...otherEquipment];
+    // Schema/response identifiers -- stable keys (e.g. "stove") for known
+    // equipment plus the user's own free-text "other" notes verbatim, so
+    // the client can localize known items via KitchenEquipmentTag.displayName
+    // and simply display "other" notes as-is (they're the user's own words,
+    // not a translatable label).
+    let equipmentOptions = [...knownEquipmentKeys, ...otherEquipment];
     // Defends the one edge case the two derivations above don't cover on
     // their own: household_equipment = ['other'] with no notes text ever
     // saved, which would otherwise produce an empty allow-list a real
     // recipe can never validate against.
-    if (allEquipmentLabels.length === 0) allEquipmentLabels = SKIP_DEFAULT_KEYS.map((k) => EQUIPMENT_LABELS[k]);
+    if (equipmentOptions.length === 0) equipmentOptions = SKIP_DEFAULT_KEYS;
+    // Human-readable "identifier (Name)" pairs so the model can reason
+    // about the equipment in English while returning the stable identifier.
+    const equipmentDescriptionForPrompt = [
+      ...knownEquipmentKeys.map((k) => `${k} (${EQUIPMENT_LABELS[k]})`),
+      ...otherEquipment,
+    ].join(", ");
 
     const consumed = (todaysMeals ?? []).reduce(
       (acc, m) => ({
@@ -194,11 +203,13 @@ Deno.serve(async (req: Request) => {
 
     const recommendation = await callClaude({
       ingredients: ingredients.trim(),
-      equipmentLabels: allEquipmentLabels,
+      equipmentOptions,
+      equipmentDescriptionForPrompt,
       remainingLine,
       recoveryLine,
       goalLine,
       recentLine,
+      language: languageName(body.language),
     });
 
     await logGeneration(supabase, userId, date, "meal_recommendation");
@@ -210,7 +221,7 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-function buildSchema(equipmentLabels: string[]) {
+function buildSchema(equipmentOptions: string[]) {
   return {
     type: "object",
     properties: {
@@ -232,7 +243,10 @@ function buildSchema(equipmentLabels: string[]) {
       // Closed vocabulary, same "deterministic vocabulary, never free
       // text" pattern generate-workout-plan uses for exercise names -- the
       // model literally cannot claim equipment the user doesn't have.
-      equipment_used: { type: "array", items: { type: "string", enum: equipmentLabels } },
+      // Values are stable identifiers (e.g. "stove"), not display labels,
+      // so the client can localize known equipment via
+      // KitchenEquipmentTag.displayName regardless of the request language.
+      equipment_used: { type: "array", items: { type: "string", enum: equipmentOptions } },
       total_time_minutes: { type: "integer" },
       calories: { type: "integer" },
       protein_g: { type: "integer" },
@@ -257,7 +271,8 @@ function buildSchema(equipmentLabels: string[]) {
 
 interface ClaudeInput {
   ingredients: string;
-  equipmentLabels: string[];
+  equipmentOptions: string[];
+  equipmentDescriptionForPrompt: string;
   remainingLine: string;
   /// Non-empty only on a rest/light recovery day -- steers framing toward
   /// protein/hydration/anti-inflammatory coaching, real behavior a
@@ -265,16 +280,17 @@ interface ClaudeInput {
   recoveryLine: string;
   goalLine: string;
   recentLine: string;
+  language: string;
 }
 
 async function callClaude(input: ClaudeInput): Promise<ClaudeRecommendation> {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
-  const schema = buildSchema(input.equipmentLabels);
+  const schema = buildSchema(input.equipmentOptions);
 
   const prompt =
     `A fitness app user asked what they can cook. Here's what they said they have: "${input.ingredients}".
 
-They have access to ONLY this kitchen equipment: ${input.equipmentLabels.join(", ")}. Never write a step that requires equipment outside this list -- if a normal method would need something they don't have (e.g. an oven), find a real way to do it with what they DO have, or say plainly that what they listed can't be cooked with what's on hand rather than assuming equipment they don't own.
+They have access to ONLY this kitchen equipment: ${input.equipmentDescriptionForPrompt}. Never write a step that requires equipment outside this list -- if a normal method would need something they don't have (e.g. an oven), find a real way to do it with what they DO have, or say plainly that what they listed can't be cooked with what's on hand rather than assuming equipment they don't own.
 
 ${input.remainingLine}
 ${input.recoveryLine}
@@ -288,9 +304,11 @@ Return:
 - why_this_meal: one or two encouraging sentences on why this fits their remaining macros and goal today -- reference the actual numbers, write like a supportive coach, never clinical
 - ingredients: array of {name, quantity} with realistic quantities for one serving
 - steps: array of clear, sequential instructions as full sentences -- any step involving heat must name the exact equipment (from the allowed list), the temperature if relevant, and the cook time (e.g. "Preheat the oven to 200°C/400°F and roast for 18 minutes")
-- equipment_used: which of the allowed equipment this recipe actually needs (a subset of the list above -- omit anything unused)
+- equipment_used: which of the allowed equipment this recipe actually needs -- return using the identifier before the parenthesis above (e.g. "stove", not "Stove"), a subset of the list (omit anything unused)
 - total_time_minutes: realistic total time including prep
-- calories, protein_g, carbs_g, fat_g: realistic totals for the whole plated meal, whole numbers`;
+- calories, protein_g, carbs_g, fat_g: realistic totals for the whole plated meal, whole numbers
+
+Write every piece of narrative text in ${input.language} -- name, why_this_meal, ingredient names, and steps. Never translate equipment_used values -- return those exactly as the identifiers listed above, regardless of language.`;
 
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",

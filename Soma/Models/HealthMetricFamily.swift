@@ -40,23 +40,23 @@ enum HealthMetricFamily: String, CaseIterable, Identifiable {
 
     var displayTitle: String {
         switch self {
-        case .recoveryReadiness: "Recovery / Readiness"
-        case .hrv: "HRV"
-        case .restingHR: "Resting HR"
-        case .sleep: "Sleep"
-        case .strain: "Strain"
-        case .stress: "Stress"
+        case .recoveryReadiness: String(localized: "healthMetricFamily.recoveryReadiness", defaultValue: "Recovery / Readiness", comment: "Health metric family name, shown as a card title and navigation title")
+        case .hrv: String(localized: "healthMetricFamily.hrv", defaultValue: "HRV", comment: "Health metric family name, shown as a card title and navigation title")
+        case .restingHR: String(localized: "healthMetricFamily.restingHR", defaultValue: "Resting HR", comment: "Health metric family name, shown as a card title and navigation title")
+        case .sleep: String(localized: "healthMetricFamily.sleep", defaultValue: "Sleep", comment: "Health metric family name, shown as a card title and navigation title")
+        case .strain: String(localized: "healthMetricFamily.strain", defaultValue: "Strain", comment: "Health metric family name, shown as a card title and navigation title")
+        case .stress: String(localized: "healthMetricFamily.stress", defaultValue: "Stress", comment: "Health metric family name, shown as a card title and navigation title")
         }
     }
 
     var unit: String {
         switch self {
         case .recoveryReadiness: ""
-        case .hrv: "ms"
-        case .restingHR: "bpm"
-        case .sleep: "h"
+        case .hrv: String(localized: "healthMetricFamily.unitMs", defaultValue: "ms", comment: "Abbreviation for milliseconds, shown next to an HRV value")
+        case .restingHR: String(localized: "healthMetricFamily.unitBpm", defaultValue: "bpm", comment: "Abbreviation for beats per minute, shown next to a resting heart rate value")
+        case .sleep: String(localized: "healthMetricFamily.unitHours", defaultValue: "h", comment: "Abbreviation for hours, shown next to a sleep duration value")
         case .strain: ""
-        case .stress: "min"
+        case .stress: String(localized: "healthMetricFamily.unitMin", defaultValue: "min", comment: "Abbreviation for minutes, shown next to a stress duration value")
         }
     }
 
@@ -96,6 +96,17 @@ enum HealthMetricFamily: String, CaseIterable, Identifiable {
         case mediumHigh = "Medium-High"
         case medium = "Medium"
         case low = "Low"
+
+        /// Display text for this band -- switches on the case, never
+        /// exposes `rawValue` (a stable internal identifier) as UI text.
+        var displayLabel: String {
+            switch self {
+            case .high: String(localized: "qualitativeBand.high", defaultValue: "High", comment: "Qualitative pill label for a high recovery/readiness reading")
+            case .mediumHigh: String(localized: "qualitativeBand.mediumHigh", defaultValue: "Medium-High", comment: "Qualitative pill label for a medium-high recovery/readiness reading")
+            case .medium: String(localized: "qualitativeBand.medium", defaultValue: "Medium", comment: "Qualitative pill label for a medium recovery/readiness reading")
+            case .low: String(localized: "qualitativeBand.low", defaultValue: "Low", comment: "Qualitative pill label for a low recovery/readiness reading")
+            }
+        }
     }
 
     /// A quick qualitative read, ONLY for Recovery/Readiness -- mirrors the
@@ -118,7 +129,7 @@ enum HealthMetricFamily: String, CaseIterable, Identifiable {
     }
 
     static func qualitativeLabel(recoveryOrReadiness value: Double, isWhoopRecovery: Bool) -> String {
-        qualitativeBand(recoveryOrReadiness: value, isWhoopRecovery: isWhoopRecovery).rawValue
+        qualitativeBand(recoveryOrReadiness: value, isWhoopRecovery: isWhoopRecovery).displayLabel
     }
 
     enum TrendDirection {

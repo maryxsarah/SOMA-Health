@@ -22,10 +22,12 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { classifyGenerationError } from "../_shared/anthropicErrors.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { checkGenerationLimit, GENERATION_LIMIT_MESSAGE, logGeneration, type SubscriptionTier } from "../_shared/generationLimits.ts";
+import { DEVICE_DETECTED_SOURCE } from "../_shared/workoutLogSources.ts";
 import { extractOutputText } from "../_shared/openai.ts";
 import { GymWorkoutTemplate, selectTemplate } from "./templates.ts";
 import { normalizeEquipment } from "../_shared/equipment.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
+import { languageName, normalizeLanguageCode } from "../_shared/language.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MODEL = "gpt-5.6-luna";
@@ -66,6 +68,8 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const date: string | undefined = body.date;
     const confirmedEquipment: string[] | undefined = body.confirmedEquipment;
+    const languageCode = normalizeLanguageCode(body.language);
+    const language = languageName(body.language);
     if (!date) return jsonResponse({ error: "missing 'date' (YYYY-MM-DD)" }, 400);
     if (!Array.isArray(confirmedEquipment)) {
       return jsonResponse({ error: "missing 'confirmedEquipment' (string array)" }, 400);
@@ -119,11 +123,14 @@ Deno.serve(async (req: Request) => {
     // is selectable, so a severity edit (mild -> severe knee) must miss
     // the cache and re-select -- otherwise the cache replays the morning's
     // squat/lunge session that the new severity exists to withhold.
+    // The requested language belongs here too, same reasoning as the
+    // injury state above -- otherwise a language switch mid-day replays the morning's wording verbatim.
     const equipmentSignature = Array.from(equipmentSet).sort().join("|") +
       (safety.excludeHighImpact ? "|no-impact" : "") +
       (safety.excludedKeywords.length > 0
         ? "|kw:" + [...safety.excludedKeywords].sort().join(",")
-        : "");
+        : "") +
+      "|lang:" + languageCode;
 
     // Same setup, same day -> same answer, so serve it rather than paying
     // for the wording pass again. A different setup is a different
@@ -169,11 +176,15 @@ Deno.serve(async (req: Request) => {
     // the error unread, `data` came back null and the lock silently
     // disengaged on exactly the days it was written for. The read error is
     // also surfaced now: a guard that fails open on error isn't a guard.
+    // Auto-detected device workouts (a walk the watch logged on its own)
+    // must not lock generation -- the user hasn't "done their workout",
+    // their wearable just noticed movement. Only deliberate logs count.
     const { data: existingLogs, error: logReadError } = await supabase
       .from("workout_log")
       .select("title")
       .eq("user_id", userId)
       .eq("date", date)
+      .neq("source", DEVICE_DETECTED_SOURCE)
       .limit(1);
     if (logReadError) {
       throw new Error(`could not check today's workout log: ${logReadError.message}`);
@@ -188,7 +199,7 @@ Deno.serve(async (req: Request) => {
 
     // Only a genuinely new generation reaches here (a cache hit already
     // returned above) -- check the daily cap before paying for one.
-    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier);
+    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier, "gym_photo");
     if (!limitCheck.allowed) {
       return jsonResponse({ date, generation_limit_reached: true, message: GENERATION_LIMIT_MESSAGE });
     }
@@ -200,6 +211,7 @@ Deno.serve(async (req: Request) => {
       goals,
       (snapshots ?? []) as SnapshotRow[],
       equipmentSet,
+      language,
     );
     // title/bodyPart travel inside the cached object so a cache hit can
     // return them without re-running selection. actual_duration_minutes is
@@ -260,6 +272,7 @@ async function callLunaForWording(
   goals: string[],
   snapshots: SnapshotRow[],
   equipment: Set<string>,
+  language: string,
 ): Promise<{ focus: string; exercises: { name: string; instructions: string }[] }> {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
@@ -283,7 +296,7 @@ async function callLunaForWording(
     ? Array.from(equipment).sort().join(", ")
     : "no equipment -- bodyweight only";
   const prompt =
-    `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, structure, and target muscle areas are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise, and do not change which muscles it targets. Write "instructions" text (2-3 sentences) for each of these exercises, in this exact order: ${exerciseList}. Open each one by briefly naming what it targets and why that supports the user's goal (${goalsText}), then give plain-language form cues. The user confirmed they have this equipment available right now: ${equipmentSummary} -- make the cues concrete about that setup where it helps, but never substitute a different exercise or suggest equipment not in that list. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session.`;
+    `You are writing friendly, encouraging per-exercise instructions for a gym workout. The exercises, sets, reps, structure, and target muscle areas are ALREADY DECIDED -- do not rename, add, remove, or reorder any exercise, and do not change which muscles it targets. Write "instructions" text (2-3 sentences) for each of these exercises, in this exact order: ${exerciseList}. Open each one by briefly naming what it targets and why that supports the user's goal (${goalsText}), then give plain-language form cues. The user confirmed they have this equipment available right now: ${equipmentSummary} -- make the cues concrete about that setup where it helps, but never substitute a different exercise or suggest equipment not in that list. Today's readiness: ${readinessSummary}. Also give a one-line "focus" summarizing this session. Write "instructions" and "focus" in ${language}; echo each exercise's "name" back exactly as given above, untranslated.`;
 
   const res = await fetch(OPENAI_URL, {
     method: "POST",

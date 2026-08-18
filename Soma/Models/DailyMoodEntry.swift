@@ -29,23 +29,13 @@ enum MoodRating: Int, CaseIterable, Identifiable {
 
     var id: Int { rawValue }
 
-    var emoji: String {
-        switch self {
-        case .rough: "😞"
-        case .notGreat: "😕"
-        case .okay: "😐"
-        case .good: "🙂"
-        case .great: "😄"
-        }
-    }
-
     var displayName: String {
         switch self {
-        case .rough: "Rough"
-        case .notGreat: "Not great"
-        case .okay: "Okay"
-        case .good: "Good"
-        case .great: "Great"
+        case .rough: String(localized: "moodRating.rough", defaultValue: "Rough", comment: "Mood check-in option: feeling rough today")
+        case .notGreat: String(localized: "moodRating.notGreat", defaultValue: "Not great", comment: "Mood check-in option: feeling not great today")
+        case .okay: String(localized: "moodRating.okay", defaultValue: "Okay", comment: "Mood check-in option: feeling okay today")
+        case .good: String(localized: "moodRating.good", defaultValue: "Good", comment: "Mood check-in option: feeling good today")
+        case .great: String(localized: "moodRating.great", defaultValue: "Great", comment: "Mood check-in option: feeling great today")
         }
     }
 }

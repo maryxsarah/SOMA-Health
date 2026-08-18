@@ -6,6 +6,7 @@ struct SomaApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
     @StateObject private var sessionManager = SessionManager()
+    @StateObject private var languageManager = LanguageManager.shared
 
     init() {
         // Must precede AppState's first read of the keychain/UserDefaults.
@@ -36,6 +37,12 @@ struct SomaApp: App {
             .environmentObject(appState)
             .environmentObject(sessionManager)
             .environmentObject(SubscriptionManager.shared)
+            .environmentObject(languageManager)
+            // Live in-app language override (Profile -> Account -> Language).
+            // `.system` resolves to `.autoupdatingCurrent`, so leaving this
+            // on its default tracks the device's language exactly as if
+            // this modifier weren't here at all.
+            .environment(\.locale, languageManager.effectiveLocale)
             // Shake-to-report, live on every screen past sign-in (the
             // insert needs a session; before onboarding completes there is
             // no user row to attach the report to). Presented via UIKit
@@ -101,7 +108,7 @@ struct SomaApp: App {
             do {
                 try await SupabaseClient.shared.completeEmailConfirmation(fragment: fragment)
                 AnalyticsManager.shared.signupCompleted()
-                appState.markSignedIn()
+                await appState.markSignedIn()
             } catch {
                 sessionManager.errorMessage = "That confirmation link didn't work. Try signing up again."
             }

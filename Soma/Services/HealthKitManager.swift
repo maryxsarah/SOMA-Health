@@ -50,6 +50,15 @@ final class HealthKitManager {
     /// `false` here after a prior `true` is never treated as "must have
     /// been revoked, ignore it" -- it just means never authorized yet.
     func isAuthorized() async -> Bool {
+        #if DEBUG
+        // The demo-recording harness needs Connect Device's gate to clear
+        // without a real HealthKit consent sheet -- the simulator's own
+        // authorization-status API is unreliable for read-only types
+        // regardless of whether the sheet was ever answered. Never
+        // compiled into Release; every other DEBUG build still hits the
+        // real check below.
+        if UITestSupport.isOnboardingDemo || UITestSupport.isOnboardingDemoResume { return true }
+        #endif
         guard Self.isAvailable else { return false }
         guard let status = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes) else {
             return false
@@ -152,6 +161,44 @@ final class HealthKitManager {
         }
     }
 
+    /// Per-day step totals over a range -- feeds the history calendar's
+    /// "perfect day" crown, which needs to know whether the step goal was
+    /// hit on a *past* day, not just today. Keyed by "yyyy-MM-dd".
+    func fetchDailySteps(from start: Date, to end: Date) async -> [String: Double] {
+        guard Self.isAvailable, let stepType = HKObjectType.quantityType(forIdentifier: .stepCount) else {
+            return [:]
+        }
+        let calendar = Calendar.current
+        let anchor = calendar.startOfDay(for: start)
+        let predicate = HKQuery.predicateForSamples(withStart: anchor, end: end, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsCollectionQuery(
+                quantityType: stepType,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum,
+                anchorDate: anchor,
+                intervalComponents: DateComponents(day: 1)
+            )
+            query.initialResultsHandler = { _, results, _ in
+                guard let results else {
+                    continuation.resume(returning: [:])
+                    return
+                }
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd"
+                formatter.timeZone = .current
+                var byDate: [String: Double] = [:]
+                results.enumerateStatistics(from: anchor, to: end) { stats, _ in
+                    guard let sum = stats.sumQuantity() else { return }
+                    byDate[formatter.string(from: stats.startDate)] = sum.doubleValue(for: .count())
+                }
+                continuation.resume(returning: byDate)
+            }
+            store.execute(query)
+        }
+    }
+
     /// Today's workout sessions actually recorded in Apple Health -- feeds
     /// Home's workout timeline alongside the server-fetched Oura/Whoop
     /// sessions (HealthKit can only be read on-device, never from a
@@ -210,19 +257,32 @@ final class HealthKitManager {
 
     private static func displayName(for type: HKWorkoutActivityType) -> String {
         switch type {
-        case .running: "Running"
-        case .walking: "Walking"
-        case .cycling: "Cycling"
-        case .swimming: "Swimming"
-        case .traditionalStrengthTraining, .functionalStrengthTraining: "Strength Training"
-        case .yoga: "Yoga"
-        case .highIntensityIntervalTraining: "HIIT"
-        case .coreTraining: "Core Training"
-        case .flexibility: "Flexibility"
-        case .hiking: "Hiking"
-        case .rowing: "Rowing"
-        case .elliptical: "Elliptical"
-        default: "Workout"
+        case .running:
+            String(localized: "healthKit.workoutType.running", defaultValue: "Running", comment: "Workout type label shown in the home workout timeline")
+        case .walking:
+            String(localized: "healthKit.workoutType.walking", defaultValue: "Walking", comment: "Workout type label shown in the home workout timeline")
+        case .cycling:
+            String(localized: "healthKit.workoutType.cycling", defaultValue: "Cycling", comment: "Workout type label shown in the home workout timeline")
+        case .swimming:
+            String(localized: "healthKit.workoutType.swimming", defaultValue: "Swimming", comment: "Workout type label shown in the home workout timeline")
+        case .traditionalStrengthTraining, .functionalStrengthTraining:
+            String(localized: "healthKit.workoutType.strengthTraining", defaultValue: "Strength Training", comment: "Workout type label shown in the home workout timeline")
+        case .yoga:
+            String(localized: "healthKit.workoutType.yoga", defaultValue: "Yoga", comment: "Workout type label shown in the home workout timeline")
+        case .highIntensityIntervalTraining:
+            String(localized: "healthKit.workoutType.hiit", defaultValue: "HIIT", comment: "Workout type label shown in the home workout timeline (High Intensity Interval Training)")
+        case .coreTraining:
+            String(localized: "healthKit.workoutType.coreTraining", defaultValue: "Core Training", comment: "Workout type label shown in the home workout timeline")
+        case .flexibility:
+            String(localized: "healthKit.workoutType.flexibility", defaultValue: "Flexibility", comment: "Workout type label shown in the home workout timeline")
+        case .hiking:
+            String(localized: "healthKit.workoutType.hiking", defaultValue: "Hiking", comment: "Workout type label shown in the home workout timeline")
+        case .rowing:
+            String(localized: "healthKit.workoutType.rowing", defaultValue: "Rowing", comment: "Workout type label shown in the home workout timeline")
+        case .elliptical:
+            String(localized: "healthKit.workoutType.elliptical", defaultValue: "Elliptical", comment: "Workout type label shown in the home workout timeline")
+        default:
+            String(localized: "healthKit.workoutType.fallback", defaultValue: "Workout", comment: "Generic fallback workout type label shown in the home workout timeline")
         }
     }
 
@@ -502,5 +562,7 @@ final class HealthKitManager {
 
 enum HealthKitError: LocalizedError {
     case notAvailable
-    var errorDescription: String? { "HealthKit is not available on this device." }
+    var errorDescription: String? {
+        String(localized: "healthKit.error.notAvailable", defaultValue: "HealthKit is not available on this device.", comment: "Error shown when the device doesn't support HealthKit")
+    }
 }

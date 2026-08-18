@@ -18,7 +18,7 @@ struct WeightScalePicker: View {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(String(format: "%.1f", weightKg))
                     .font(.system(size: 48, weight: .bold, design: .rounded))
-                Text("kg")
+                Text(String(localized: "weightScalePicker.unit", defaultValue: "kg", comment: "Weight scale picker: unit label next to the entered weight value"))
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -55,7 +55,7 @@ struct WeightScalePicker: View {
             .frame(height: 72)
             .contentShape(Rectangle())
             .gesture(
-                DragGesture()
+                DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         if dragStartWeight == nil { dragStartWeight = weightKg }
                         let delta = Double(value.translation.width / pointsPerKg)
@@ -70,6 +70,9 @@ struct WeightScalePicker: View {
                     }
             )
         }
+        // Ticks off a whole-kg crossing, same feel as Apple Health's own
+        // scale picker -- fires on every integer, not every 0.1 snap.
+        .sensoryFeedback(.selection, trigger: Int(weightKg.rounded()))
     }
 }
 

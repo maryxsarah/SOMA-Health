@@ -119,19 +119,19 @@ struct MetricDetailView: View {
     /// HealthMetricFamily.trendDescription rather than two hand-copies.
     private func insightSentence(entries: [(date: String, value: Double)]) -> String {
         guard let today = entries.last else {
-            return "Not enough data yet to show a trend for \(metric.displayTitle.lowercased())."
+            return String(localized: "metricDetail.insight.noData", defaultValue: "Not enough data yet to show a trend for \(metric.displayTitle.lowercased()).", comment: "Insight sentence shown when there isn't enough history for a metric trend; placeholder is the metric name")
         }
         let priorValues = entries.dropLast().map(\.value)
         guard let trend = HealthMetricFamily.trendDescription(today: today.value, priorValues: priorValues) else {
-            return "This is your first recorded reading for \(metric.displayTitle.lowercased())."
+            return String(localized: "metricDetail.insight.firstReading", defaultValue: "This is your first recorded reading for \(metric.displayTitle.lowercased()).", comment: "Insight sentence shown for a metric's first-ever recorded reading; placeholder is the metric name")
         }
         switch trend.direction {
         case .flat:
-            return "Today's \(metric.displayTitle.lowercased()) is in line with your recent average."
+            return String(localized: "metricDetail.insight.flat", defaultValue: "Today's \(metric.displayTitle.lowercased()) is in line with your recent average.", comment: "Insight sentence when today's metric matches the recent average; placeholder is the metric name")
         case .up:
-            return "Today's \(metric.displayTitle.lowercased()) is about \(trend.percent)% above your recent average."
+            return String(localized: "metricDetail.insight.up", defaultValue: "Today's \(metric.displayTitle.lowercased()) is about \(trend.percent)% above your recent average.", comment: "Insight sentence when today's metric is above the recent average; first placeholder is the metric name, second is a percent number")
         case .down:
-            return "Today's \(metric.displayTitle.lowercased()) is about \(trend.percent)% below your recent average."
+            return String(localized: "metricDetail.insight.down", defaultValue: "Today's \(metric.displayTitle.lowercased()) is about \(trend.percent)% below your recent average.", comment: "Insight sentence when today's metric is below the recent average; first placeholder is the metric name, second is a percent number")
         }
     }
 

@@ -58,6 +58,7 @@ function goal(overrides: Partial<GoalState>): GoalState {
     courtDays: null,
     workoutText: null,
     coachName: null,
+    frequencyPerWeek: null,
     ...overrides,
   };
 }
@@ -549,6 +550,52 @@ Deno.test("isScheduledToday: every_other_day is false the day right after a bloc
   const g = goal({ scheduleRule: "every_other_day" });
   assertFalse(isScheduledToday(g, "2026-08-04", [{ date: "2026-08-03", text: "x" }]));
   assert(isScheduledToday(g, "2026-08-04", [{ date: "2026-08-02", text: "x" }]));
+});
+
+Deno.test("REGRESSION: the plain 'N x a week' chip (scheduleRule null) used to be ignored entirely -- frequencyPerWeek now caps the trailing 7-day window", () => {
+  // No history yet: any frequency allows today.
+  const twicePerWeek = goal({ scheduleRule: null, frequencyPerWeek: 2 });
+  assert(isScheduledToday(twicePerWeek, "2026-08-07", []));
+  // One block already this window: still under the cap of 2.
+  assert(isScheduledToday(twicePerWeek, "2026-08-07", [{ date: "2026-08-03", text: "x" }]));
+  // Two blocks already in the trailing 7-day window (today - 6 .. today - 1):
+  // the cap is reached, today is not scheduled.
+  assertFalse(isScheduledToday(twicePerWeek, "2026-08-07", [
+    { date: "2026-08-02", text: "x" },
+    { date: "2026-08-04", text: "x" },
+  ]));
+  // A block from 8 days ago is outside the window and doesn't count.
+  assert(isScheduledToday(twicePerWeek, "2026-08-07", [
+    { date: "2026-07-30", text: "x" },
+    { date: "2026-08-04", text: "x" },
+  ]));
+  // No explicit count (legacy goals predating this field): unlimited, same
+  // as the old always-true default.
+  assert(isScheduledToday(goal({ scheduleRule: null, frequencyPerWeek: null }), "2026-08-07", [
+    { date: "2026-08-02", text: "x" },
+    { date: "2026-08-03", text: "x" },
+    { date: "2026-08-04", text: "x" },
+  ]));
+});
+
+Deno.test("REGRESSION: decideGoalWork actually withholds a preset block once frequencyPerWeek is reached, and a custom goal too", () => {
+  const cappedPreset = goal({ frequencyPerWeek: 1 });
+  const first = decideGoalWork(input({ date: "2026-08-07", goal: cappedPreset, recentGoalBlocks: [] }));
+  assert(first, "first session of the week should still be scheduled");
+  const second = decideGoalWork(input({
+    date: "2026-08-07",
+    goal: cappedPreset,
+    recentGoalBlocks: [{ date: "2026-08-05", text: "goal work" }],
+  }));
+  assertEquals(second, null, "a second session this week should be withheld once frequencyPerWeek: 1 is already met");
+
+  const cappedCustom = goal({ kind: "custom", frequencyPerWeek: 1, workoutText: "coach session" });
+  const custom = decideGoalWork(input({
+    date: "2026-08-07",
+    goal: cappedCustom,
+    recentGoalBlocks: [{ date: "2026-08-05", text: "coach session" }],
+  }));
+  assertEquals(custom, null, "custom goals must respect the same weekly cap");
 });
 
 Deno.test("describeUpcomingGoalWork: null for paused or not-visible goals", () => {

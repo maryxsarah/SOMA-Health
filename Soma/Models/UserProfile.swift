@@ -17,13 +17,13 @@ enum InjuryTag: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .knee: "Knee"
-        case .ankle: "Ankle"
-        case .back: "Back"
-        case .shoulder: "Shoulder"
-        case .hip: "Hip"
-        case .wrist: "Wrist"
-        case .other: "Other"
+        case .knee: String(localized: "injuryTag.knee", defaultValue: "Knee", comment: "Injury location tag shown in injury tracking UI")
+        case .ankle: String(localized: "injuryTag.ankle", defaultValue: "Ankle", comment: "Injury location tag shown in injury tracking UI")
+        case .back: String(localized: "injuryTag.back", defaultValue: "Back", comment: "Injury location tag shown in injury tracking UI")
+        case .shoulder: String(localized: "injuryTag.shoulder", defaultValue: "Shoulder", comment: "Injury location tag shown in injury tracking UI")
+        case .hip: String(localized: "injuryTag.hip", defaultValue: "Hip", comment: "Injury location tag shown in injury tracking UI")
+        case .wrist: String(localized: "injuryTag.wrist", defaultValue: "Wrist", comment: "Injury location tag shown in injury tracking UI")
+        case .other: String(localized: "injuryTag.other", defaultValue: "Other", comment: "Injury location tag (catch-all) shown in injury tracking UI")
         }
     }
 }
@@ -43,9 +43,9 @@ enum InjurySeverity: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .mild: "Mild"
-        case .moderate: "Moderate"
-        case .severe: "Severe"
+        case .mild: String(localized: "injurySeverity.mild", defaultValue: "Mild", comment: "Injury severity level shown in injury tracking UI")
+        case .moderate: String(localized: "injurySeverity.moderate", defaultValue: "Moderate", comment: "Injury severity level shown in injury tracking UI")
+        case .severe: String(localized: "injurySeverity.severe", defaultValue: "Severe", comment: "Injury severity level shown in injury tracking UI")
         }
     }
 }
@@ -66,11 +66,11 @@ enum InjuryType: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .strain: "Strain"
-        case .sprain: "Sprain"
-        case .tendinitis: "Tendinitis"
-        case .postSurgical: "Post-surgical"
-        case .other: "Other"
+        case .strain: String(localized: "injuryType.strain", defaultValue: "Strain", comment: "Injury type shown in injury tracking UI (muscle strain)")
+        case .sprain: String(localized: "injuryType.sprain", defaultValue: "Sprain", comment: "Injury type shown in injury tracking UI (ligament sprain)")
+        case .tendinitis: String(localized: "injuryType.tendinitis", defaultValue: "Tendinitis", comment: "Injury type shown in injury tracking UI")
+        case .postSurgical: String(localized: "injuryType.postSurgical", defaultValue: "Post-surgical", comment: "Injury type shown in injury tracking UI (recovering from surgery)")
+        case .other: String(localized: "injuryType.other", defaultValue: "Other", comment: "Injury type (catch-all) shown in injury tracking UI")
         }
     }
 }
@@ -88,11 +88,26 @@ enum ExperienceLevel: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .newbie: "Newbie"
-        case .moderate: "Moderate"
-        case .advanced: "Advanced"
+        case .newbie: String(localized: "experienceLevel.newbie", defaultValue: "Newbie", comment: "Training experience level shown in profile UI")
+        case .moderate: String(localized: "experienceLevel.moderate", defaultValue: "Moderate", comment: "Training experience level shown in profile UI")
+        case .advanced: String(localized: "experienceLevel.advanced", defaultValue: "Advanced", comment: "Training experience level shown in profile UI")
         }
     }
+}
+
+/// One recurring weekly commitment (item 6: `UserProfile.anchorSessions`
+/// is a list of these, up to 5, stored as the `users.anchor_sessions`
+/// jsonb column -- not a normal snake_case table column, so these keys are
+/// the literal jsonb shape, not a wire-convention mapping). `days` reuses
+/// the 0=Sun..6=Sat (JS getUTCDay) convention every other schedule-days
+/// field in this app already uses. `timeOfDay` is optional free text
+/// ("morning"/"evening"/"7:00 AM") -- MVP scope deliberately doesn't parse
+/// or validate it beyond that.
+struct AnchorSession: Codable, Equatable, Identifiable {
+    var id: String
+    var name: String
+    var days: [Int]
+    var timeOfDay: String? = nil
 }
 
 /// Mirrors the profile-related columns on `users`. Contact email is
@@ -211,15 +226,14 @@ struct UserProfile: Codable, Equatable {
     /// case here for anyone not yet analyzed).
     var bodyPhotoEmphasisTags: [GoalTag]? = nil
     var trainingEmphasis: TrainingEmphasis? = nil
-    /// A recurring class/activity (e.g. "Hot Yoga") the rest of the week
-    /// gets built around -- Phase 4 (see
-    /// docs/coaching-personalization-plan.md). Editable here, unlike
-    /// weightKg/desiredWeightKg above -- there's no reason to lock it once
-    /// set, same reasoning as heightCm. nil name = no anchor session set.
-    var anchorSessionName: String? = nil
-    /// 0=Sun..6=Sat (JS getUTCDay), same convention SportGoals'
-    /// scheduleDays already uses server-side.
-    var anchorSessionDays: [Int] = []
+    /// Up to 5 recurring classes/activities (e.g. "Hot Yoga") the rest of
+    /// the week gets built around -- Phase 4 (see
+    /// docs/coaching-personalization-plan.md). Item 6 fix: was a single
+    /// name/days pair; real feedback is that anyone with a weekly schedule
+    /// almost always has more than one recurring commitment. Editable
+    /// here, unlike weightKg/desiredWeightKg above -- there's no reason to
+    /// lock it once set, same reasoning as heightCm.
+    var anchorSessions: [AnchorSession] = []
     /// Read-only, server-assigned at account creation -- the journey
     /// "start date" the goal-progress bar counts elapsed days from. Not a
     /// plan-start date (there isn't a separate one), but close enough: for
@@ -265,8 +279,7 @@ struct UserProfile: Codable, Equatable {
         case createdAt = "created_at"
         case bodyPhotoEmphasisTags = "body_photo_emphasis_tags"
         case trainingEmphasis = "training_emphasis"
-        case anchorSessionName = "anchor_session_name"
-        case anchorSessionDays = "anchor_session_days"
+        case anchorSessions = "anchor_sessions"
     }
 
     /// "Austin, US" / "US" / "Austin" -- nil when neither part is set.
@@ -315,21 +328,21 @@ enum LiftPattern: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .squatPattern: "Squat"
-        case .hingePattern: "Deadlift"
-        case .overheadPress: "Overhead press"
-        case .horizontalPress: "Bench press"
-        case .rowPull: "Row"
+        case .squatPattern: String(localized: "liftPattern.squatPattern.name", defaultValue: "Squat", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
+        case .hingePattern: String(localized: "liftPattern.hingePattern.name", defaultValue: "Deadlift", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
+        case .overheadPress: String(localized: "liftPattern.overheadPress.name", defaultValue: "Overhead press", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
+        case .horizontalPress: String(localized: "liftPattern.horizontalPress.name", defaultValue: "Bench press", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
+        case .rowPull: String(localized: "liftPattern.rowPull.name", defaultValue: "Row", comment: "Bilateral lift pattern name shown in the Known Lifts editor")
         }
     }
 
     var placeholder: String {
         switch self {
-        case .squatPattern: "e.g. back squat, both legs"
-        case .hingePattern: "e.g. barbell deadlift"
-        case .overheadPress: "e.g. barbell or double-dumbbell, both arms"
-        case .horizontalPress: "e.g. barbell or dumbbell bench, both arms"
-        case .rowPull: "e.g. barbell row, both arms"
+        case .squatPattern: String(localized: "liftPattern.squatPattern.placeholder", defaultValue: "e.g. back squat, both legs", comment: "Text field placeholder for the squat lift pattern in the Known Lifts editor")
+        case .hingePattern: String(localized: "liftPattern.hingePattern.placeholder", defaultValue: "e.g. barbell deadlift", comment: "Text field placeholder for the hinge lift pattern in the Known Lifts editor")
+        case .overheadPress: String(localized: "liftPattern.overheadPress.placeholder", defaultValue: "e.g. barbell or double-dumbbell, both arms", comment: "Text field placeholder for the overhead press lift pattern in the Known Lifts editor")
+        case .horizontalPress: String(localized: "liftPattern.horizontalPress.placeholder", defaultValue: "e.g. barbell or dumbbell bench, both arms", comment: "Text field placeholder for the horizontal press lift pattern in the Known Lifts editor")
+        case .rowPull: String(localized: "liftPattern.rowPull.placeholder", defaultValue: "e.g. barbell row, both arms", comment: "Text field placeholder for the row lift pattern in the Known Lifts editor")
         }
     }
 }

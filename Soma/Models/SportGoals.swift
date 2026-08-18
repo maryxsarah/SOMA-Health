@@ -188,12 +188,16 @@ struct SportGoal: Codable, Identifiable, Hashable {
     var promiseLine: String {
         if let promise, !promise.isEmpty { return promise }
         switch kind {
-        case .milestone: return "Stage-based — no numbers needed"
-        case .qualitative: return "A target in your own words"
+        case .milestone:
+            return String(localized: "sportGoal.promiseLine.milestone", defaultValue: "Stage-based — no numbers needed", comment: "Fallback promise-line for milestone-kind sport goals")
+        case .qualitative:
+            return String(localized: "sportGoal.promiseLine.qualitative", defaultValue: "A target in your own words", comment: "Fallback promise-line for qualitative-kind sport goals")
         default: break
         }
-        if let unit, !unit.isEmpty { return "Measurable in \(unit)" }
-        return "Measured, honestly"
+        if let unit = SportGoalFormat.localizedUnit(unit), !unit.isEmpty {
+            return String(localized: "sportGoal.promiseLine.measurableInUnit", defaultValue: "Measurable in \(unit)", comment: "Fallback promise-line template; unit is server-provided data (e.g. 'cm', 'reps') -- keep the interpolation, translate only 'Measurable in'")
+        }
+        return String(localized: "sportGoal.promiseLine.measuredHonestly", defaultValue: "Measured, honestly", comment: "Final fallback promise-line when no unit/promise text is available")
     }
 
     /// The three-numbered-lines protocol from the server's protocol text.
@@ -243,15 +247,36 @@ struct SportGoal: Codable, Identifiable, Hashable {
     }
 
     /// Ladder index for a stored stage -- matches raw keys and, for rows
-    /// written before keys were stored, the display names.
+    /// written before keys were stored, the always-English display names.
     func stageIndex(of stage: String) -> Int? {
         if let i = stageLadder.firstIndex(of: stage) { return i }
-        return stageLadder.firstIndex { Self.stageDisplayName($0) == stage }
+        return stageLadder.firstIndex { Self.legacyEnglishStageDisplayName($0) == stage }
     }
 
     /// Display copy for a ladder key; unknown keys fall back to a plain
     /// sentence-cased form of the key itself.
     static func stageDisplayName(_ key: String) -> String {
+        switch key {
+        case "never_tried":
+            return String(localized: "sportGoal.stage.neverTried", defaultValue: "Never tried", comment: "Milestone stage chip label")
+        case "feet_lift":
+            return String(localized: "sportGoal.stage.feetLift", defaultValue: "Feet lift", comment: "Milestone stage chip label")
+        case "hold_3s":
+            return String(localized: "sportGoal.stage.hold3s", defaultValue: "Holds 3 s", comment: "Milestone stage chip label")
+        case "hold_seconds":
+            return String(localized: "sportGoal.stage.holdSeconds", defaultValue: "Timed hold", comment: "Milestone stage chip label")
+        default:
+            let words = key.replacingOccurrences(of: "_", with: " ")
+            return words.prefix(1).uppercased() + words.dropFirst()
+        }
+    }
+
+    /// Fixed English text -- legacy `baselineStage` rows persisted this
+    /// literal string, always in English, regardless of display language.
+    private static func legacyEnglishStageDisplayName(_ key: String) -> String {
+        // Deliberately always English, matching this function's own doc
+        // comment above.
+        // swiftlint:disable raw_string_return
         switch key {
         case "never_tried": return "Never tried"
         case "feet_lift": return "Feet lift"
@@ -261,6 +286,7 @@ struct SportGoal: Codable, Identifiable, Hashable {
             let words = key.replacingOccurrences(of: "_", with: " ")
             return words.prefix(1).uppercased() + words.dropFirst()
         }
+        // swiftlint:enable raw_string_return
     }
 
     /// Ruler bounds derived from the band edges when present.
@@ -461,11 +487,13 @@ extension UserGoal {
     func displayName(in catalog: SportCatalog?) -> String {
         if kind == .custom {
             if let customMetricName, !customMetricName.isEmpty { return customMetricName }
-            if let coachName, !coachName.isEmpty { return "Coach \(coachName)'s task" }
-            return "Coach's task"
+            if let coachName, !coachName.isEmpty {
+                return String(localized: "userGoal.displayName.coachNamedTask", defaultValue: "Coach \(coachName)'s task", comment: "Fallback display name for a coach-assigned custom goal; coachName is the coach's name")
+            }
+            return String(localized: "userGoal.displayName.coachTask", defaultValue: "Coach's task", comment: "Fallback display name for a coach-assigned custom goal when no coach name is available")
         }
         if let goalId, let goal = catalog?.goal(id: goalId) { return goal.name }
-        return "Your goal"
+        return String(localized: "userGoal.displayName.yourGoal", defaultValue: "Your goal", comment: "Fallback display name when the goal cannot be resolved from the catalog")
     }
 
     var startDate: Date? {
@@ -493,9 +521,12 @@ extension UserGoal {
     }
 
     /// "week 4 of 10–12" -- only when both halves are real.
+    /// Placeholders must stay %lld in the catalog (not %@): these are Int
+    /// arguments, and a stored %@ crashes String(localized:) resolution
+    /// on-device (BUG-118 class -- see DailyRecommendation.explanation).
     var weekLine: String? {
         guard let currentWeek, let horizon = horizonWeeks else { return nil }
-        return "week \(currentWeek) of \(horizon.low)–\(horizon.high)"
+        return String(localized: "userGoal.weekLine", defaultValue: "week \(currentWeek) of \(horizon.low)–\(horizon.high)", comment: "Training-week progress line, e.g. 'week 4 of 10-12'; placeholders are the current week number and the horizon low/high week numbers")
     }
 
     /// "+3–6 cm" from the stored target range.
@@ -574,7 +605,7 @@ struct GoalSafetyConflict: Decodable, Identifiable, Hashable {
             return
         }
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        message = (try? c.decodeIfPresent(String.self, forKey: .message)) ?? "This assignment may conflict with your noted health situation."
+        message = (try? c.decodeIfPresent(String.self, forKey: .message)) ?? String(localized: "goalSafetyConflict.default", defaultValue: "This assignment may conflict with your noted health situation.", comment: "Fallback safety-conflict message when the server doesn't provide a specific message")
         let pregnancyFlag = (try? c.decodeIfPresent(Bool.self, forKey: .pregnancy)) ?? false
         isPregnancyRelated = pregnancyFlag || message.lowercased().contains("pregnan")
     }
@@ -642,8 +673,23 @@ enum SportGoalFormat {
         v.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", v) : String(format: "%.1f", v)
     }
 
+    /// The catalog's `unit` column is a small closed vocabulary (cm, reps,
+    /// seconds, count) -- translated here rather than server-side so a
+    /// coach's free-typed custom unit (e.g. "jumps") still passes through
+    /// unchanged when it doesn't match a known token.
+    static func localizedUnit(_ unit: String?) -> String? {
+        guard let unit, !unit.isEmpty else { return unit }
+        switch unit {
+        case "seconds": return String(localized: "sportGoalUnit.seconds", defaultValue: "seconds", comment: "Sport goal measurement unit: seconds")
+        case "reps": return String(localized: "sportGoalUnit.reps", defaultValue: "reps", comment: "Sport goal measurement unit: repetitions")
+        case "cm": return String(localized: "sportGoalUnit.cm", defaultValue: "cm", comment: "Sport goal measurement unit: centimeters")
+        case "count": return String(localized: "sportGoalUnit.count", defaultValue: "count", comment: "Sport goal measurement unit: a plain count")
+        default: return unit
+        }
+    }
+
     static func value(_ v: Double, unit: String?) -> String {
-        guard let unit, !unit.isEmpty else { return value(v) }
+        guard let unit = localizedUnit(unit), !unit.isEmpty else { return value(v) }
         return "\(value(v)) \(unit)"
     }
 
@@ -651,7 +697,7 @@ enum SportGoalFormat {
     static func gainRange(low: Double, high: Double, unit: String?) -> String {
         let sign = low >= 0 ? "+" : ""
         let core = "\(sign)\(value(low))–\(value(high))"
-        guard let unit, !unit.isEmpty else { return core }
+        guard let unit = localizedUnit(unit), !unit.isEmpty else { return core }
         return "\(core) \(unit)"
     }
 

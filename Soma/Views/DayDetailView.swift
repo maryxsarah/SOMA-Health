@@ -12,6 +12,10 @@ struct DayDetailView: View {
     /// this screen's crown line can never disagree with the strip's crown
     /// glyph (both derive from CalendarStripView.bestReadinessDate).
     let recentRecommendations: [DailyRecommendation]
+    /// The user's active sport goal, if any -- Home already has this loaded,
+    /// passed through rather than re-fetched here. Only drives the small
+    /// goal-day badge/note below; every other section is unaffected by it.
+    var activeSportGoal: UserGoal?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -66,10 +70,10 @@ struct DayDetailView: View {
                 }
             }
         }
-        .alert("Reschedule", isPresented: $showRescheduleInfo) {
-            Button("Got it", role: .cancel) {}
+        .alert(String(localized: "dayDetail.reschedule.title", defaultValue: "Reschedule", comment: "Alert title shown when tapping a day that can't be rescheduled"), isPresented: $showRescheduleInfo) {
+            Button(String(localized: "dayDetail.reschedule.gotIt", defaultValue: "Got it", comment: "Dismiss button for the reschedule-not-supported alert"), role: .cancel) {}
         } message: {
-            Text("Soma doesn't move workouts between days yet -- pick another day from the week strip on Home to do it there instead.")
+            Text(String(localized: "dayDetail.reschedule.message", defaultValue: "Soma doesn't move workouts between days yet -- pick another day from the week strip on Home to do it there instead.", comment: "Alert body explaining rescheduling isn't supported yet"))
         }
     }
 
@@ -114,10 +118,10 @@ struct DayDetailView: View {
 
     private var statusPill: some View {
         let info: (label: String, fg: Color, bg: Color, systemImage: String) = switch state {
-        case .done: ("Completed", SomaTokens.heart, SomaTokens.heartSoft, "heart.fill")
-        case .todo: ("Planned for today", SomaTokens.accent, SomaTokens.accentSoft, "heart")
-        case .upcoming: ("Planned", SomaTokens.accent, SomaTokens.accentSoft, "heart")
-        case .skipped: ("Missed", SomaTokens.ink3, SomaTokens.surface3, "heart")
+        case .done: (String(localized: "day_detail.status.completed", defaultValue: "Completed", comment: "Status pill label for a completed workout day"), SomaTokens.heart, SomaTokens.heartSoft, "heart.fill")
+        case .todo: (String(localized: "day_detail.status.planned_today", defaultValue: "Planned for today", comment: "Status pill label for today's planned workout"), SomaTokens.accent, SomaTokens.accentSoft, "heart")
+        case .upcoming: (String(localized: "day_detail.status.planned", defaultValue: "Planned", comment: "Status pill label for a future planned workout day"), SomaTokens.accent, SomaTokens.accentSoft, "heart")
+        case .skipped: (String(localized: "day_detail.status.missed", defaultValue: "Missed", comment: "Status pill label for a missed workout day"), SomaTokens.ink3, SomaTokens.surface3, "heart")
         }
         return HStack(spacing: 4) {
             Image(systemName: info.systemImage).font(.system(size: 10))
@@ -137,7 +141,7 @@ struct DayDetailView: View {
     private var readinessCard: some View {
         if let recommendation {
             CardView {
-                Text("READINESS THAT DAY")
+                Text(String(localized: "dayDetail.readinessThatDay", defaultValue: "READINESS THAT DAY", comment: "Eyebrow label above the readiness category/message for a past or planned day"))
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.5)
                     .foregroundStyle(SomaTokens.ink4)
@@ -177,7 +181,7 @@ struct DayDetailView: View {
                 } else if let suggestion = topSuggestion {
                     Text(suggestion.title)
                         .font(.system(size: 15, weight: .bold))
-                    Text("Not generated yet -- tap Start workout to build today's plan.")
+                    Text(String(localized: "dayDetail.notGeneratedYet", defaultValue: "Not generated yet -- tap Start workout to build today's plan.", comment: "Shown on a suggested-but-not-yet-generated day's card"))
                         .font(.system(size: 12.5))
                         .foregroundStyle(SomaTokens.ink3)
                 }
@@ -188,14 +192,11 @@ struct DayDetailView: View {
                     .font(.system(size: 15, weight: .bold))
                 metaLine
             }
+            goalDayIndicator
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
-                .fill(SomaTokens.surface)
-                .somaCardShadow()
-        )
+        .glassCard()
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(stateColor)
@@ -209,6 +210,43 @@ struct DayDetailView: View {
         case .done: SomaTokens.heart
         case .todo, .upcoming: SomaTokens.accent
         case .skipped: SomaTokens.ink3
+        }
+    }
+
+    /// The actual generated plan for whichever state this day is in --
+    /// `nil` for `.skipped` (nothing was ever generated to compare against).
+    private var currentPlan: AIWorkoutPlan? {
+        switch state {
+        case .done: log?.planSnapshot
+        case .todo, .upcoming: plannedPlan?.plan
+        case .skipped: nil
+        }
+    }
+
+    /// Answers "why does the calendar heart look the way it does" right
+    /// where the user is already looking -- a real plan exists either way,
+    /// this just names whether it happened to include the goal block.
+    /// Silent whenever there's no active goal, or no plan yet to check.
+    @ViewBuilder
+    private var goalDayIndicator: some View {
+        if let activeSportGoal, activeSportGoal.status == .active, let plan = currentPlan {
+            if plan.goalBlock != nil {
+                HStack(spacing: 4) {
+                    Image(systemName: "target")
+                        .font(.system(size: 10, weight: .bold))
+                    Text(String(localized: "day_detail.goalDay.included", defaultValue: "Goal day", comment: "Small badge on a day whose workout includes the user's active sport-goal training block"))
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.3)
+                }
+                .foregroundStyle(SomaTokens.success)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(SomaTokens.successSoft))
+            } else {
+                Text(String(localized: "day_detail.goalDay.notToday", defaultValue: "Not a goal day this week — your regular training still counts.", comment: "Reassuring note on a day whose workout has no goal-training block, shown to a user with an active goal"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SomaTokens.ink3)
+            }
         }
     }
 
@@ -234,7 +272,7 @@ struct DayDetailView: View {
         switch state {
         case .done:
             if let wearableSummary {
-                Text("Avg \(wearableSummary.averageHeartRate) bpm, max \(wearableSummary.maxHeartRate) bpm (\(wearableSummary.sourceDisplayName))")
+                Text(String(localized: "day_detail.metaLine.wearableSummary", defaultValue: "Avg \(wearableSummary.averageHeartRate) bpm, max \(wearableSummary.maxHeartRate) bpm (\(wearableSummary.sourceDisplayName))", comment: "Heart-rate summary line for a completed workout day, e.g. 'Avg 120 bpm, max 165 bpm (Apple Health)'. First two placeholders are average/max heart rate in bpm, third is the wearable provider's display name."))
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink3)
             }
@@ -245,7 +283,7 @@ struct DayDetailView: View {
                     .foregroundStyle(SomaTokens.ink3)
             }
         case .skipped:
-            Text("Two skips in a week breaks the streak.")
+            Text(String(localized: "dayDetail.skippedNote", defaultValue: "Two skips in a week breaks the streak.", comment: "Note shown on a skipped/missed day's card"))
                 .font(.system(size: 12.5))
                 .foregroundStyle(SomaTokens.ink3)
         }
@@ -257,12 +295,12 @@ struct DayDetailView: View {
         switch state {
         case .done:
             if let feelRating = log?.feelRating {
-                SomaChip(title: feelRating.displayName, isSelected: true) {}
+                SomaChip(title: LocalizedStringKey(feelRating.displayName), isSelected: true) {}
                     .allowsHitTesting(false)
             }
         case .todo, .upcoming:
             if let gear = requiredGear {
-                SomaChip(title: gear, isSelected: false) {}
+                SomaChip(title: LocalizedStringKey(gear), isSelected: false) {}
                     .allowsHitTesting(false)
             }
         case .skipped:
@@ -285,7 +323,7 @@ struct DayDetailView: View {
     private var plannedTitleForSkippedDay: String {
         if let plannedPlan { return plannedPlan.selectedTitle }
         if let title = topSuggestion?.title { return title }
-        return "No plan was recorded for this day"
+        return String(localized: "day_detail.no_plan_recorded", defaultValue: "No plan was recorded for this day", comment: "Fallback workout title shown for a skipped day with no recorded plan")
     }
 
     // MARK: - Bottom bar
@@ -303,14 +341,14 @@ struct DayDetailView: View {
                 if plannedPlan != nil {
                     // A plan already exists for today -- the primary action
                     // is finishing it, not re-opening the generator.
-                    SomaButton(title: "Complete workout", size: .lg, variant: .primary, isEnabled: !isCompleting) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "recommendationDetail.completeWorkoutButton", defaultValue: "Complete workout", comment: "Primary bottom-bar CTA that marks today's workout as done")), size: .lg, variant: .primary, isEnabled: !isCompleting) {
                         Task { await completePlannedWorkout() }
                     }
-                    SomaButton(title: "View or swap workout", size: .md, variant: .secondary, isEnabled: recommendation != nil) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "dayDetail.viewOrSwapWorkout", defaultValue: "View or swap workout", comment: "Button: opens the action sheet to view or swap today's already-planned workout")), size: .md, variant: .secondary, isEnabled: recommendation != nil) {
                         showActionSheet = true
                     }
                 } else {
-                    SomaButton(title: "Start workout", size: .lg, variant: .primary, isEnabled: recommendation != nil) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "recommendationDetail.startWorkoutButton", defaultValue: "Start workout", comment: "Primary bottom-bar CTA that generates the AI workout plan")), size: .lg, variant: .primary, isEnabled: recommendation != nil) {
                         showActionSheet = true
                     }
                 }
@@ -319,10 +357,10 @@ struct DayDetailView: View {
         case .skipped:
             if recommendation != nil {
                 VStack(spacing: 9) {
-                    SomaButton(title: "Log it anyway", size: .lg, variant: .primary) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "dayDetail.logItAnyway", defaultValue: "Log it anyway", comment: "Button: log a workout for a skipped/missed past day anyway")), size: .lg, variant: .primary) {
                         showActionSheet = true
                     }
-                    SomaButton(title: "Reschedule", size: .md, variant: .secondary) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "dayDetail.reschedule.title", defaultValue: "Reschedule", comment: "Button: opens the reschedule-not-supported alert for a skipped day")), size: .md, variant: .secondary) {
                         showRescheduleInfo = true
                     }
                 }
@@ -330,10 +368,10 @@ struct DayDetailView: View {
             }
         case .done:
             VStack(spacing: 9) {
-                SomaButton(title: "Do it again", size: .lg, variant: .primary) {
+                SomaButton(title: LocalizedStringKey(String(localized: "completedWorkout.cta.doItAgain", defaultValue: "Do it again", comment: "Button: repeat this completed workout")), size: .lg, variant: .primary) {
                     showActionSheet = true
                 }
-                SomaButton(title: "See full log", size: .md, variant: .secondary) {
+                SomaButton(title: LocalizedStringKey(String(localized: "dayDetail.seeFullLog", defaultValue: "See full log", comment: "Button: open the full completed-workout log detail for a done day")), size: .md, variant: .secondary) {
                     showCompletedSheet = true
                 }
             }
@@ -363,11 +401,12 @@ struct DayDetailView: View {
                 title: plannedPlan.selectedTitle,
                 bodyPart: bodyPart,
                 category: plannedPlan.category,
-                planSnapshot: plannedPlan.plan
+                planSnapshot: plannedPlan.plan,
+                reasonSnapshot: WorkoutReasonResolver.impactNote(source: "ai_plan", dayLoadState: .pending)
             )
             await load()
         } catch {
-            completeError = "Couldn't log this workout. Try again."
+            completeError = String(localized: "day_detail.complete_error", defaultValue: "Couldn't log this workout. Try again.", comment: "Error shown when logging a completed workout fails")
         }
     }
 

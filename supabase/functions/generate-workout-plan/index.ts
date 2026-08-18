@@ -30,13 +30,14 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { classifyGenerationError } from "../_shared/anthropicErrors.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { checkGenerationLimit, GENERATION_LIMIT_MESSAGE, logGeneration, type SubscriptionTier } from "../_shared/generationLimits.ts";
+import { DEVICE_DETECTED_SOURCE } from "../_shared/workoutLogSources.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
 import { describeContraindications, type InjurySeverityLevel } from "../_shared/contraindications.ts";
 import { describePregnancyGuidance } from "../_shared/pregnancyGuidance.ts";
 import { describeVolumeGuidance, type ExperienceLevel } from "../_shared/volumeLandmarks.ts";
 import { describeRirGuidance } from "./rirGuidance.ts";
 import { decideShapingGoalGuidance } from "./shapingGoalGuidance.ts";
-import { describeAnchorSession } from "./anchorSessionGuidance.ts";
+import { describeAnchorSessions } from "./anchorSessionGuidance.ts";
 import { describeSexAwareConsiderations, describeSexAwareGoalDoseConsideration } from "./sexAwareGuidance.ts";
 import { type CyclePhaseResult, deriveCyclePhase } from "../_shared/cyclePhaseGuidance.ts";
 import { resolveBodyPartForInjuries } from "../_shared/injurySubstitution.ts";
@@ -64,6 +65,7 @@ import {
   type GoalWorkBlock,
   type GoalWorkConcept,
 } from "./goalWork.ts";
+import { languageName, normalizeLanguageCode } from "../_shared/language.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -136,12 +138,11 @@ interface UserRow {
   /// is 42 degrees celsius, SOMA should not recommend a run outside."
   country: string | null;
   city: string | null;
-  /// Phase 4 (docs/coaching-personalization-plan.md): a recurring class/
-  /// activity the rest of the week gets built around, set at onboarding or
-  /// from ProfileView. Null name = no anchor session set. See
-  /// anchorSessionGuidance.ts for how these two feed the prompt.
-  anchor_session_name: string | null;
-  anchor_session_days: number[] | null;
+  /// Phase 4 (docs/coaching-personalization-plan.md): up to 5 recurring
+  /// classes/activities the rest of the week gets built around, set at
+  /// onboarding or from ProfileView (item 6 fix: was a single name/days
+  /// pair). See anchorSessionGuidance.ts for how this feeds the prompt.
+  anchor_sessions: { id: string; name: string; days: number[] }[] | null;
   /// Phase 5 (docs/coaching-personalization-plan.md): opt-in cycle-phase
   /// tracking, set only from ProfileView (never onboarding, same posture
   /// as pregnancy/pregnancy_week). Null date = not opted in. See
@@ -206,7 +207,15 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const date: string | undefined = body.date;
     const selection: Selection | undefined = body.selection;
+    const languageCode = normalizeLanguageCode(body.language);
+    const language = languageName(body.language);
     const notes: string | undefined = typeof body.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : undefined;
+    // "Regenerate" (11d): the user wants a fresh take on the SAME
+    // selection, not just whatever's already cached for today. Only
+    // bypasses the cache-hit return below -- the already-logged guard a
+    // few lines down still wins regardless, so a completed workout can
+    // never be swapped out from under its own log.
+    const forceRegenerate = body.forceRegenerate === true;
     const targetDurationRange: DurationRange | undefined =
       body.targetDurationRange && typeof body.targetDurationRange.min === "number" && typeof body.targetDurationRange.max === "number"
         ? body.targetDurationRange
@@ -275,11 +284,14 @@ Deno.serve(async (req: Request) => {
     // unique(user_id, date) on workout_log), and maybeSingle errors on 2+
     // rows -- with the error unread, `data` came back null and the lock
     // silently disengaged on exactly the days it was written for.
+    // device_detected excluded: an auto-logged wearable session must not
+    // count as "today's workout is done" for locking purposes.
     const { data: existingLogs, error: logReadError } = await supabase
       .from("workout_log")
       .select("title")
       .eq("user_id", userId)
-      .eq("date", date);
+      .eq("date", date)
+      .neq("source", DEVICE_DETECTED_SOURCE);
     if (logReadError) {
       throw new Error(`could not check today's workout log: ${logReadError.message}`);
     }
@@ -293,6 +305,22 @@ Deno.serve(async (req: Request) => {
     // goal-state change that arrived after the fact.
     const cachedGoalSignature =
       ((cached?.plan as { goal_signature?: string | null } | undefined)?.goal_signature) ?? null;
+    // Unlike goal_signature/injury_signature below, a language mismatch is
+    // NEVER waved through by cachedSelectionLogged, and a null (pre-existing)
+    // cached language is NOT treated as compatible either -- those other
+    // fields default to "don't know, trust it" because an unknown goal/
+    // injury state has no clear right answer, but a plan in the wrong
+    // language is unambiguously wrong, full stop, logged or not. The app's
+    // own language switcher tells the user to force-quit and relaunch to
+    // "finish switching" (ProfileView's profile.language.restartAlert) --
+    // that promise has to hold for AI-generated content too, not just the
+    // static catalog strings a relaunch already picks up. In practice this
+    // only fires right after such a relaunch (the client doesn't change its
+    // request language mid-session), so it doesn't fight the "don't
+    // regenerate over a logged workout" protection the other two checks
+    // exist for. See generate-gym-workout's equipment_signature for the same
+    // fix baked directly into that cache's key instead.
+    const cachedLanguage = ((cached?.plan as { language?: string | null } | undefined)?.language) ?? null;
     const cachedSelectionLogged = (existingLogs ?? []).some((log) => log.title === selection.title);
     // Deliberately stricter than the goal-signature null-passes rule above:
     // a cache row from before this column existed (cachedInjurySignature ===
@@ -307,7 +335,9 @@ Deno.serve(async (req: Request) => {
       (cachedInjurySignature !== null ? cachedInjurySignature === injurySignature : injurySignature === "");
     if (
       cached && cached.selected_title === selection.title &&
+      (cachedSelectionLogged || !forceRegenerate) &&
       (cachedGoalSignature === null || cachedGoalSignature === goalSignature || cachedSelectionLogged) &&
+      cachedLanguage === languageCode &&
       injurySignatureOk
     ) {
       return jsonResponse({ date, category: cached.category, source: cached.source, ...cached.plan });
@@ -335,7 +365,7 @@ Deno.serve(async (req: Request) => {
       .eq("id", userId)
       .maybeSingle();
     const subscriptionTier = ((tierRow?.subscription_tier as SubscriptionTier | null) ?? "free");
-    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier);
+    const limitCheck = await checkGenerationLimit(supabase, userId, date, subscriptionTier, "suggestion");
     if (!limitCheck.allowed) {
       return jsonResponse({ date, generation_limit_reached: true, message: GENERATION_LIMIT_MESSAGE });
     }
@@ -353,7 +383,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_session_name, anchor_session_days, last_period_start_date, typical_cycle_length_days")
+      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_sessions, last_period_start_date, typical_cycle_length_days")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -485,6 +515,7 @@ Deno.serve(async (req: Request) => {
         courtDays: goalRow.court_days ?? null,
         workoutText: goalRow.workout_text ?? null,
         coachName: goalRow.coach_name ?? null,
+        frequencyPerWeek: goalRow.frequency_per_week ?? null,
       };
       goalDecision = decideGoalWork({
         category,
@@ -510,11 +541,7 @@ Deno.serve(async (req: Request) => {
     // independent of the goal-work machinery above (no user_goal row
     // needed), so it's computed here rather than inside that `if (goalRow)`
     // block.
-    const anchorSessionLine = describeAnchorSession({
-      name: (userRow as UserRow | null)?.anchor_session_name ?? null,
-      days: (userRow as UserRow | null)?.anchor_session_days ?? [],
-      date,
-    });
+    const anchorSessionLine = describeAnchorSessions((userRow as UserRow | null)?.anchor_sessions ?? [], date);
 
     // Phase 5 (docs/coaching-personalization-plan.md): null whenever the
     // user hasn't opted in (no last_period_start_date) or the projection
@@ -544,6 +571,7 @@ Deno.serve(async (req: Request) => {
       upcomingGoalLine,
       anchorSessionLine,
       cyclePhase,
+      language,
     );
 
     // Goal-mapped exercise ids join the closed vocabulary inside, under
@@ -742,6 +770,7 @@ Deno.serve(async (req: Request) => {
       // Cache identity (see the cache read above) + tomorrow's goal-block
       // history (hangs-never-consecutive-days rule in goalWork.ts).
       goal_signature: goalSignature,
+      language: languageCode,
       // Cache identity -- see the injurySignature comment near the top of
       // this handler for why this exists at all.
       injury_signature: injurySignature,
@@ -873,6 +902,7 @@ function buildPrompt(
   upcomingGoalLine: string | null,
   anchorSessionLine: string | null,
   cyclePhase: CyclePhaseResult | null,
+  language: string,
 ): string {
   const goals = userRow?.goals?.length ? userRow.goals.join(", ") : "general fitness";
   // A secondary, lower-confidence signal from comparing the user's stored
@@ -1053,7 +1083,9 @@ Return the full session as:
 - blocks: an ordered array of named blocks (e.g. "Block 1", "Superset A") that together make up "${selection.title}" for today's "${category}" intensity, following the experience guidance above. Each block has its own rounds (1 for a straight-through block, 2+ for a circuit/superset), a rest_between_rounds, and is_finisher (true only for the optional finisher block described next, false for every other block). VARIETY IS REQUIRED: use each specific named exercise AT MOST ONCE across the ENTIRE session (warm_up + every block + cool_down combined) -- never repeat the same exercise in multiple blocks or rounds of a superset. Like a real strength coach programming a session, deliberately spread the work across different specific muscles within the target body part (e.g. a lower-body day should mix quad-, hamstring-, glute-, and calf-dominant movements, not four variations of the same squat pattern) and different movement patterns (push/pull/hinge/squat/carry/isolation as relevant), not near-duplicates of one exercise.${restLightContentLine} ${finisherInstruction}${goalInstruction}
 - cool_down: 2-3 items of static stretching/breathing targeting the muscles just worked.
 
-For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, rest_seconds (integer, real prescriptive rest AFTER this exercise before the next -- roughly 0 for a stretch/warm-up cardio item, 30-60s for lighter accessory/circuit work, 60-90s for standard working sets, 120-180s for heavy compound lifts near the top of the day's intensity; scale it with today's intensity and the user's experience level like a real coach would, don't default to the same number every time), and instructions -- 2-3 plain, easy-to-follow sentences giving EXACT form/technique PLUS one concrete, specific coaching cue for this exact movement (e.g. "brace your core like you're about to be punched in the stomach" or "drive through your mid-foot, not your toes" or "keep your ribs stacked over your hips throughout"). A generic filler cue that could apply to any exercise (e.g. "maintain good form", "focus on technique", "go at your own pace") is NOT acceptable -- the cue must be specific enough that it wouldn't make sense pasted onto a different exercise. Also give a one-line "focus" summarizing today's session.`;
+For every exercise in warm_up, every block's exercises, and cool_down, give: name, sets (integer -- use 1 for anything that's just a held stretch or a single timed activity, not part of a multi-round block), reps (a string, e.g. "8-10", "30 sec", "5 min"), weight_guidance (concrete and actionable -- e.g. "start light, 2x8kg dumbbells" or "bodyweight" or "N/A" for stretches -- not vague advice), intensity (e.g. "RPE 6/10" or "easy/moderate/hard"), duration_minutes for that item including rest, rest_seconds (integer, real prescriptive rest AFTER this exercise before the next -- roughly 0 for a stretch/warm-up cardio item, 30-60s for lighter accessory/circuit work, 60-90s for standard working sets, 120-180s for heavy compound lifts near the top of the day's intensity; scale it with today's intensity and the user's experience level like a real coach would, don't default to the same number every time), and instructions -- 2-3 plain, easy-to-follow sentences giving EXACT form/technique PLUS one concrete, specific coaching cue for this exact movement (e.g. "brace your core like you're about to be punched in the stomach" or "drive through your mid-foot, not your toes" or "keep your ribs stacked over your hips throughout"). A generic filler cue that could apply to any exercise (e.g. "maintain good form", "focus on technique", "go at your own pace") is NOT acceptable -- the cue must be specific enough that it wouldn't make sense pasted onto a different exercise. Also give a one-line "focus" summarizing today's session.
+
+Write every piece of narrative text in ${language} -- reps, weight_guidance, intensity, instructions, block names, rest_between_rounds, and the closing "focus" line. Never translate an exercise's "name" -- copy it exactly as given.`;
 }
 
 /// Turns whichever provider(s) reported today into a plain-language health
@@ -1443,20 +1475,25 @@ async function fetchGoalExerciseIds(supabase: any, goalId: string): Promise<stri
     .filter((n): n is string => typeof n === "string");
 }
 
-/// Yesterday's goal-block metadata from the cached plan -- feeds the
-/// hangs-never-consecutive-days and every_other_day rules.
+/// The trailing 6 days' goal-block metadata from cached plans -- feeds the
+/// hangs-never-consecutive-days and every_other_day rules (both only ever
+/// check yesterday specifically) and isScheduledToday's frequencyPerWeek
+/// gate (counts placements across the whole window).
 // deno-lint-ignore no-explicit-any
 async function fetchRecentGoalBlocks(supabase: any, userId: string, date: string): Promise<GoalBlockHistoryEntry[]> {
+  const windowStart = addDays(date, -6);
   const yesterday = addDays(date, -1);
   const { data, error } = await supabase
     .from("ai_workout_plan")
-    .select("plan")
+    .select("date, plan")
     .eq("user_id", userId)
-    .eq("date", yesterday)
-    .maybeSingle();
+    .gte("date", windowStart)
+    .lte("date", yesterday);
   if (error || !data) return [];
-  const meta = (data.plan as { goal_block?: { text?: string } } | null)?.goal_block;
-  return meta?.text ? [{ date: yesterday, text: meta.text }] : [];
+  // deno-lint-ignore no-explicit-any
+  return (data as any[])
+    .map((row) => ({ date: row.date as string, text: (row.plan as { goal_block?: { text?: string } } | null)?.goal_block?.text }))
+    .filter((r): r is GoalBlockHistoryEntry => typeof r.text === "string");
 }
 
 /// Main-block AND cool_down exercise names from the last 2 days' plans for

@@ -25,6 +25,14 @@ final class SubscriptionManager: ObservableObject {
     /// The tier last synced to Supabase ("free"/"monthly"/"annual") -- lets
     /// UI quota gates mirror the server's tier-scaled generation limits.
     @Published private(set) var tier = "free"
+    /// Subscribed via a free-trial offer (introductory OR a redeemed
+    /// offer code) -- drives the in-app "Upgrade now" highlight while
+    /// the trial runs.
+    @Published private(set) var isInTrial = false
+    /// Current entitlement's expiration: the trial's end while isInTrial,
+    /// otherwise the next renewal date -- feeds the status-row chip's
+    /// "TRIAL · N DAYS" countdown and 12b's "renews <date>" line.
+    @Published private(set) var expirationDate: Date?
 
     private var transactionListener: Task<Void, Never>?
 
@@ -42,6 +50,20 @@ final class SubscriptionManager: ObservableObject {
     }
 
     func refreshEntitlement() async {
+        // Fixture runs mock the entitlement (no StoreKit purchases exist
+        // in the simulator) -- still mirrors into Superwall, so paywall
+        // gating behaves exactly as it would for a real subscriber.
+        if let mock = UITestSupport.subscriptionMock {
+            isSubscribed = mock.isSubscribed
+            tier = mock.tier
+            isInTrial = mock.isInTrial
+            expirationDate = mock.isInTrial
+                ? Calendar.current.date(byAdding: .day, value: 3, to: Date())
+                : (mock.isSubscribed ? Calendar.current.date(byAdding: .day, value: 117, to: Date()) : nil)
+            mirrorSubscriptionStatusToSuperwall()
+            return
+        }
+
         // StoreKit has no direct "user cancelled" push -- this is the one
         // observable signal available: isSubscribed flipping true -> false
         // across a refresh (expired, revoked/refunded, or no longer in
@@ -60,22 +82,51 @@ final class SubscriptionManager: ObservableObject {
             else { continue }
             isSubscribed = transaction.revocationDate == nil
             tier = isSubscribed ? (transaction.productID == Self.annualProductID ? "annual" : "monthly") : "free"
+            // paymentMode is the correct trial signal: an offer-code
+            // redemption reports offer type .code, never .introductory,
+            // so the old type check rendered code trials as full paid
+            // (crown, PRO chip, "renews ..."). The fallback treats .code
+            // as a trial too -- every Soma code offer is Free mode.
+            let isTrialOffer: Bool
+            if #available(iOS 17.2, *), let paymentMode = transaction.offer?.paymentMode {
+                isTrialOffer = paymentMode == .freeTrial
+            } else {
+                let offerType: Transaction.OfferType? = if #available(iOS 17.2, *) {
+                    transaction.offer?.type
+                } else {
+                    transaction.offerType
+                }
+                isTrialOffer = offerType == .introductory || offerType == .code
+            }
+            isInTrial = isSubscribed && isTrialOffer
+            expirationDate = transaction.expirationDate
             updateSubscriptionTierRemote(tier)
             mirrorSubscriptionStatusToSuperwall()
             return
         }
         isSubscribed = false
         tier = "free"
+        isInTrial = false
+        expirationDate = nil
         updateSubscriptionTierRemote("free")
         mirrorSubscriptionStatusToSuperwall()
     }
 
-    /// A single "premium" entitlement identifier covers both plans --
+    /// A single "pro" entitlement identifier covers both plans --
     /// which plan (monthly vs annual) is tracked separately in Supabase's
     /// `subscription_tier`, not duplicated into Superwall's entitlement
     /// set, since Superwall's own paywall gating only needs "paid or not."
     private func mirrorSubscriptionStatusToSuperwall() {
-        Superwall.shared.subscriptionStatus = isSubscribed ? .active([Entitlement(id: "premium")]) : .inactive
+        // "pro" matches the dashboard's Products & Entitlements identifier
+        // exactly -- a mismatched id ("premium") makes entitlement-based
+        // audience filters silently never match.
+        Superwall.shared.subscriptionStatus = isSubscribed ? .active([Entitlement(id: "pro")]) : .inactive
+        // Trial is .active above, so dashboard audiences can't see it via
+        // subscription status -- expose it as user attributes instead.
+        Superwall.shared.setUserAttributes([
+            "is_in_trial": isInTrial,
+            "trial_ends_at": isInTrial ? (expirationDate?.timeIntervalSince1970 ?? 0) : 0
+        ])
     }
 
     /// Fire-and-forget, best-effort -- see SupabaseClient.updateSubscriptionTier's

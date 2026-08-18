@@ -102,8 +102,9 @@ enum Config {
     /// new data collection or vendor was added.
     static let enableBodyPhotoVisionAnalysis = true
 
-    /// Sport goal programs -- compile-time safety net only. The operational
-    /// switch is server-side (`sports.status` via RLS): empty catalog = off.
+    /// Sport goal programs -- compile-time safety net only. Live to every
+    /// user as of 2026-08-16 (`sports.status = 'live'`, no opt-in); this
+    /// flag stays as the emergency kill switch (SGP-A7).
     static let enableSportGoals = true
 
     /// Opt-in cycle-phase tracking (Phase 5: see

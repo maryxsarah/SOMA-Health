@@ -15,6 +15,7 @@ import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkFlatDailyLimit, logGeneration } from "../_shared/generationLimits.ts";
 import { clampEstimate, type MealEstimate } from "./estimateBounds.ts";
+import { languageName } from "../_shared/language.ts";
 
 // Meals are logged multiple times a day (breakfast/lunch/dinner/snacks),
 // unlike the once-a-day workout generation -- a generous flat ceiling,
@@ -47,6 +48,7 @@ Deno.serve(async (req: Request) => {
     const userId = await requireUser(req);
     const body = await req.json().catch(() => ({}));
     const text: string | undefined = body.text;
+    const language = languageName(body.language);
 
     if (!text || !text.trim()) {
       return jsonResponse({ error: "missing 'text'" }, 400);
@@ -59,7 +61,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Too many estimates today. Enter the numbers directly, or try again tomorrow." }, 429);
     }
 
-    const estimate = clampEstimate(await callClaude(text.trim()));
+    const estimate = clampEstimate(await callClaude(text.trim(), language));
     await logGeneration(supabase, userId, date, "meal_text_estimate");
     return jsonResponse(estimate);
   } catch (err) {
@@ -69,14 +71,14 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function callClaude(text: string): Promise<MealEstimate> {
+async function callClaude(text: string, _language: string): Promise<MealEstimate> {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
   const prompt = `A fitness app user just typed what they ate: "${text}"
 
 Estimate its nutrition as realistically as you can. When the user didn't give amounts, assume typical realistic portion sizes (e.g. "a chicken breast" ≈ 150g cooked, "a bowl of rice" ≈ 1 cup cooked, "a coffee with milk" ≈ a splash of milk, not a full cup). If they described multiple items, sum the whole meal into one total.
 
 Return:
-- label: a short, cleaned-up version of what they described (under 8 words, title case, no calorie/macro numbers in it)
+- label: a short version of what they described (under 8 words, no calorie/macro numbers in it), keeping the user's own language, wording and capitalization -- never convert it to Title Case, never translate a name they typed themselves
 - calories: total kcal for the whole meal, whole number
 - proteinG, carbsG, fatG: total grams for the whole meal, whole numbers
 

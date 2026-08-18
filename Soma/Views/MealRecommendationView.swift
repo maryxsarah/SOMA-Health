@@ -54,7 +54,7 @@ struct MealRecommendationView: View {
                 .padding(.bottom, 90)
             }
             .somaBackground()
-            .navigationTitle("What can I make?")
+            .navigationTitle(String(localized: "mealRecommendation.title", defaultValue: "What can I make?", comment: "Navigation title for the AI meal recommendation screen"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -98,9 +98,9 @@ struct MealRecommendationView: View {
 
     private var inputSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Tell Soma what you have.")
+            Text(String(localized: "mealRecommendation.input.heading", defaultValue: "Tell Soma what you have.", comment: "Heading on the meal recommendation input screen"))
                 .font(Theme.display)
-            Text("Type it, dictate it, or just list what's in the fridge and pantry -- Soma builds one full recipe from it, sized to what's left of today's target.")
+            Text(String(localized: "mealRecommendation.input.subtitle", defaultValue: "Type it, dictate it, or just list what's in the fridge and pantry -- Soma builds one full recipe from it, sized to what's left of today's target.", comment: "Subtitle explaining how to describe ingredients on the meal recommendation input screen"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -110,14 +110,18 @@ struct MealRecommendationView: View {
 
             CardView {
                 HStack(alignment: .top, spacing: 8) {
-                    TextField("e.g. \"chicken breast, spinach, rice, half an onion\"", text: $ingredientsText, axis: .vertical)
+                    TextField(String(localized: "mealRecommendation.input.placeholder", defaultValue: "e.g. \"chicken breast, spinach, rice, half an onion\"", comment: "Placeholder text for the ingredients input field"), text: $ingredientsText, axis: .vertical)
                         .lineLimit(1...4)
                     dictateButton
                 }
                 if speechRecognizer.isListening {
-                    Label("Listening -- tap the mic when you're done, or just stop talking.", systemImage: "waveform")
-                        .font(.caption2)
-                        .foregroundStyle(SomaTokens.accent)
+                    Label {
+                        Text(String(localized: "mealRecommendation.input.listening", defaultValue: "Listening -- tap the mic when you're done, or just stop talking.", comment: "Hint shown while dictating ingredients with the mic"))
+                    } icon: {
+                        Image(systemName: "waveform")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(SomaTokens.accent)
                 }
             }
 
@@ -126,7 +130,7 @@ struct MealRecommendationView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
             } else {
-                SomaButton(title: "Get a meal idea", size: .lg, variant: .primary, isEnabled: canGenerate) {
+                SomaButton(title: LocalizedStringKey(String(localized: "mealRecommendation.input.generateButton", defaultValue: "Get a meal idea", comment: "Button to generate an AI meal recommendation")), size: .lg, variant: .primary, isEnabled: canGenerate) {
                     Task { await generate() }
                 }
             }
@@ -138,12 +142,12 @@ struct MealRecommendationView: View {
             Image(systemName: "info.circle.fill")
                 .foregroundStyle(SomaTokens.warn)
             VStack(alignment: .leading, spacing: 4) {
-                Text("We don't know your kitchen yet")
+                Text(String(localized: "mealRecommendation.equipmentHint.title", defaultValue: "We don't know your kitchen yet", comment: "Title of the hint shown when the user hasn't set up kitchen equipment"))
                     .font(.system(size: 13, weight: .semibold))
-                Text("Recipes will assume a stove, oven, and microwave until you set up your full kitchen equipment.")
+                Text(String(localized: "mealRecommendation.equipmentHint.body", defaultValue: "Recipes will assume a stove, oven, and microwave until you set up your full kitchen equipment.", comment: "Body of the hint shown when the user hasn't set up kitchen equipment"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("Set up now") { showKitchenSetup = true }
+                Button(LocalizedStringKey(String(localized: "mealRecommendation.equipmentHint.cta", defaultValue: "Set up now", comment: "Button to open kitchen equipment setup from the meal recommendation hint"))) { showKitchenSetup = true }
                     .font(.caption.bold())
             }
         }
@@ -167,10 +171,10 @@ struct MealRecommendationView: View {
     }
 
     private static let thinkingMessages = [
-        "Checking what's actually in season...",
-        "Matching this to today's remaining macros...",
-        "Making sure every step fits your kitchen...",
-        "Working out realistic portions...",
+        String(localized: "mealRecommendation.thinking.season", defaultValue: "Checking what's actually in season...", comment: "Loading message shown while generating an AI meal recommendation"),
+        String(localized: "mealRecommendation.thinking.macros", defaultValue: "Matching this to today's remaining macros...", comment: "Loading message shown while generating an AI meal recommendation"),
+        String(localized: "mealRecommendation.thinking.kitchen", defaultValue: "Making sure every step fits your kitchen...", comment: "Loading message shown while generating an AI meal recommendation"),
+        String(localized: "mealRecommendation.thinking.portions", defaultValue: "Working out realistic portions...", comment: "Loading message shown while generating an AI meal recommendation"),
     ]
 
     // MARK: - Result
@@ -182,13 +186,20 @@ struct MealRecommendationView: View {
                     .font(Theme.display)
                 HStack(spacing: 10) {
                     Label("\(rec.totalTimeMinutes) min", systemImage: "clock")
-                    Label("\(rec.calories) kcal", systemImage: "flame")
+                    Label {
+                        Text(String(localized: "mealRecommendation.result.caloriesLabel", defaultValue: "\(rec.calories) kcal", comment: "Calorie count for the generated recipe, shown next to a flame icon"))
+                    } icon: {
+                        Image(systemName: "flame")
+                    }
                 }
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
             }
 
-            SomaDisclosure(closedLabel: "Why this meal?", openLabel: "Hide") {
+            SomaDisclosure(
+                closedLabel: LocalizedStringKey(String(localized: "mealRecommendation.whyThisMeal.closedLabel", defaultValue: "Why this meal?", comment: "Disclosure trigger label to reveal why a recommended meal fits")),
+                openLabel: LocalizedStringKey(String(localized: "mealRecommendation.whyThisMeal.openLabel", defaultValue: "Hide", comment: "Disclosure trigger label to hide the 'why this meal' explanation"))
+            ) {
                 Text(rec.whyThisMeal)
             }
 
@@ -203,7 +214,7 @@ struct MealRecommendationView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "wrench.and.screwdriver.fill")
                         .font(.caption2)
-                    Text("Uses: \(rec.equipmentUsed.joined(separator: ", "))")
+                    Text(String(localized: "mealRecommendation.equipmentUsed.label", defaultValue: "Uses: \(Self.equipmentUsedDisplayNames(rec.equipmentUsed).joined(separator: ", "))", comment: "Lists which of the user's kitchen equipment items the recipe uses"))
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)
@@ -211,14 +222,22 @@ struct MealRecommendationView: View {
         }
     }
 
+    /// The server returns stable equipment identifiers (e.g. "stove") for
+    /// known equipment so this can localize via KitchenEquipmentTag, plus
+    /// the user's own free-text "other" notes verbatim (not a translatable
+    /// label, shown as-is when it doesn't match a known identifier).
+    private static func equipmentUsedDisplayNames(_ raw: [String]) -> [String] {
+        raw.map { KitchenEquipmentTag(rawValue: $0)?.displayName ?? $0 }
+    }
+
     private func macroFitCard(_ rec: MealRecommendation, remaining: NutritionDayProgress) -> some View {
         CardView {
-            Text("How this fits what's left today")
+            Text(String(localized: "mealRecommendation.macroFit.title", defaultValue: "How this fits what's left today", comment: "Title of the card comparing a recommended meal's macros to what's left of today's target"))
                 .font(.subheadline.bold())
-            macroFitRow(label: "Calories", value: rec.calories, of: remaining.caloriesRemaining, unit: "kcal", color: SomaTokens.accent)
-            macroFitRow(label: "Protein", value: rec.proteinG, of: remaining.proteinRemainingG, unit: "g", color: Self.proteinColor)
-            macroFitRow(label: "Carbs", value: rec.carbsG, of: remaining.carbsRemainingG, unit: "g", color: Self.carbsColor)
-            macroFitRow(label: "Fat", value: rec.fatG, of: remaining.fatRemainingG, unit: "g", color: Self.fatColor)
+            macroFitRow(label: "Calories", value: rec.calories, of: remaining.caloriesRemaining, unit: String(localized: "kcal", comment: "Unit abbreviation for kilocalories, shown next to a macro fit value"), color: SomaTokens.accent)
+            macroFitRow(label: "Protein", value: rec.proteinG, of: remaining.proteinRemainingG, unit: String(localized: "g", comment: "Unit abbreviation for grams, shown next to a macro fit value"), color: Self.proteinColor)
+            macroFitRow(label: "Carbs", value: rec.carbsG, of: remaining.carbsRemainingG, unit: String(localized: "g", comment: "Unit abbreviation for grams, shown next to a macro fit value"), color: Self.carbsColor)
+            macroFitRow(label: "Fat", value: rec.fatG, of: remaining.fatRemainingG, unit: String(localized: "g", comment: "Unit abbreviation for grams, shown next to a macro fit value"), color: Self.fatColor)
         }
     }
 
@@ -230,12 +249,12 @@ struct MealRecommendationView: View {
     /// the fill can run past 100% (this meal alone can exceed what's left,
     /// same "the real numbers tell the honest story" rule NutritionView's
     /// own macroBar follows, never silently clamped to look flattering).
-    private func macroFitRow(label: String, value: Int, of remaining: Int, unit: String, color: Color) -> some View {
+    private func macroFitRow(label: LocalizedStringKey, value: Int, of remaining: Int, unit: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(label).font(.caption.bold())
                 Spacer()
-                Text("\(value) / \(remaining) \(unit) left")
+                Text(String(localized: "mealRecommendation.macroFit.rowValue", defaultValue: "\(value) / \(remaining) \(unit) left", comment: "A recipe's amount of one macro vs. how much of that macro is left today, e.g. '30 / 120 g left'"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -254,7 +273,7 @@ struct MealRecommendationView: View {
 
     private func ingredientsCard(_ rec: MealRecommendation) -> some View {
         CardView {
-            Text("Ingredients")
+            Text(String(localized: "mealRecommendation.ingredients.title", defaultValue: "Ingredients", comment: "Title of the ingredients list card for a generated recipe"))
                 .font(.subheadline.bold())
             ForEach(rec.ingredients) { ingredient in
                 HStack {
@@ -271,7 +290,7 @@ struct MealRecommendationView: View {
 
     private func stepsCard(_ rec: MealRecommendation) -> some View {
         CardView {
-            Text("How to make it")
+            Text(String(localized: "mealRecommendation.steps.title", defaultValue: "How to make it", comment: "Title of the recipe steps card"))
                 .font(.subheadline.bold())
             ForEach(Array(rec.steps.prefix(2).enumerated()), id: \.offset) { index, step in
                 HStack(alignment: .top, spacing: 8) {
@@ -284,11 +303,12 @@ struct MealRecommendationView: View {
                 }
             }
             if rec.steps.count > 2 {
-                Text("+ \(rec.steps.count - 2) more step\(rec.steps.count - 2 == 1 ? "" : "s")")
+                let remainingSteps = rec.steps.count - 2
+                Text(String(localized: "mealRecommendation.steps.moreCount", defaultValue: "+ \(remainingSteps) more steps", comment: "Count of additional recipe steps not shown inline, e.g. '+ 3 more steps'; catalog entry uses plural variations, not a hand-rolled suffix"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            SomaButton(title: "Start cooking", size: .md, variant: .secondary) {
+            SomaButton(title: LocalizedStringKey(String(localized: "mealRecommendation.steps.startCookingButton", defaultValue: "Start cooking", comment: "Button to enter step-by-step cook mode for a recipe")), size: .md, variant: .secondary) {
                 showCookMode = true
             }
             .padding(.top, 4)
@@ -301,21 +321,28 @@ struct MealRecommendationView: View {
     private func bottomBar(_ rec: MealRecommendation) -> some View {
         VStack(spacing: 8) {
             if didLog {
-                Label("Logged -- nice.", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(SomaTokens.success)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .transition(.scale.combined(with: .opacity))
+                Label {
+                    Text(String(localized: "mealRecommendation.bottomBar.loggedConfirmation", defaultValue: "Logged -- nice.", comment: "Confirmation shown after successfully logging the generated meal"))
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill")
+                }
+                .font(.system(size: 14.5, weight: .semibold))
+                .foregroundStyle(SomaTokens.success)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .transition(.scale.combined(with: .opacity))
             } else {
                 HStack(spacing: 10) {
-                    SomaButton(title: "Try different ingredients", size: .lg, variant: .secondary) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "mealRecommendation.bottomBar.retryButton", defaultValue: "Try different ingredients", comment: "Button to discard the current recommendation and try different ingredients")), size: .lg, variant: .secondary) {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                             recommendation = nil
                             ingredientsText = ""
                         }
                     }
-                    SomaButton(title: isLogging ? "Logging..." : "Log this meal", size: .lg, variant: .primary, isEnabled: !isLogging) {
+                    let logButtonTitle = LocalizedStringKey(isLogging
+                        ? String(localized: "mealRecommendation.bottomBar.loggingButton", defaultValue: "Logging...", comment: "Button label shown while a logged meal save is in progress")
+                        : String(localized: "mealRecommendation.bottomBar.logButton", defaultValue: "Log this meal", comment: "Button label to save the generated meal recommendation as a logged meal"))
+                    SomaButton(title: logButtonTitle, size: .lg, variant: .primary, isEnabled: !isLogging) {
                         Task { await logThisMeal(rec) }
                     }
                 }
@@ -338,7 +365,7 @@ struct MealRecommendationView: View {
                 recommendation = result
             }
         } catch {
-            errorMessage = "Couldn't come up with something from that -- try describing it differently, or try again in a moment."
+            errorMessage = String(localized: "mealRecommendation.error.generateFailed", defaultValue: "Couldn't come up with something from that -- try describing it differently, or try again in a moment.", comment: "Error shown when AI meal recommendation generation fails")
         }
     }
 
@@ -363,7 +390,7 @@ struct MealRecommendationView: View {
             try? await Task.sleep(nanoseconds: 900_000_000)
             dismiss()
         } catch {
-            errorMessage = "Couldn't save that entry. Try again."
+            errorMessage = String(localized: "logMeal.saveFailed", defaultValue: "Couldn't save that entry. Try again.", comment: "Error shown when saving a meal log entry fails")
         }
     }
 

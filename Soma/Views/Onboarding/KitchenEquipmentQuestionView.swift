@@ -26,10 +26,10 @@ struct KitchenEquipmentQuestionView: View {
             OnboardingTopBar(progress: progress, onBack: onBack)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("What's in your kitchen?")
+                Text(String(localized: "kitchenEquipmentQuestion.title", defaultValue: "What's in your kitchen?", comment: "Onboarding kitchen-equipment question screen title"))
                     .font(Theme.display)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("So we only ever suggest recipes you can actually cook. Optional -- skip if you're not sure yet.")
+                Text(String(localized: "kitchenEquipmentQuestion.subtitle", defaultValue: "So we only ever suggest recipes you can actually cook. Optional -- skip if you're not sure yet.", comment: "Onboarding kitchen-equipment question screen subtitle/explainer"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -55,8 +55,10 @@ struct KitchenEquipmentQuestionView: View {
                         }
                     }
                     if selection.contains(.other) {
-                        TextField("What else? (comma-separated)", text: $otherText)
-                            .textFieldStyle(.roundedBorder)
+                        TextField(String(localized: "kitchenEquipmentQuestion.otherPlaceholder", defaultValue: "What else? (comma-separated)", comment: "Placeholder for the free-text field shown when the 'Other' kitchen equipment option is selected"), text: $otherText)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .glassCardFlat(cornerRadius: SomaTokens.rXL)
                     }
                 }
                 .padding(.horizontal, 24)

@@ -6,8 +6,8 @@ import SwiftUI
 /// that animates); the body sits on surface-3 so it reads as a quote, never
 /// as a second card. Closed removes the body entirely (no height animation).
 struct SomaDisclosure<Content: View, Accessory: View>: View {
-    var closedLabel: String
-    var openLabel: String
+    var closedLabel: LocalizedStringKey
+    var openLabel: LocalizedStringKey
     /// Leading-aligns the trigger by default; Home's readiness card right-
     /// aligns it under the TODAY pill (guide 09 §1).
     var alignment: HorizontalAlignment
@@ -19,8 +19,8 @@ struct SomaDisclosure<Content: View, Accessory: View>: View {
     @State private var isOpen = false
 
     init(
-        closedLabel: String = "Why this?",
-        openLabel: String = "Hide details",
+        closedLabel: LocalizedStringKey = LocalizedStringKey(String(localized: "somaDisclosure.defaultClosedLabel", defaultValue: "Why this?", comment: "Default disclosure trigger label when a caller doesn't provide its own")),
+        openLabel: LocalizedStringKey = LocalizedStringKey(String(localized: "somaDisclosure.defaultOpenLabel", defaultValue: "Hide details", comment: "Default disclosure trigger label (open state) when a caller doesn't provide its own")),
         alignment: HorizontalAlignment = .leading,
         @ViewBuilder content: @escaping () -> Content,
         @ViewBuilder triggerAccessory: @escaping () -> Accessory = { EmptyView() }

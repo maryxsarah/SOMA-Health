@@ -1,0 +1,127 @@
+# Default rule set (~101 rules) plus a curated opt-in set, tuned against
+# this actual codebase on 2026-08-12 rather than adopted blind -- every
+# addition/exclusion below was measured (violation count) before being
+# decided, same as the two custom localization rules further down.
+#
+# Rules deliberately left OFF, and why (re-check periodically, not never):
+#   no_magic_numbers      -- 2182 hits. Fires on every SwiftUI layout
+#                             literal (.padding(20), font sizes, etc.);
+#                             impractical without naming hundreds of
+#                             one-off constants. Standard to skip in
+#                             SwiftUI-heavy codebases.
+#   multiline_arguments    -- 231 hits, conflicts with this codebase's
+#                             established one-line-call style.
+#   trailing_comma          -- 79 hits, pure style preference, not worth
+#                             the churn right now.
+#   todo                    -- this codebase uses `// TODO` deliberately
+#                             in a few places.
+# Rules tuned (not off, not default) because the stock threshold doesn't
+# fit this codebase's style -- see inline config below:
+#   line_length, identifier_name
+# Rules left ON despite a nonzero count because the hits are real findings,
+# not noise -- worth a deliberate cleanup pass, not a blocker:
+#   force_unwrapping (41 hits, real crash risk), accessibility_label_for_image
+#   (107 hits, real App Store accessibility gap) -- see docs/bug-log.md O-22.
+# Not attempted here: unused_import / unused_declaration are analyzer-only
+# rules (`swiftlint analyze`, needs a full xcodebuild compiler log, not
+# just `swiftlint lint`) -- untested, follow-up if wanted.
+
+disabled_rules:
+  - todo
+  - no_magic_numbers
+  - multiline_arguments
+  - trailing_comma
+
+opt_in_rules:
+  - force_unwrapping
+  - empty_count
+  - first_where
+  - contains_over_filter_is_empty
+  - contains_over_filter_count
+  - contains_over_first_not_nil
+  - flatmap_over_map_reduce
+  - fatal_error_message
+  - toggle_bool
+  - explicit_init
+  - redundant_optional_initialization
+  - discouraged_optional_boolean
+  - identical_operands
+  - joined_default_parameter
+  - convenience_type
+  - accessibility_label_for_image
+  - accessibility_trait_for_button
+
+line_length:
+  # Stock 120/200 flooded on this codebase's established style of long,
+  # single-line String(localized: "key", defaultValue: "...", comment:
+  # "...") calls (measured 969 hits at stock thresholds, many on lines
+  # this session itself just wrote correctly). Raised, not disabled --
+  # still catches genuinely excessive lines.
+  warning: 200
+  error: 400
+
+identifier_name:
+  # Stock min_length: 3 flagged the AppLanguage enum's ISO 639-1 codes
+  # (en/es/fr/it/de/ru/ka/hy) as "too short" -- those can't be renamed,
+  # they're a standard. 2 is still enough to catch genuinely bad names.
+  min_length:
+    warning: 2
+
+# Two custom rules aimed at the localization-coverage bug class fixed in
+# BUG-106 (docs/bug-log.md): UI text that never reaches Localizable.xcstrings
+# at all, either because it's a raw literal at a Text()/Button()/etc. call
+# site, or because it's returned from a helper as a plain String and only
+# reaches a Text() several lines away.
+#
+# Neither rule can know whether a flagged literal already has a real,
+# translated catalog entry -- SwiftLint's custom_rules are pure regex over
+# syntax-highlighted source, with no access to the .xcstrings file. That
+# means raw_localizable_literal WILL fire on hundreds of pre-existing,
+# already-correctly-localized direct-literal calls (measured: ~247 hits
+# across Soma/ as of 2026-08-12) -- it's a nudge for new code, not a
+# repo-wide gate. Run it scoped to a diff (see scripts/lint-localization.sh)
+# rather than across the whole tree.
+#
+# raw_string_return is much lower-noise (13 hits repo-wide when tuned, 0
+# after BUG-107's fixes) and safe to run untargeted -- it already surfaced
+# real bugs during tuning (Soma/App/SessionManager.swift's Sign in with
+# Apple/Google/email error messages, Soma/Models/AIWorkoutPlan.swift's
+# restLabel) that predate BUG-106 and are unrelated to it.
+#
+# Neither rule replaces extract_keys.py-style cross-referencing against
+# Localizable.xcstrings for proving nothing is missing (see O-21,
+# docs/bug-log.md) -- they exist to catch the *next* regression early, in
+# the IDE or in review, not to replace that audit.
+
+excluded:
+  - Soma.xcodeproj
+  - build
+
+custom_rules:
+  raw_localizable_literal:
+    name: "Unlocalized SwiftUI text literal"
+    regex: '(?<=\b(?:Text|Button|Label|TextField|Section|Stepper|DatePicker|Picker|SomaButton|ToolbarItem)\(\s{0,20})"[A-Za-z][^"]*? [^"]*?[A-Za-z][^"]*"'
+    match_kinds: string
+    message: >
+      Raw string literal passed directly to a SwiftUI text control. If this
+      is user-facing copy, wrap it in
+      String(localized: "key", defaultValue: "...", comment: "...") and add
+      the key to Soma/Resources/Localizable.xcstrings. If it's intentionally
+      never translated (a brand name, a raw code/identifier), use
+      Text(verbatim:) instead so the intent is explicit and this warning
+      doesn't recur.
+    severity: warning
+
+  raw_string_return:
+    name: "Helper returns an unlocalized string literal"
+    regex: '(?<=\breturn\s{0,5})"[A-Za-z][^"]*? [^"]*?[A-Za-z][^"]*"'
+    match_kinds: string
+    message: >
+      This helper returns a raw English literal with a space in it (looks
+      like prose, not an identifier/key). If the caller shows this in the
+      UI, wrap it in String(localized:defaultValue:comment:) -- this is the
+      exact shape of bug that shipped several "Not set"/"Xd cycle"-style
+      strings in English-only before BUG-106 (docs/bug-log.md). If it's
+      genuinely not user-facing (a DB key, a log line, documented legacy
+      data), add a comment explaining that instead of a blanket disable.
+    severity: warning

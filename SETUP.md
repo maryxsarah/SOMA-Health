@@ -160,8 +160,9 @@ cp Config/Config.sample.xcconfig Config/Config-Release.xcconfig
 ```
 Edit both with your real `SUPABASE_HOST` (bare host, no `https://` —
 xcconfig treats `//` as a comment, see the file's own comment),
-`SUPABASE_ANON_KEY`, `WHOOP_CLIENT_ID`, `OURA_CLIENT_ID`, `POSTHOG_API_KEY`
-(step 6c below), `POSTHOG_HOST` (bare host, same `//` reason).
+`SUPABASE_ANON_KEY`, `WHOOP_CLIENT_ID`, `OURA_CLIENT_ID`, `SUPERWALL_API_KEY`
+(step 6d below), `POSTHOG_API_KEY` (step 6c below), `POSTHOG_HOST` (bare
+host, same `//` reason).
 
 **Analytics only reports from Release builds** (TestFlight / App Store).
 Local Debug runs from Xcode initialize neither Firebase nor PostHog and
@@ -225,6 +226,35 @@ Both backends are driven from the same call: every method on
 fans out to Firebase Analytics **and** PostHog in one place. Never call
 `Analytics.logEvent` or `PostHogSDK.shared.capture` directly elsewhere --
 event names/parameter keys are defined exactly once, in `AnalyticsManager`.
+
+## 6d. Superwall
+
+1. Grab your **Public API Key** from the Superwall dashboard (**Settings →
+   Keys** -- the `pk_...` key, same for Debug/Release, Superwall separates
+   environments by app rather than by key) and set `SUPERWALL_API_KEY` in
+   both `Config-Debug.xcconfig`/`Config-Release.xcconfig` (step 6 above).
+2. `xcodegen generate` resolves the `SuperwallKit` Swift Package dependency
+   the same way as Firebase's/PostHog's, above.
+3. `Superwall.configure(apiKey:...)` runs in `AppDelegate`, right after the
+   analytics setup -- **deliberately unconditional**, even with an empty
+   key (see that call site's own comment): a keyless checkout must still
+   build and run, not crash at the first `register()` call. An empty/wrong
+   key means every paywall placement fails to present, **silently** --
+   there's no crash, no visible error, nothing in the UI. The only signals
+   are `SuperwallDiagnostics`' `os.Logger` output (Debug, Xcode console)
+   and the `paywall_skipped`/`paywall_presentation_failed` PostHog events
+   it fires (TestFlight/Release) -- check those first if a paywall "just
+   doesn't open."
+4. **This exact failure mode shipped for real** on 2026-08-18: the
+   CI-driven TestFlight pipeline (`.github/workflows/testflight.yml`)
+   never had `SUPERWALL_API_KEY` in its list of injected secrets from when
+   it was first set up until that date, so every CI-built TestFlight
+   release up to that point had `Superwall.configure(apiKey: "")` and no
+   paywall ever presented. The workflow now fails the build outright if
+   `SUPERWALL_API_KEY` (or `POSTHOG_API_KEY`) comes through empty --
+   confirm both are actually set via `gh secret list` (see
+   `scripts/gh-set-secrets.sh`, gitignored, holds the real values) before
+   assuming a "successful" CI run means the paywall will actually work.
 
 ## 7. Build and run
 

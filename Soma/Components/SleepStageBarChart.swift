@@ -70,7 +70,7 @@ struct SleepStageBarChart: View {
         }
     }
 
-    private func legendItem(_ label: String, color: Color) -> some View {
+    private func legendItem(_ label: LocalizedStringKey, color: Color) -> some View {
         HStack(spacing: 4) {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(label)

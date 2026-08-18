@@ -56,9 +56,13 @@ struct LogMealView: View {
                         dictateButton
                     }
                     if speechRecognizer.isListening {
-                        Label("Listening -- tap the mic when you're done, or just stop talking.", systemImage: "waveform")
-                            .font(.caption2)
-                            .foregroundStyle(SomaTokens.accent)
+                        Label {
+                            Text(String(localized: "logMeal.input.listening", defaultValue: "Listening -- tap the mic when you're done, or just stop talking.", comment: "Hint shown while dictating a meal description with the mic"))
+                        } icon: {
+                            Image(systemName: "waveform")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(SomaTokens.accent)
                     }
                     if isEstimating {
                         // Shuffled per appearance so back-to-back estimates
@@ -76,8 +80,9 @@ struct LogMealView: View {
                         .disabled(!canEstimate)
                     }
                 } footer: {
-                    Text("Type it, dictate it, or describe your meal in words -- Soma fills in the fields below either way. Review and adjust anything before saving.")
+                    Text(String(localized: "logMeal.footer.description", defaultValue: "Type it, dictate it, or describe your meal in words -- Soma fills in the fields below either way. Review and adjust anything before saving.", comment: "Footer note explaining the meal entry section on the log meal screen"))
                 }
+                .listRowBackground(SomaTokens.surface2)
                 Section("Required") {
                     LabeledContent("Calories") {
                         TextField("kcal", text: $caloriesText)
@@ -90,6 +95,7 @@ struct LogMealView: View {
                             .multilineTextAlignment(.trailing)
                     }
                 }
+                .listRowBackground(SomaTokens.surface2)
                 Section("Optional") {
                     LabeledContent("Carbs") {
                         TextField("g", text: $carbsText)
@@ -102,12 +108,16 @@ struct LogMealView: View {
                             .multilineTextAlignment(.trailing)
                     }
                 }
+                .listRowBackground(SomaTokens.surface2)
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
+                        .listRowBackground(Color.clear)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .somaBackground()
             .navigationTitle("Log food")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -170,21 +180,29 @@ struct LogMealView: View {
         defer { isEstimating = false }
         do {
             let result = try await SupabaseClient.shared.parseMealText(label)
-            label = result.label
+            // Item 8: a name the user typed themselves is kept exactly as
+            // entered (no Title Case, no translation) -- the AI's shortened
+            // label only replaces genuinely long free-text descriptions.
+            let typed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            if typed.split(whereSeparator: \.isWhitespace).count > 8 {
+                label = result.label
+            } else {
+                label = typed
+            }
             caloriesText = String(result.calories)
             proteinText = String(result.proteinG)
             carbsText = String(result.carbsG)
             fatText = String(result.fatG)
             usedAIEstimate = true
         } catch {
-            errorMessage = "Couldn't estimate that -- try describing it differently, or enter the numbers below yourself."
+            errorMessage = String(localized: "logMeal.estimateFailed", defaultValue: "Couldn't estimate that -- try describing it differently, or enter the numbers below yourself.", comment: "Error shown when AI meal estimation fails")
         }
     }
 
     private func save() async {
         guard let calories, let protein else { return }
         guard macrosInRange else {
-            errorMessage = "Calories should be 0-5000 and macros 0-500g -- check your numbers."
+            errorMessage = String(localized: "logMeal.macrosOutOfRange", defaultValue: "Calories should be 0-5000 and macros 0-500g -- check your numbers.", comment: "Validation error shown when entered meal macros are out of allowed range")
             return
         }
         isSaving = true
@@ -202,7 +220,7 @@ struct LogMealView: View {
             )
             dismiss()
         } catch {
-            errorMessage = "Couldn't save that entry. Try again."
+            errorMessage = String(localized: "logMeal.saveFailed", defaultValue: "Couldn't save that entry. Try again.", comment: "Error shown when saving a meal log entry fails")
         }
     }
 }

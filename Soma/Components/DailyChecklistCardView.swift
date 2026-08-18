@@ -20,14 +20,27 @@ struct DailyChecklistCardView: View {
         var hasReviewedFirstPlan: Bool
     }
 
+    /// `.full` is every row (the checklist sheet). `.compact` is the Home
+    /// dashboard widget -- per the Soma Glass 3e handoff, Home shows only
+    /// the first couple of open items plus a link into the sheet for the
+    /// rest, not the whole list inline.
+    enum Style { case full, compact }
+
     let date: String
     let signals: SharedSignals
+    var style: Style = .full
+    /// Compact style only: opens the full checklist sheet.
+    var onSeeAll: (() -> Void)? = nil
     /// Set (by HomeView) while a tapped row's destination is still
     /// loading required data -- see HomeView.openTodaysWorkoutDetail's
     /// own doc comment. Shows a spinner on the matching row instead of
     /// its usual chevron, rather than the row appearing to do nothing.
     var loadingDeepLink: ChecklistDeepLink? = nil
     let onDeepLink: (ChecklistDeepLink) -> Void
+    /// Lets HomeView mirror checked/total into its own greeting-row progress
+    /// pill without duplicating this view's own fetch -- fired once load()
+    /// resolves, same numbers `header`'s "N/M today" pill shows.
+    var onProgressChange: (Int, Int) -> Void = { _, _ in }
 
     @State private var progress: DailyChecklistProgress?
     @State private var isLoading = true
@@ -36,6 +49,13 @@ struct DailyChecklistCardView: View {
     /// Guards against re-firing the completion flourish/day-complete write
     /// more than once per appearance of this card.
     @State private var hasWrittenDayComplete = false
+
+    /// Compact style's preview rows -- the first two still-open items, so
+    /// the widget always shows something actionable rather than whichever
+    /// two happen to sort first.
+    private func previewItems(_ progress: DailyChecklistProgress) -> [DailyChecklistItem] {
+        Array(progress.items.filter { !$0.isChecked }.prefix(2))
+    }
 
     var body: some View {
         CardView {
@@ -46,13 +66,34 @@ struct DailyChecklistCardView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             } else if let progress {
-                VStack(spacing: 10) {
-                    ForEach(progress.items) { item in
-                        row(for: item)
+                switch style {
+                case .full:
+                    VStack(spacing: 10) {
+                        ForEach(progress.items) { item in
+                            row(for: item)
+                        }
                     }
-                }
-                if progress.isComplete {
-                    completionFlourish(streak: progress.streak)
+                    if progress.isComplete {
+                        completionFlourish(streak: progress.streak)
+                    }
+                case .compact:
+                    if progress.isComplete {
+                        completionFlourish(streak: progress.streak)
+                    } else {
+                        VStack(spacing: 10) {
+                            ForEach(previewItems(progress)) { item in
+                                row(for: item)
+                            }
+                        }
+                        if let onSeeAll {
+                            Button(action: onSeeAll) {
+                                Text(String(localized: "dailyChecklist.seeAllTasks", defaultValue: "All \(progress.totalCount) tasks", comment: "Link on the compact Home checklist widget opening the full checklist sheet; placeholder is the total task count"))
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundStyle(SomaTokens.accent)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
             }
         }
@@ -62,8 +103,12 @@ struct DailyChecklistCardView: View {
     // MARK: - Header
 
     private var title: String {
-        guard let progress else { return "Today's checklist" }
-        return progress.streak > 0 && progress.totalCount == 8 ? "Getting started" : "Today's checklist"
+        guard let progress else {
+            return String(localized: "dailyChecklist.title.default", defaultValue: "Today's checklist", comment: "Daily checklist card header title shown in the standard (non-onboarding) daily mode")
+        }
+        return progress.streak > 0 && progress.totalCount == 8
+            ? String(localized: "dailyChecklist.title.gettingStarted", defaultValue: "Getting started", comment: "Daily checklist card header title shown during the one-time onboarding checklist")
+            : String(localized: "dailyChecklist.title.default", defaultValue: "Today's checklist", comment: "Daily checklist card header title shown in the standard (non-onboarding) daily mode")
     }
 
     private var header: some View {
@@ -72,7 +117,7 @@ struct DailyChecklistCardView: View {
                 .font(.subheadline.bold())
             Spacer()
             if let progress {
-                Text("\(progress.checkedCount)/\(progress.totalCount) today")
+                Text(String(localized: "dailyChecklist.header.progressCount", defaultValue: "\(progress.checkedCount)/\(progress.totalCount) today", comment: "Daily checklist header pill showing checked items out of total for today, e.g. '3/8 today'"))
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(progress.isComplete ? SomaTokens.success : SomaTokens.ink3)
                     .padding(.horizontal, 9)
@@ -154,7 +199,9 @@ struct DailyChecklistCardView: View {
         HStack(spacing: 8) {
             Image(systemName: "flame.fill")
                 .foregroundStyle(SomaTokens.warn)
-            Text(streak > 1 ? "Perfect day -- \(streak) days in a row." : "Perfect day. That's how streaks start.")
+            Text(streak > 1
+                ? String(localized: "dailyChecklist.completion.streak", defaultValue: "Perfect day -- \(streak) days in a row.", comment: "Daily checklist completion flourish shown when the user has a multi-day streak; placeholder is the streak count")
+                : String(localized: "dailyChecklist.completion.firstDay", defaultValue: "Perfect day. That's how streaks start.", comment: "Daily checklist completion flourish shown on the first day of a new streak"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SomaTokens.ink2)
         }
@@ -191,7 +238,7 @@ struct DailyChecklistCardView: View {
                 try await SupabaseClient.shared.deleteDailyChecklistState(itemKey: item.key, date: date)
             } else {
                 try await SupabaseClient.shared.upsertDailyChecklistState(scope: scope, itemKey: item.key, date: date)
-                if item.deepLink == .progressPicture || item.deepLink == .profileKitchenEquipment || item.deepLink == .healthDashboard {
+                if item.deepLink == .progressPicture || item.deepLink == .profileKitchenEquipment || item.deepLink == .healthDashboard || item.deepLink == .chooseWidgets {
                     onDeepLink(item.deepLink!)
                 }
             }
@@ -235,7 +282,8 @@ struct DailyChecklistCardView: View {
                 || onboardingRows.contains { $0.itemKey == "onboarding_review_plan" },
             hasLoggedFirstWorkout: workoutEver,
             hasLoggedFirstMeal: mealEver,
-            hasSeenHowSomaWorks: onboardingRows.contains { $0.itemKey == "onboarding_how_soma_works" }
+            hasSeenHowSomaWorks: onboardingRows.contains { $0.itemKey == "onboarding_how_soma_works" },
+            hasChosenWidgets: onboardingRows.contains { $0.itemKey == "onboarding_choose_widgets" }
         )
 
         let dayCompleteDates = dailyRows.filter { $0.itemKey == "__day_complete__" }.map(\.date)
@@ -267,6 +315,7 @@ struct DailyChecklistCardView: View {
         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
             animatedFraction = resolved.fraction
         }
+        onProgressChange(resolved.checkedCount, resolved.totalCount)
 
         if resolved.isComplete, !hasWrittenDayComplete {
             hasWrittenDayComplete = true

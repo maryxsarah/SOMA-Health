@@ -8,10 +8,10 @@ enum RecommendationCategory: String, Codable {
 
     var displayTitle: String {
         switch self {
-        case .rest: "Rest"
-        case .light: "Light Movement"
-        case .moderate: "Moderate"
-        case .pushHard: "Push Hard"
+        case .rest: String(localized: "recommendationCategory.rest", defaultValue: "Rest", comment: "Daily recommendation category label: full rest day")
+        case .light: String(localized: "recommendationCategory.light", defaultValue: "Light Movement", comment: "Daily recommendation category label: light movement day")
+        case .moderate: String(localized: "recommendationCategory.moderate", defaultValue: "Moderate", comment: "Daily recommendation category label: moderate effort day")
+        case .pushHard: String(localized: "recommendationCategory.pushHard", defaultValue: "Push Hard", comment: "Daily recommendation category label: high intensity day")
         }
     }
 
@@ -19,10 +19,10 @@ enum RecommendationCategory: String, Codable {
     /// today's category (which itself is derived from the user's data).
     var stepTarget: String {
         switch self {
-        case .pushHard: "10,000+ steps"
-        case .moderate: "7,000–9,000 steps"
-        case .light: "4,000–6,000 steps"
-        case .rest: "2,000–3,000 steps"
+        case .pushHard: String(localized: "recommendationCategory.stepTarget.pushHard", defaultValue: "10,000+ steps", comment: "Daily step target range shown for the Push Hard category")
+        case .moderate: String(localized: "recommendationCategory.stepTarget.moderate", defaultValue: "7,000–9,000 steps", comment: "Daily step target range shown for the Moderate category")
+        case .light: String(localized: "recommendationCategory.stepTarget.light", defaultValue: "4,000–6,000 steps", comment: "Daily step target range shown for the Light Movement category")
+        case .rest: String(localized: "recommendationCategory.stepTarget.rest", defaultValue: "2,000–3,000 steps", comment: "Daily step target range shown for the Rest category")
         }
     }
 
@@ -37,6 +37,21 @@ enum RecommendationCategory: String, Codable {
         }
     }
 
+    /// Rough expected calorie burn for a session in this category -- the
+    /// "dayTarget" DayLoadState compares a logged workout's calories
+    /// against, so Home/RecommendationDetail can tell "closed today's
+    /// quota" apart from "barely started" apart from "way over". Not
+    /// personalized (no such per-user target exists yet), same posture as
+    /// stepTarget above.
+    var dayLoadTargetKcal: Int {
+        switch self {
+        case .pushHard: 550
+        case .moderate: 350
+        case .light: 150
+        case .rest: 50
+        }
+    }
+
     /// Fixed, specific suggestions per category -- concrete activity +
     /// duration, no AI generation, same pattern as the existing 4 message
     /// templates. Each carries equipment/impact/body-part tags so the
@@ -46,39 +61,39 @@ enum RecommendationCategory: String, Codable {
         switch self {
         case .pushHard:
             [
-                WorkoutSuggestion(title: "50 min full-body strength training", equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .fullBody, targetDurationMinutes: 50...50),
-                WorkoutSuggestion(title: "40 min upper body strength (chest, back, shoulders, arms)", equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .upperBody, targetDurationMinutes: 40...40),
-                WorkoutSuggestion(title: "40 min lower body strength (quads, hamstrings, glutes)", equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .lowerBody, targetDurationMinutes: 40...40),
-                WorkoutSuggestion(title: "30 min HIIT circuit", equipment: .bodyweightOnly, goals: [.leanerToned, .moreSculpted, .cardioEndurance], highImpact: true, bodyPart: .fullBody, targetDurationMinutes: 30...30),
-                WorkoutSuggestion(title: "45 min hard run", equipment: .bodyweightOnly, goals: [.cardioEndurance, .leanerToned], highImpact: true, bodyPart: .cardio, targetDurationMinutes: 45...45),
-                WorkoutSuggestion(title: "45 min hard bike ride", equipment: .bike, goals: [.cardioEndurance], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 45...45),
-                WorkoutSuggestion(title: "40 min resistance band strength circuit", equipment: .resistanceBands, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .fullBody, targetDurationMinutes: 40...40),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.fullBodyStrength50", defaultValue: "50 min full-body strength training", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .fullBody, targetDurationMinutes: 50...50),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.upperBodyStrength40", defaultValue: "40 min upper body strength (chest, back, shoulders, arms)", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .upperBody, targetDurationMinutes: 40...40),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.lowerBodyStrength40", defaultValue: "40 min lower body strength (quads, hamstrings, glutes)", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .gym, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .lowerBody, targetDurationMinutes: 40...40),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.hiitCircuit30", defaultValue: "30 min HIIT circuit", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bodyweightOnly, goals: [.leanerToned, .moreSculpted, .cardioEndurance], highImpact: true, bodyPart: .fullBody, targetDurationMinutes: 30...30),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.hardRun45", defaultValue: "45 min hard run", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bodyweightOnly, goals: [.cardioEndurance, .leanerToned], highImpact: true, bodyPart: .cardio, targetDurationMinutes: 45...45),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.hardBikeRide45", defaultValue: "45 min hard bike ride", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bike, goals: [.cardioEndurance], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 45...45),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.resistanceBandStrength40", defaultValue: "40 min resistance band strength circuit", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .resistanceBands, goals: [.buildStrength, .gainMuscle], highImpact: false, bodyPart: .fullBody, targetDurationMinutes: 40...40),
             ]
         case .moderate:
             [
-                WorkoutSuggestion(title: "40 min moderate strength training", equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false, bodyPart: .fullBody, targetDurationMinutes: 40...40),
-                WorkoutSuggestion(title: "35 min upper body strength", equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false, bodyPart: .upperBody, targetDurationMinutes: 35...35),
-                WorkoutSuggestion(title: "35 min lower body strength", equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false, bodyPart: .lowerBody, targetDurationMinutes: 35...35),
-                WorkoutSuggestion(title: "35 min steady-state run", equipment: .bodyweightOnly, goals: [.cardioEndurance], highImpact: true, bodyPart: .cardio, targetDurationMinutes: 35...35),
-                WorkoutSuggestion(title: "30 min swim", equipment: .pool, goals: [.cardioEndurance, .generalFitness], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 30...30),
-                WorkoutSuggestion(title: "45 min moderate bike ride", equipment: .bike, goals: [.cardioEndurance], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 45...45),
-                WorkoutSuggestion(title: "30 min resistance band circuit", equipment: .resistanceBands, goals: [.buildStrength, .moreSculpted, .generalFitness], highImpact: false, bodyPart: .fullBody, targetDurationMinutes: 30...30),
-                WorkoutSuggestion(title: "45 min vinyasa or power yoga", equipment: .yogaStudio, goals: [.improveFlexibility, .generalFitness], highImpact: false, bodyPart: .core, targetDurationMinutes: 45...45),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.moderateStrength40", defaultValue: "40 min moderate strength training", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false, bodyPart: .fullBody, targetDurationMinutes: 40...40),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.upperBodyStrength35", defaultValue: "35 min upper body strength", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false, bodyPart: .upperBody, targetDurationMinutes: 35...35),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.lowerBodyStrength35", defaultValue: "35 min lower body strength", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .gym, goals: [.buildStrength, .gainMuscle, .generalFitness], highImpact: false, bodyPart: .lowerBody, targetDurationMinutes: 35...35),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.steadyStateRun35", defaultValue: "35 min steady-state run", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bodyweightOnly, goals: [.cardioEndurance], highImpact: true, bodyPart: .cardio, targetDurationMinutes: 35...35),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.swim30", defaultValue: "30 min swim", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .pool, goals: [.cardioEndurance, .generalFitness], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 30...30),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.moderateBikeRide45", defaultValue: "45 min moderate bike ride", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bike, goals: [.cardioEndurance], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 45...45),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.resistanceBandCircuit30", defaultValue: "30 min resistance band circuit", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .resistanceBands, goals: [.buildStrength, .moreSculpted, .generalFitness], highImpact: false, bodyPart: .fullBody, targetDurationMinutes: 30...30),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.vinyasaPowerYoga45", defaultValue: "45 min vinyasa or power yoga", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .yogaStudio, goals: [.improveFlexibility, .generalFitness], highImpact: false, bodyPart: .core, targetDurationMinutes: 45...45),
             ]
         case .light:
             [
-                WorkoutSuggestion(title: "30 min yoga session", equipment: .yogaStudio, goals: [.improveFlexibility, .activeRecovery], highImpact: false, bodyPart: .core, targetDurationMinutes: 30...30),
-                WorkoutSuggestion(title: "25 min easy bike ride", equipment: .bike, goals: [.activeRecovery], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 25...25),
-                WorkoutSuggestion(title: "20–30 min easy walk", equipment: .bodyweightOnly, goals: [.activeRecovery, .generalFitness], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 20...30),
-                WorkoutSuggestion(title: "20 min light mobility work", equipment: .bodyweightOnly, goals: [.improveFlexibility, .activeRecovery], highImpact: false, bodyPart: .core, targetDurationMinutes: 20...20),
-                WorkoutSuggestion(title: "20 min easy swim", equipment: .pool, goals: [.activeRecovery], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 20...20),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.yogaSession30", defaultValue: "30 min yoga session", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .yogaStudio, goals: [.improveFlexibility, .activeRecovery], highImpact: false, bodyPart: .core, targetDurationMinutes: 30...30),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.easyBikeRide25", defaultValue: "25 min easy bike ride", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bike, goals: [.activeRecovery], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 25...25),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.easyWalk2030", defaultValue: "20–30 min easy walk", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bodyweightOnly, goals: [.activeRecovery, .generalFitness], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 20...30),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.lightMobility20", defaultValue: "20 min light mobility work", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bodyweightOnly, goals: [.improveFlexibility, .activeRecovery], highImpact: false, bodyPart: .core, targetDurationMinutes: 20...20),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.easySwim20", defaultValue: "20 min easy swim", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .pool, goals: [.activeRecovery], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 20...20),
             ]
         case .rest:
             [
-                WorkoutSuggestion(title: "15–20 min gentle walk", equipment: .bodyweightOnly, goals: [.activeRecovery, .betterSleep], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 15...20),
-                WorkoutSuggestion(title: "15 min restorative yoga or stretching", equipment: .yogaStudio, goals: [.improveFlexibility, .activeRecovery, .betterSleep], highImpact: false, bodyPart: .core, targetDurationMinutes: 15...15),
-                WorkoutSuggestion(title: "10 min foam rolling / mobility", equipment: .bodyweightOnly, goals: [.activeRecovery], highImpact: false, bodyPart: .core, targetDurationMinutes: 10...10),
-                WorkoutSuggestion(title: "Full rest day", equipment: .bodyweightOnly, goals: [.activeRecovery, .betterSleep], highImpact: false, bodyPart: .recovery, targetDurationMinutes: nil),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.gentleWalk1520", defaultValue: "15–20 min gentle walk", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bodyweightOnly, goals: [.activeRecovery, .betterSleep], highImpact: false, bodyPart: .cardio, targetDurationMinutes: 15...20),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.restorativeYoga15", defaultValue: "15 min restorative yoga or stretching", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .yogaStudio, goals: [.improveFlexibility, .activeRecovery, .betterSleep], highImpact: false, bodyPart: .core, targetDurationMinutes: 15...15),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.foamRolling10", defaultValue: "10 min foam rolling / mobility", comment: "Concrete workout suggestion title shown on the daily recommendation screen"), equipment: .bodyweightOnly, goals: [.activeRecovery], highImpact: false, bodyPart: .core, targetDurationMinutes: 10...10),
+                WorkoutSuggestion(title: String(localized: "workoutSuggestion.fullRestDay", defaultValue: "Full rest day", comment: "Concrete workout suggestion title shown on the daily recommendation screen: no exercise, complete rest"), equipment: .bodyweightOnly, goals: [.activeRecovery, .betterSleep], highImpact: false, bodyPart: .recovery, targetDurationMinutes: nil),
             ]
         }
     }
@@ -97,12 +112,12 @@ enum BodyPartFocus: String, Codable {
 
     var displayName: String {
         switch self {
-        case .fullBody: "Full Body"
-        case .upperBody: "Upper Body"
-        case .lowerBody: "Lower Body"
-        case .core: "Abs & Core"
-        case .cardio: "Cardio"
-        case .recovery: "Recovery"
+        case .fullBody: String(localized: "bodyPartFocus.fullBody", defaultValue: "Full Body", comment: "Body part focus label for a workout")
+        case .upperBody: String(localized: "bodyPartFocus.upperBody", defaultValue: "Upper Body", comment: "Body part focus label for a workout")
+        case .lowerBody: String(localized: "bodyPartFocus.lowerBody", defaultValue: "Lower Body", comment: "Body part focus label for a workout")
+        case .core: String(localized: "bodyPartFocus.core", defaultValue: "Abs & Core", comment: "Body part focus label for a workout")
+        case .cardio: String(localized: "bodyPartFocus.cardio", defaultValue: "Cardio", comment: "Body part focus label for a workout")
+        case .recovery: String(localized: "bodyPartFocus.recovery", defaultValue: "Recovery", comment: "Body part focus label for a workout")
         }
     }
 }
@@ -131,19 +146,19 @@ enum EquipmentTag: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .gym: "Gym"
-        case .homeGym: "Home Gym"
-        case .yogaStudio: "Yoga Studio"
-        case .resistanceBands: "Resistance Bands"
-        case .bike: "Bike"
-        case .pool: "Pool"
-        case .boxingGym: "Boxing Gym"
-        case .matPilates: "Mat Pilates"
-        case .calisthenicsGymnastics: "Calisthenics & Gymnastics"
-        case .crossfit: "CrossFit"
-        case .hiitCircuitStudio: "HIIT or Circuit Studio"
-        case .bodyweightOnly: "No Equipment"
-        case .other: "Other"
+        case .gym: String(localized: "equipmentTag.gym", defaultValue: "Gym", comment: "Equipment/access tag label")
+        case .homeGym: String(localized: "equipmentTag.homeGym", defaultValue: "Home Gym", comment: "Equipment/access tag label")
+        case .yogaStudio: String(localized: "equipmentTag.yogaStudio", defaultValue: "Yoga Studio", comment: "Equipment/access tag label")
+        case .resistanceBands: String(localized: "equipmentTag.resistanceBands", defaultValue: "Resistance Bands", comment: "Equipment/access tag label")
+        case .bike: String(localized: "equipmentTag.bike", defaultValue: "Bike", comment: "Equipment/access tag label")
+        case .pool: String(localized: "equipmentTag.pool", defaultValue: "Pool", comment: "Equipment/access tag label")
+        case .boxingGym: String(localized: "equipmentTag.boxingGym", defaultValue: "Boxing Gym", comment: "Equipment/access tag label")
+        case .matPilates: String(localized: "equipmentTag.matPilates", defaultValue: "Mat Pilates", comment: "Equipment/access tag label")
+        case .calisthenicsGymnastics: String(localized: "equipmentTag.calisthenicsGymnastics", defaultValue: "Calisthenics & Gymnastics", comment: "Equipment/access tag label")
+        case .crossfit: String(localized: "equipmentTag.crossfit", defaultValue: "CrossFit", comment: "Equipment/access tag label; CrossFit is a brand name, keep untranslated")
+        case .hiitCircuitStudio: String(localized: "equipmentTag.hiitCircuitStudio", defaultValue: "HIIT or Circuit Studio", comment: "Equipment/access tag label")
+        case .bodyweightOnly: String(localized: "equipmentTag.bodyweightOnly", defaultValue: "No Equipment", comment: "Equipment/access tag label: needs nothing special")
+        case .other: String(localized: "equipmentTag.other", defaultValue: "Other", comment: "Equipment/access tag label: catch-all option")
         }
     }
 }
@@ -176,18 +191,18 @@ enum GoalTag: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .loseWeight: "Lose Weight"
-        case .maintain: "Maintain"
-        case .buildStrength: "Build Strength"
-        case .gainMuscle: "Gain More Muscle"
-        case .leanerToned: "Getting Leaner/Toned"
-        case .moreSculpted: "More Sculpted"
-        case .cardioEndurance: "Cardiovascular Endurance"
-        case .improveFlexibility: "Improving Flexibility"
-        case .betterSleep: "Better Sleep"
-        case .generalFitness: "General Fitness"
-        case .activeRecovery: "Active Recovery"
-        case .other: "Other"
+        case .loseWeight: String(localized: "goalTag.loseWeight", defaultValue: "Lose Weight", comment: "Training goal tag label")
+        case .maintain: String(localized: "goalTag.maintain", defaultValue: "Maintain", comment: "Training goal tag label")
+        case .buildStrength: String(localized: "goalTag.buildStrength", defaultValue: "Build Strength", comment: "Training goal tag label")
+        case .gainMuscle: String(localized: "goalTag.gainMuscle", defaultValue: "Gain More Muscle", comment: "Training goal tag label")
+        case .leanerToned: String(localized: "goalTag.leanerToned", defaultValue: "Getting Leaner/Toned", comment: "Training goal tag label")
+        case .moreSculpted: String(localized: "goalTag.moreSculpted", defaultValue: "More Sculpted", comment: "Training goal tag label")
+        case .cardioEndurance: String(localized: "goalTag.cardioEndurance", defaultValue: "Cardiovascular Endurance", comment: "Training goal tag label")
+        case .improveFlexibility: String(localized: "goalTag.improveFlexibility", defaultValue: "Improving Flexibility", comment: "Training goal tag label")
+        case .betterSleep: String(localized: "goalTag.betterSleep", defaultValue: "Better Sleep", comment: "Training goal tag label")
+        case .generalFitness: String(localized: "goalTag.generalFitness", defaultValue: "General Fitness", comment: "Training goal tag label")
+        case .activeRecovery: String(localized: "goalTag.activeRecovery", defaultValue: "Active Recovery", comment: "Training goal tag label")
+        case .other: String(localized: "goalTag.other", defaultValue: "Other", comment: "Training goal tag label: catch-all option")
         }
     }
 }
@@ -243,40 +258,45 @@ enum RecommendationReason: String, Codable {
     case insufficientData = "insufficient_data"
     case unknown
 
-    /// Fixed explanation template. `%@` is filled in with the relevant
-    /// metric's real value from today's daily_snapshot row when available.
-    var explanationTemplate: String {
-        switch self {
-        case .whoopHigh: "Your Whoop recovery was %@%%, well into the high range (67%%+) -- your body is well-recovered today."
-        case .whoopMedium: "Your Whoop recovery was %@%%, in the medium range (34-66%%) -- your body has some room to work, but isn't fully topped up."
-        case .whoopLow: "Your Whoop recovery was %@%%, in the low range (under 34%%) -- your body is signaling it needs rest."
-        case .ouraHigh: "Your Oura readiness was %@, well into the high range (85+) -- you're set up well for a hard effort."
-        case .ouraMediumHigh: "Your Oura readiness was %@, in the medium-high range (70-84) -- solidly good, if not peak."
-        case .ouraMedium: "Your Oura readiness was %@, in the medium range (60-69) -- moderate effort suits today."
-        case .ouraLow: "Your Oura readiness was %@, under 60 -- your body needs a lighter day."
-        case .healthkitHigh: "Your HRV was close to your recent baseline and you slept enough -- a good sign of recovery."
-        case .healthkitMedium: "Your HRV was somewhat below your recent baseline, or sleep was a little short -- a moderate day fits best."
-        case .healthkitLow: "Your HRV was well below your recent baseline, or sleep was short -- your body needs to ease up today."
-        case .insufficientData: "Not enough health data yet to build a personalized read -- Soma is defaulting to a cautious moderate session while your baseline builds."
-        case .unknown: "Today's recommendation is based on the data currently available."
-        }
-    }
-
-    /// explanationTemplate with the real metric value substituted in --
-    /// the ONLY way templates should reach the screen, since rendering
-    /// them raw shows a literal "%@" to the user.
+    /// Value is interpolated directly -- a stored "%@" with no matching
+    /// interpolation argument crashes String(localized:) resolution on-device.
     func explanation(snapshots: [DailySnapshotRow]) -> String {
         func formatted(_ value: Double?) -> String {
             guard let value else { return "—" }
             return String(Int(value.rounded()))
         }
         switch self {
-        case .whoopHigh, .whoopMedium, .whoopLow:
-            return String(format: explanationTemplate, formatted(snapshots.first(where: { $0.source == "whoop" })?.recoveryScore))
-        case .ouraHigh, .ouraMediumHigh, .ouraMedium, .ouraLow:
-            return String(format: explanationTemplate, formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore))
-        case .healthkitHigh, .healthkitMedium, .healthkitLow, .insufficientData, .unknown:
-            return explanationTemplate
+        case .whoopHigh:
+            let percent = formatted(snapshots.first(where: { $0.source == "whoop" })?.recoveryScore)
+            return String(localized: "recommendationReason.explanation.whoopHigh", defaultValue: "Your Whoop recovery was \(percent)%, well into the high range (67%+) -- your body is well-recovered today.", comment: "Recovery percent is pre-formatted text, e.g. '72' or '—' when unavailable")
+        case .whoopMedium:
+            let percent = formatted(snapshots.first(where: { $0.source == "whoop" })?.recoveryScore)
+            return String(localized: "recommendationReason.explanation.whoopMedium", defaultValue: "Your Whoop recovery was \(percent)%, in the medium range (34-66%) -- your body has some room to work, but isn't fully topped up.", comment: "Recovery percent is pre-formatted text, e.g. '72' or '—' when unavailable")
+        case .whoopLow:
+            let percent = formatted(snapshots.first(where: { $0.source == "whoop" })?.recoveryScore)
+            return String(localized: "recommendationReason.explanation.whoopLow", defaultValue: "Your Whoop recovery was \(percent)%, in the low range (under 34%) -- your body is signaling it needs rest.", comment: "Recovery percent is pre-formatted text, e.g. '72' or '—' when unavailable")
+        case .ouraHigh:
+            let score = formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore)
+            return String(localized: "recommendationReason.explanation.ouraHigh", defaultValue: "Your Oura readiness was \(score), well into the high range (85+) -- you're set up well for a hard effort.", comment: "Readiness score is pre-formatted text, e.g. '88' or '—' when unavailable")
+        case .ouraMediumHigh:
+            let score = formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore)
+            return String(localized: "recommendationReason.explanation.ouraMediumHigh", defaultValue: "Your Oura readiness was \(score), in the medium-high range (70-84) -- solidly good, if not peak.", comment: "Readiness score is pre-formatted text, e.g. '88' or '—' when unavailable")
+        case .ouraMedium:
+            let score = formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore)
+            return String(localized: "recommendationReason.explanation.ouraMedium", defaultValue: "Your Oura readiness was \(score), in the medium range (60-69) -- moderate effort suits today.", comment: "Readiness score is pre-formatted text, e.g. '88' or '—' when unavailable")
+        case .ouraLow:
+            let score = formatted(snapshots.first(where: { $0.source == "oura" })?.readinessScore)
+            return String(localized: "recommendationReason.explanation.ouraLow", defaultValue: "Your Oura readiness was \(score), under 60 -- your body needs a lighter day.", comment: "Readiness score is pre-formatted text, e.g. '88' or '—' when unavailable")
+        case .healthkitHigh:
+            return String(localized: "recommendationReason.explanation.healthkitHigh", defaultValue: "Your HRV was close to your recent baseline and you slept enough -- a good sign of recovery.", comment: "No placeholders")
+        case .healthkitMedium:
+            return String(localized: "recommendationReason.explanation.healthkitMedium", defaultValue: "Your HRV was somewhat below your recent baseline, or sleep was a little short -- a moderate day fits best.", comment: "No placeholders")
+        case .healthkitLow:
+            return String(localized: "recommendationReason.explanation.healthkitLow", defaultValue: "Your HRV was well below your recent baseline, or sleep was short -- your body needs to ease up today.", comment: "No placeholders")
+        case .insufficientData:
+            return String(localized: "recommendationReason.explanation.insufficientData", defaultValue: "Not enough health data yet to build a personalized read -- Soma is defaulting to a cautious moderate session while your baseline builds.", comment: "No placeholders")
+        case .unknown:
+            return String(localized: "recommendationReason.explanation.unknown", defaultValue: "Today's recommendation is based on the data currently available.", comment: "No placeholders; fallback for unrecognized server reason codes")
         }
     }
 
@@ -284,17 +304,17 @@ enum RecommendationReason: String, Codable {
     var tomorrowTip: String {
         switch self {
         case .whoopHigh, .ouraHigh:
-            "Keep it up -- consistent sleep and hydration tonight will help maintain this trend."
+            String(localized: "recommendationReason.tomorrowTip.highRecovery", defaultValue: "Keep it up -- consistent sleep and hydration tonight will help maintain this trend.", comment: "Tomorrow tip shown for a high recovery/readiness day; no placeholders")
         case .whoopMedium, .ouraMediumHigh, .ouraMedium, .healthkitMedium:
-            "A solid night's sleep tonight can push tomorrow into a higher-intensity day."
+            String(localized: "recommendationReason.tomorrowTip.mediumRecovery", defaultValue: "A solid night's sleep tonight can push tomorrow into a higher-intensity day.", comment: "Tomorrow tip shown for a medium recovery/readiness day; no placeholders")
         case .whoopLow, .ouraLow, .healthkitLow:
-            "Prioritize sleep tonight and keep today's effort light -- recovery compounds over a few days, not just one."
+            String(localized: "recommendationReason.tomorrowTip.lowRecovery", defaultValue: "Prioritize sleep tonight and keep today's effort light -- recovery compounds over a few days, not just one.", comment: "Tomorrow tip shown for a low recovery/readiness day; no placeholders")
         case .healthkitHigh:
-            "You're on a good trend -- keep sleep and activity consistent to stay here."
+            String(localized: "recommendationReason.tomorrowTip.healthkitHigh", defaultValue: "You're on a good trend -- keep sleep and activity consistent to stay here.", comment: "Tomorrow tip shown for a high HealthKit-only recovery day; no placeholders")
         case .insufficientData:
-            "Wearing your Apple Watch overnight, or connecting Whoop or Oura, will give you a personalized read starting tomorrow."
+            String(localized: "recommendationReason.tomorrowTip.insufficientData", defaultValue: "Wearing your Apple Watch overnight, or connecting Whoop or Oura, will give you a personalized read starting tomorrow.", comment: "Tomorrow tip shown when there wasn't enough health data today; no placeholders")
         case .unknown:
-            "Connecting Whoop or Oura gives a more precise recovery score than Apple Health alone."
+            String(localized: "recommendationReason.tomorrowTip.unknown", defaultValue: "Connecting Whoop or Oura gives a more precise recovery score than Apple Health alone.", comment: "Tomorrow tip fallback for unrecognized server reason codes; no placeholders")
         }
     }
 }
@@ -316,7 +336,7 @@ enum DataConfidence: String, Codable {
         switch self {
         case .high: nil
         case .low:
-            "Today's read is based on limited data — Apple Health didn't record much to go on. Wearing your watch overnight, or connecting Whoop or Oura, makes this more precise."
+            String(localized: "dataConfidence.caveat.low", defaultValue: "Today's read is based on limited data — Apple Health didn't record much to go on. Wearing your watch overnight, or connecting Whoop or Oura, makes this more precise.", comment: "Caveat shown under the explanation when confidence in today's read is low; no placeholders")
         }
     }
 }
@@ -325,6 +345,12 @@ struct DailyRecommendation: Codable, Equatable {
     let date: String
     let category: RecommendationCategory
     let message: String
+    /// The fuller reasoning `message` was capped down from (caps/confidence
+    /// clauses included) -- shown in the "Why this?" disclosure. Nil for
+    /// rows written before this column existed, or for the user-requested-
+    /// override/insufficient-data paths, which have nothing more to add
+    /// beyond `message` itself.
+    let messageDetail: String?
     let reason: RecommendationReason
     let sleepCapApplied: Bool
     let injuryCapApplied: Bool
@@ -362,6 +388,7 @@ struct DailyRecommendation: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case date, category, message, reason
+        case messageDetail = "message_detail"
         case dataConfidence = "data_confidence"
         case sleepCapApplied = "sleep_cap_applied"
         case injuryCapApplied = "injury_cap_applied"
@@ -394,6 +421,7 @@ extension DailyRecommendation {
         date = try container.decode(String.self, forKey: .date)
         category = try container.decode(RecommendationCategory.self, forKey: .category)
         message = try container.decode(String.self, forKey: .message)
+        messageDetail = try container.decodeIfPresent(String.self, forKey: .messageDetail)
         reason = try container.decode(RecommendationReason.self, forKey: .reason)
         sleepCapApplied = try container.decode(Bool.self, forKey: .sleepCapApplied)
         injuryCapApplied = try container.decode(Bool.self, forKey: .injuryCapApplied)

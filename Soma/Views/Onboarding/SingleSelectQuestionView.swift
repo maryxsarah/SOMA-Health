@@ -6,8 +6,8 @@ import SwiftUI
 /// frequency, referral source, goal, diet type, accomplishment) so each
 /// only needs to supply copy + the option type, not a bespoke screen.
 struct SingleSelectQuestionView<Option: SurveyOption>: View {
-    let headline: String
-    var subtext: String? = nil
+    let headline: LocalizedStringKey
+    var subtext: LocalizedStringKey? = nil
     let progress: Double
     /// Defaults to every case; pass an explicit curated subset (e.g.
     /// GoalTag.onboardingOptions) when a screen needs fewer/reordered
@@ -24,11 +24,12 @@ struct SingleSelectQuestionView<Option: SurveyOption>: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(headline)
                     .font(Theme.display)
+                    .foregroundStyle(SomaTokens.ink)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtext {
                     Text(subtext)
                         .font(.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(SomaTokens.ink3)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

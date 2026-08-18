@@ -18,13 +18,13 @@ enum StreakMilestone: Int, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .threeDay: return "3 Days"
-        case .week: return "1 Week"
-        case .twoWeek: return "2 Weeks"
-        case .month: return "1 Month"
-        case .sixtyDay: return "60 Days"
-        case .hundredDay: return "100 Days"
-        case .year: return "1 Year"
+        case .threeDay: return String(localized: "streakMilestone.threeDay", defaultValue: "3 Days", comment: "Streak milestone badge title")
+        case .week: return String(localized: "streakMilestone.week", defaultValue: "1 Week", comment: "Streak milestone badge title")
+        case .twoWeek: return String(localized: "streakMilestone.twoWeek", defaultValue: "2 Weeks", comment: "Streak milestone badge title")
+        case .month: return String(localized: "streakMilestone.month", defaultValue: "1 Month", comment: "Streak milestone badge title")
+        case .sixtyDay: return String(localized: "streakMilestone.sixtyDay", defaultValue: "60 Days", comment: "Streak milestone badge title")
+        case .hundredDay: return String(localized: "streakMilestone.hundredDay", defaultValue: "100 Days", comment: "Streak milestone badge title")
+        case .year: return String(localized: "streakMilestone.year", defaultValue: "1 Year", comment: "Streak milestone badge title")
         }
     }
 

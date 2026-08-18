@@ -17,7 +17,7 @@ struct AchievementCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("SOMA")
+                Text(String(localized: "achievementCard.brand.wordmark", defaultValue: "SOMA", comment: "Soma brand wordmark on the achievement share card; intentionally kept as 'SOMA' in every locale"))
                     .font(.system(size: 12, weight: .black))
                     .tracking(2.5)
                     .foregroundStyle(accentColor)
@@ -29,11 +29,11 @@ struct AchievementCardView: View {
             }
 
             Text(goalName)
-                .font(.system(size: 22, design: .serif).italic())
+                .font(SomaType.metric(22))
                 .foregroundStyle(SomaTokens.ink)
 
             Text(bigLine)
-                .font(.system(size: 40, design: .serif).italic())
+                .font(SomaType.metric(40))
                 .foregroundStyle(accentColor)
 
             if case .coachExport(_, _, _, let chartValues, _) = variant, chartValues.count >= 2 {
@@ -55,15 +55,11 @@ struct AchievementCardView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
+        .glassCard()
+        .overlay(
             RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
-                .fill(SomaTokens.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
-                        .stroke(borderColor, lineWidth: 1)
-                )
+                .strokeBorder(borderColor, lineWidth: 1)
         )
-        .somaCardShadow()
     }
 
     private var accentColor: Color {
@@ -82,11 +78,13 @@ struct AchievementCardView: View {
 
     private var headline: String {
         switch variant {
-        case .celebratory: return "Goal achieved"
-        case .neutral: return "Block complete"
+        case .celebratory: return String(localized: "achievementCard.headline.celebratory", defaultValue: "Goal achieved", comment: "Achievement card: headline when the goal target was hit")
+        case .neutral: return String(localized: "achievementCard.headline.neutral", defaultValue: "Block complete", comment: "Achievement card: headline for a completed, non-celebratory block")
         case .coachExport(_, _, let coachName, _, _):
-            if let coachName, !coachName.isEmpty { return "Built with Coach \(coachName)" }
-            return "Coach's task"
+            if let coachName, !coachName.isEmpty {
+                return String(localized: "achievementCard.headline.coachNamed", defaultValue: "Built with Coach \(coachName)", comment: "Achievement card: headline crediting the coach by name")
+            }
+            return String(localized: "achievementCard.headline.coachGeneric", defaultValue: "Coach's task", comment: "Achievement card: headline for a coach-assigned task with no coach name set")
         }
     }
 
@@ -111,8 +109,8 @@ struct AchievementCardView: View {
 
     private var footerRight: String? {
         switch variant {
-        case .celebratory: "Goal achieved"
-        case .neutral: "Block complete"
+        case .celebratory: String(localized: "achievementCard.footer.celebratory", defaultValue: "Goal achieved", comment: "Achievement card: footer label confirming the goal was achieved")
+        case .neutral: String(localized: "achievementCard.footer.neutral", defaultValue: "Block complete", comment: "Achievement card: footer label confirming the block was completed")
         case .coachExport: nil
         }
     }

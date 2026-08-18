@@ -60,17 +60,17 @@ struct GymPhotoWorkoutView: View {
                                 cameraBlockedContent
                             case .analyzing:
                                 loadingContent(stages: [
-                                    "Looking at your photo…",
-                                    "Identifying equipment…",
-                                    "Checking what's usable…",
+                                    String(localized: "gymPhoto.analyzing.stage1", defaultValue: "Looking at your photo…", comment: "Loading stage while Soma examines the gym photo"),
+                                    String(localized: "gymPhoto.analyzing.stage2", defaultValue: "Identifying equipment…", comment: "Loading stage while Soma identifies equipment in the photo"),
+                                    String(localized: "gymPhoto.analyzing.stage3", defaultValue: "Checking what's usable…", comment: "Loading stage while Soma checks which equipment is usable"),
                                 ])
                             case .confirmingEquipment:
                                 confirmingEquipmentContent
                             case .generating:
                                 loadingContent(stages: [
-                                    "Matching a workout to your setup…",
-                                    "Selecting exercises…",
-                                    "Writing your instructions…",
+                                    String(localized: "gymPhoto.generating.stage1", defaultValue: "Matching a workout to your setup…", comment: "Loading stage while Soma builds a workout from the confirmed equipment"),
+                                    String(localized: "gymPhoto.generating.stage2", defaultValue: "Selecting exercises…", comment: "Loading stage while Soma selects exercises"),
+                                    String(localized: "gymPhoto.generating.stage3", defaultValue: "Writing your instructions…", comment: "Loading stage while Soma writes the workout instructions"),
                                 ])
                             case .result:
                                 EmptyView()
@@ -84,15 +84,15 @@ struct GymPhotoWorkoutView: View {
                         }
                         .padding(20)
                     }
-                    .somaBackground()
+                    .somaSheetBackground()
                 }
             }
-            .navigationTitle(step == .result ? "" : "Scan your gym")
+            .navigationTitle(step == .result ? "" : String(localized: "gymPhoto.navigationTitle", defaultValue: "Scan your gym", comment: "Navigation title for the gym-photo scan flow"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(step == .result ? .hidden : .visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button(String(localized: "gymPhoto.close", defaultValue: "Close", comment: "Button closing the gym-photo scan flow")) { dismiss() }
                 }
             }
         }
@@ -125,30 +125,100 @@ struct GymPhotoWorkoutView: View {
 
     private var pickPhotoContent: some View {
         VStack(spacing: 16) {
-            Text("Take or choose a photo of your gym or workout space, and Soma will build a workout around the equipment it sees.")
+            Text(String(localized: "gymPhoto.pickPhoto.explainer", defaultValue: "Take or choose a photo of your gym or workout space, and Soma will build a workout around the equipment it sees.", comment: "Gym-photo scan: explainer shown before picking a photo"))
                 .font(.body)
                 .foregroundStyle(.secondary)
 
-            Button {
-                Task { await startCamera() }
-            } label: {
-                Label("Take a photo", systemImage: "camera.fill")
-            }
-            .buttonStyle(.borderedProminent)
+            photoDropZone
 
-            libraryPicker(fullWidth: false)
+            HStack(spacing: 10) {
+                SomaButton(title: "Take photo", size: .md, variant: .primary) {
+                    Task { await startCamera() }
+                }
+                libraryPicker(fullWidth: true, title: "Choose photo", showIcon: false)
+            }
+
+            analysisPreview
         }
         .frame(maxWidth: .infinity)
     }
 
+    /// Decorative preview of the drop target -- the actual tap targets are
+    /// the buttons below it, this is just the "Then, while Soma looks"
+    /// invitation the mockup leads with.
+    private var photoDropZone: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "camera")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(SomaTokens.accent)
+                .frame(width: 56, height: 56)
+                .glassLens(cornerRadius: 28)
+
+            Text(String(localized: "gymPhoto.dropZone.title", defaultValue: "Take or choose a photo", comment: "Gym-photo scan: decorative drop-zone label"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink2)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 220)
+        .background(
+            RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
+                .fill(Color.white.opacity(0.35))
+                .overlay(
+                    RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
+                        .strokeBorder(SomaTokens.accent.opacity(0.28), style: StrokeStyle(lineWidth: 2, dash: [7, 6]))
+                )
+        )
+    }
+
+    /// A preview of `loadingContent`'s own stage copy for `.analyzing` --
+    /// sets expectations before the tap, at ascending opacity to read as
+    /// "this is coming up next", not as live progress.
+    private var analysisPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "gymPhoto.analysisPreview.header", defaultValue: "THEN, WHILE SOMA LOOKS", comment: "Gym-photo scan: uppercase header previewing the analysis stage copy"))
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(SomaTokens.inkPlaceholder)
+
+            analysisPreviewLine(String(localized: "gymPhoto.analysisPreview.step1", defaultValue: "Looking at your photo…", comment: "Gym-photo scan: analysis preview step 1"), opacity: 0.5)
+            analysisPreviewLine(String(localized: "gymPhoto.analysisPreview.step2", defaultValue: "Identifying equipment…", comment: "Gym-photo scan: analysis preview step 2"), opacity: 0.75)
+            analysisPreviewLine(String(localized: "gymPhoto.analysisPreview.step3", defaultValue: "Checking what's usable…", comment: "Gym-photo scan: analysis preview step 3"), opacity: 1)
+        }
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func analysisPreviewLine(_ text: String, opacity: Double) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(SomaTokens.accent)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(SomaTokens.ink2)
+        }
+        .opacity(opacity)
+    }
+
     /// The library-pick affordance, shared by the pick step and the
     /// camera-blocked explainer so copy/filter/icon changes happen once.
-    private func libraryPicker(fullWidth: Bool) -> some View {
+    private func libraryPicker(fullWidth: Bool, title: LocalizedStringKey = "Choose from library", showIcon: Bool = true) -> some View {
         PhotosPicker(selection: $photoItem, matching: .images) {
-            Label("Choose from library", systemImage: "photo.on.rectangle")
-                .frame(maxWidth: fullWidth ? .infinity : nil)
+            Group {
+                if showIcon {
+                    Label(title, systemImage: "photo.on.rectangle")
+                } else {
+                    Text(title)
+                }
+            }
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(SomaTokens.accent)
+            .frame(maxWidth: fullWidth ? .infinity : nil)
+            .frame(height: 46)
+            .padding(.horizontal, 18)
+            .glassLens()
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
     }
 
     /// Shown instead of the camera when access isn't granted. Without
@@ -161,19 +231,23 @@ struct GymPhotoWorkoutView: View {
                     .font(.largeTitle)
                     .foregroundStyle(Theme.pillFill)
 
-                Text(cameraRestricted ? "Camera is restricted" : "Camera access is off")
+                Text(cameraRestricted
+                    ? String(localized: "gymPhoto.cameraBlocked.restrictedTitle", defaultValue: "Camera is restricted", comment: "Title shown when camera access is blocked by a device restriction")
+                    : String(localized: "gymPhoto.cameraBlocked.offTitle", defaultValue: "Camera access is off", comment: "Title shown when camera access is simply denied"))
                     .font(.title3.bold())
 
                 Text(cameraRestricted
-                    ? "Something on this device is blocking the camera — usually Screen Time or a work/school profile. You can still scan your gym from a photo you already have."
-                    : "Soma needs camera access to see your gym equipment. You can turn it back on in Settings.")
+                    ? String(localized: "gymPhoto.cameraBlocked.restrictedBody", defaultValue: "Something on this device is blocking the camera — usually Screen Time or a work/school profile. You can still scan your gym from a photo you already have.", comment: "Explainer shown when camera access is blocked by a device restriction")
+                    : String(localized: "gymPhoto.cameraBlocked.offBody", defaultValue: "Soma needs camera access to see your gym equipment. You can turn it back on in Settings.", comment: "Explainer shown when camera access is simply denied"))
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(cameraRestricted ? "How to allow it" : "How to turn it on")
+                Text(cameraRestricted
+                    ? String(localized: "gymPhoto.cameraBlocked.restrictedHeading", defaultValue: "How to allow it", comment: "Heading above the numbered steps to allow camera access on a restricted device")
+                    : String(localized: "gymPhoto.cameraBlocked.offHeading", defaultValue: "How to turn it on", comment: "Heading above the numbered steps to turn camera access back on"))
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
 
@@ -190,25 +264,21 @@ struct GymPhotoWorkoutView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.systemGray6)))
+            .glassCardFlat(cornerRadius: 16)
 
             VStack(spacing: 10) {
                 // Restricted devices have no Soma camera toggle to reach,
                 // so sending them to the app's settings page would be a
                 // dead end -- only the recoverable case gets the button.
                 if !cameraRestricted {
-                    Button {
+                    SomaButton(title: "Open Settings", size: .lg, variant: .primary) {
                         SystemSettings.open()
-                    } label: {
-                        Text("Open Settings")
-                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
 
                 libraryPicker(fullWidth: true)
 
-                Button("Back") { step = .pickPhoto }
+                Button(String(localized: "gymPhoto.back", defaultValue: "Back", comment: "Button returning from the camera-blocked explainer to photo picking")) { step = .pickPhoto }
                     .font(.subheadline)
             }
         }
@@ -217,8 +287,16 @@ struct GymPhotoWorkoutView: View {
 
     private var cameraInstructionSteps: [String] {
         cameraRestricted
-            ? ["Open the Settings app", "Go to Screen Time → Content & Privacy Restrictions", "Under Allowed Apps (or App Privacy), allow the Camera"]
-            : ["Open the Settings app", "Scroll down and tap Soma", "Turn on Camera"]
+            ? [
+                String(localized: "gymPhoto.cameraSteps.openSettings", defaultValue: "Open the Settings app", comment: "Step 1 of camera access instructions: open the Settings app"),
+                String(localized: "gymPhoto.cameraSteps.restrictedScreenTime", defaultValue: "Go to Screen Time → Content & Privacy Restrictions", comment: "Step 2 of instructions for a restricted device: navigate to Screen Time restrictions"),
+                String(localized: "gymPhoto.cameraSteps.restrictedAllowCamera", defaultValue: "Under Allowed Apps (or App Privacy), allow the Camera", comment: "Step 3 of instructions for a restricted device: allow Camera under Allowed Apps"),
+            ]
+            : [
+                String(localized: "gymPhoto.cameraSteps.openSettings", defaultValue: "Open the Settings app", comment: "Step 1 of camera access instructions: open the Settings app"),
+                String(localized: "gymPhoto.cameraSteps.scrollToSoma", defaultValue: "Scroll down and tap Soma", comment: "Step 2 of camera access instructions: find Soma in the Settings list"),
+                String(localized: "gymPhoto.cameraSteps.turnOnCamera", defaultValue: "Turn on Camera", comment: "Step 3 of camera access instructions: enable the Camera toggle"),
+            ]
     }
 
     private func loadingContent(stages: [String]) -> some View {
@@ -237,7 +315,9 @@ struct GymPhotoWorkoutView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
 
-            Text(lowConfidenceNotice ? "Soma wasn't sure what it saw -- add the equipment you have available." : "Here's what Soma detected. Add or remove anything before continuing.")
+            Text(lowConfidenceNotice
+                ? String(localized: "gymPhoto.confirmEquipment.lowConfidence", defaultValue: "Soma wasn't sure what it saw -- add the equipment you have available.", comment: "Shown when gym-photo analysis had low confidence in what it detected")
+                : String(localized: "gymPhoto.confirmEquipment.detected", defaultValue: "Here's what Soma detected. Add or remove anything before continuing.", comment: "Shown when gym-photo analysis detected equipment normally"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -248,9 +328,9 @@ struct GymPhotoWorkoutView: View {
             }
 
             HStack(spacing: 8) {
-                TextField("Add equipment", text: $newEquipmentText)
+                TextField(String(localized: "gymPhoto.addEquipment.placeholder", defaultValue: "Add equipment", comment: "Placeholder for the free-text add-equipment field"), text: $newEquipmentText)
                     .textFieldStyle(.roundedBorder)
-                Button("Add") {
+                Button(String(localized: "gymPhoto.addEquipment.button", defaultValue: "Add", comment: "Button adding the typed equipment item")) {
                     addEquipment()
                 }
                 .disabled(newEquipmentText.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -319,15 +399,15 @@ struct GymPhotoWorkoutView: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 6) {
                     Image(systemName: "sparkles")
-                    Text("SOMA AI ANALYSIS")
+                    Text(String(localized: "gymPhoto.result.header", defaultValue: "SOMA AI ANALYSIS", comment: "Gym-photo scan result: uppercase header above the generated plan"))
                         .font(.caption.bold())
                         .tracking(1)
                 }
-                .foregroundStyle(Theme.pillFill)
+                .foregroundStyle(SomaTokens.accent)
 
                 Text(resultPlan != nil
-                    ? "Based on your setup and health, here's today's workout to reach your goal:"
-                    : "Let's check in first")
+                    ? String(localized: "gymPhoto.result.withPlan", defaultValue: "Based on your setup and health, here's today's workout to reach your goal:", comment: "Gym-photo scan result: intro line when a workout plan was generated")
+                    : String(localized: "gymPhoto.result.noPlan", defaultValue: "Let's check in first", comment: "Gym-photo scan result: intro line when no plan was generated yet (safety check-in needed)"))
                     .font(.body.bold())
 
                 if let resultPlan {
@@ -352,7 +432,7 @@ struct GymPhotoWorkoutView: View {
 
                 if resultPlan != nil {
                     if addedToPlan {
-                        Label("Added to today's plan", systemImage: "checkmark.circle.fill")
+                        Label(String(localized: "gymPhoto.result.addedToPlan", defaultValue: "Added to today's plan", comment: "Confirmation shown after the generated workout is added to today's plan"), systemImage: "checkmark.circle.fill")
                             .font(.subheadline.bold())
                             .foregroundStyle(.green)
                             .frame(maxWidth: .infinity)
@@ -361,15 +441,20 @@ struct GymPhotoWorkoutView: View {
                         Button {
                             Task { await addToTodaysPlan() }
                         } label: {
-                            if isAddingToPlan {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Text("Add to today's plan")
-                                    .frame(maxWidth: .infinity)
+                            Group {
+                                if isAddingToPlan {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Text(String(localized: "gymPhoto.result.addToPlanButton", defaultValue: "Add to today's plan", comment: "Button adding the generated gym-photo workout to today's plan"))
+                                }
                             }
+                            .font(.system(size: 16.5, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .foregroundStyle(.white)
+                        .glassGel(.blue)
                         .disabled(isAddingToPlan)
                         .padding(.top, 4)
 
@@ -377,13 +462,9 @@ struct GymPhotoWorkoutView: View {
                         // workout stays on screen (resultPlan is never
                         // cleared by this tap), it's just a re-entry into
                         // the equipment step in case the plan isn't right.
-                        Button {
+                        SomaButton(title: "Adjust manually", size: .lg, variant: .secondary) {
                             step = .confirmingEquipment
-                        } label: {
-                            Text("Adjust manually")
-                                .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
                     }
                 }
             }
@@ -395,19 +476,9 @@ struct GymPhotoWorkoutView: View {
     }
 
     private func equipmentChip(_ item: String) -> some View {
-        HStack(spacing: 4) {
-            Text(item)
-                .font(.subheadline.weight(.medium))
-            Button {
-                equipment.removeAll { $0 == item }
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.caption)
-            }
+        SomaChip(title: LocalizedStringKey(item), isSelected: true, showsRemoveIcon: true) {
+            equipment.removeAll { $0 == item }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Capsule().fill(Color(.systemGray6)))
     }
 
     private func addEquipment() {
@@ -447,7 +518,7 @@ struct GymPhotoWorkoutView: View {
         step = .analyzing
         errorMessage = nil
         guard let imageData = ImageCompression.jpeg(image) else {
-            errorMessage = "Couldn't process that photo. Try another one."
+            errorMessage = String(localized: "gymPhoto.error.photoProcessFailed", defaultValue: "Couldn't process that photo. Try another one.", comment: "Error shown when the selected/captured photo can't be compressed for upload")
             step = .pickPhoto
             return
         }
@@ -457,7 +528,7 @@ struct GymPhotoWorkoutView: View {
             lowConfidenceNotice = result.lowConfidence
             step = .confirmingEquipment
         } catch {
-            errorMessage = "Couldn't analyze that photo. Try again."
+            errorMessage = String(localized: "gymPhoto.error.analyzeFailed", defaultValue: "Couldn't analyze that photo. Try again.", comment: "Error shown when the gym-photo equipment analysis request fails")
             step = .pickPhoto
         }
     }
@@ -488,7 +559,7 @@ struct GymPhotoWorkoutView: View {
             errorMessage = SupabaseError.serviceUnavailable.errorDescription
             step = .confirmingEquipment
         } catch {
-            errorMessage = "Couldn't build a workout right now. Try again."
+            errorMessage = String(localized: "gymPhoto.error.generateFailed", defaultValue: "Couldn't build a workout right now. Try again.", comment: "Error shown when generating a workout from confirmed equipment fails")
             step = .confirmingEquipment
         }
     }
@@ -501,7 +572,7 @@ struct GymPhotoWorkoutView: View {
             try await SupabaseClient.shared.confirmAIPlan(date: date)
             addedToPlan = true
         } catch {
-            addToPlanError = "Couldn't add to today's plan. Try again."
+            addToPlanError = String(localized: "gymPhoto.error.addToPlanFailed", defaultValue: "Couldn't add to today's plan. Try again.", comment: "Error shown when confirming the AI-generated workout into today's plan fails")
         }
     }
 

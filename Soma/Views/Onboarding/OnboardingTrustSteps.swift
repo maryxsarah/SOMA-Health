@@ -46,8 +46,36 @@ struct WeightDeltaReactionView: View {
     let onBack: () -> Void
     let onContinue: () -> Void
 
-    private var verb: String { deltaKg < 0 ? "Losing" : "Gaining" }
-    private var amountText: String { String(format: "%.1f kg", abs(deltaKg)) }
+    private var amountText: String {
+        let formatted = String(format: "%.1f", abs(deltaKg))
+        return String(localized: "onboarding.weightDelta.amountKg", defaultValue: "\(formatted) kg", comment: "Formatted weight-delta amount with kg unit, e.g. '5.0 kg'; used inline in the onboarding weight-delta reaction headline")
+    }
+
+    /// Built as one localized sentence per direction (not concatenated
+    /// English fragments) since word order and verb form vary by
+    /// language; the amount substring is located after localization and
+    /// colored, so styling survives translation and reordering.
+    private var headline: AttributedString {
+        let template: String
+        if deltaKg < 0 {
+            template = String(
+                localized: "onboarding.weightDelta.headlineLosing",
+                defaultValue: "Losing \(amountText) starts with a plan!",
+                comment: "Onboarding reaction headline when the user's target is a weight loss; %@ is an amount like '5.0 kg'"
+            )
+        } else {
+            template = String(
+                localized: "onboarding.weightDelta.headlineGaining",
+                defaultValue: "Gaining \(amountText) starts with a plan!",
+                comment: "Onboarding reaction headline when the user's target is a weight gain; %@ is an amount like '5.0 kg'"
+            )
+        }
+        var attributed = AttributedString(template)
+        if let range = attributed.range(of: amountText) {
+            attributed[range].foregroundColor = .orange
+        }
+        return attributed
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,13 +84,9 @@ struct WeightDeltaReactionView: View {
             Spacer()
 
             VStack(spacing: 14) {
-                (
-                    Text("\(verb) ")
-                        + Text(amountText).foregroundStyle(.orange)
-                        + Text(" starts with a plan!")
-                )
-                .font(Theme.display)
-                .multilineTextAlignment(.center)
+                Text(headline)
+                    .font(Theme.display)
+                    .multilineTextAlignment(.center)
 
                 Text("We help you understand your body better and make steady progress with tailored daily plans based on your habits, goals, health information, and timeline.")
                     .font(.body)
@@ -158,7 +182,13 @@ struct OnTrackStepView: View {
         GoalPace.estimatedMonths(deltaKg: weightDeltaKg, pace: pace)
     }
 
-    private var monthLabel: String { "\(estimatedMonths) month\(estimatedMonths == 1 ? "" : "s")" }
+    private var monthLabel: String {
+        String(
+            localized: "onboarding.monthsStandalone",
+            defaultValue: "\(estimatedMonths) months",
+            comment: "Bare month count used as a chart axis label and inline in a sentence, pluralized by count"
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -167,6 +197,8 @@ struct OnTrackStepView: View {
             Text("Your tailored health journey")
                 .font(Theme.eyebrow)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 24)
                 .padding(.top, 20)

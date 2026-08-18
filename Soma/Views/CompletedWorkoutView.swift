@@ -117,8 +117,8 @@ struct CompletedWorkoutView: View {
             Text(formattedDate)
                 .font(Theme.display)
             HStack(spacing: 8) {
-                statusPill(label: "Completed", background: SomaTokens.heartSoft, foreground: SomaTokens.heart)
-                Text("Logged \(formattedLoggedTime)")
+                statusPill(label: LocalizedStringKey(String(localized: "completedWorkout.status.completed", defaultValue: "Completed", comment: "Status pill on a completed workout's detail screen")), background: SomaTokens.heartSoft, foreground: SomaTokens.heart)
+                Text(String(localized: "completedWorkout.logged", defaultValue: "Logged \(formattedLoggedTime)", comment: "Shows the time the workout was logged, e.g. 'Logged 6:42 PM'"))
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink3)
             }
@@ -144,7 +144,7 @@ struct CompletedWorkoutView: View {
         }
     }
 
-    private func statusPill(label: String, background: Color, foreground: Color) -> some View {
+    private func statusPill(label: LocalizedStringKey, background: Color, foreground: Color) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "heart.fill").font(.system(size: 10))
             Text(label).font(.system(size: 12, weight: .semibold))
@@ -167,7 +167,7 @@ struct CompletedWorkoutView: View {
                         .font(.system(size: 9))
                         .foregroundStyle(SomaTokens.accent)
                 )
-            Text("YOUR SESSION")
+            Text(String(localized: "completedWorkout.yourSession", defaultValue: "YOUR SESSION", comment: "Eyebrow label above the completed workout's session details"))
                 .font(.system(size: 11, weight: .bold))
                 .tracking(0.6)
                 .foregroundStyle(SomaTokens.accent)
@@ -185,13 +185,13 @@ struct CompletedWorkoutView: View {
                     .foregroundStyle(SomaTokens.ink)
                     .contentTransition(.numericText())
                 HStack(spacing: 6) {
-                    Text("kcal burned")
+                    Text(String(localized: "completedWorkout.calories.unit", defaultValue: "kcal burned", comment: "Completed workout: unit label under the calorie count"))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(SomaTokens.ink3)
                     // Never presented as measured when it isn't -- see
                     // WorkoutCalorieEstimator's own doc comment.
                     if log.caloriesEstimated {
-                        Text("ESTIMATED")
+                        Text(String(localized: "completedWorkout.calories.estimatedBadge", defaultValue: "ESTIMATED", comment: "Completed workout: badge shown when the calorie count is an estimate, not a measured reading"))
                             .font(.system(size: 9.5, weight: .bold))
                             .tracking(0.4)
                             .foregroundStyle(SomaTokens.ink4)
@@ -211,7 +211,7 @@ struct CompletedWorkoutView: View {
                 Text("—")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .foregroundStyle(SomaTokens.ink4)
-                Text("Calories unavailable for this session")
+                Text(String(localized: "completedWorkout.calories.unavailable", defaultValue: "Calories unavailable for this session", comment: "Completed workout: shown when no calorie reading or estimate could be produced"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(SomaTokens.ink4)
             }
@@ -224,13 +224,13 @@ struct CompletedWorkoutView: View {
 
     private var metricTiles: some View {
         HStack(spacing: 10) {
-            metricTile(label: "Duration", value: durationText ?? "—")
-            metricTile(label: "Strain", value: dayStrain.map { String(format: "%.1f", $0) } ?? "—")
-            metricTile(label: "Avg bpm", value: wearableSummary.map { "\($0.averageHeartRate)" } ?? "—")
+            metricTile(label: LocalizedStringKey(String(localized: "completedWorkout.metric.duration", defaultValue: "Duration", comment: "Metric tile label: workout duration")), value: durationText ?? "—")
+            metricTile(label: LocalizedStringKey(String(localized: "completedWorkout.metric.strain", defaultValue: "Strain", comment: "Metric tile label: wearable-reported strain score")), value: dayStrain.map { String(format: "%.1f", $0) } ?? "—")
+            metricTile(label: LocalizedStringKey(String(localized: "completedWorkout.metric.avgBpm", defaultValue: "Avg bpm", comment: "Metric tile label: average heart rate in beats per minute")), value: wearableSummary.map { "\($0.averageHeartRate)" } ?? "—")
         }
     }
 
-    private func metricTile(label: String, value: String) -> some View {
+    private func metricTile(label: LocalizedStringKey, value: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.system(size: 19, weight: .bold))
@@ -241,10 +241,7 @@ struct CompletedWorkoutView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous)
-                .fill(SomaTokens.surface3)
-        )
+        .glassCardFlat(cornerRadius: SomaTokens.rXL)
     }
 
     /// `MM:SS`, matching guide 04's own example ("Duration 42:10"). Real
@@ -286,7 +283,11 @@ struct CompletedWorkoutView: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(SomaTokens.accent)
-                Text("WHY THIS WORKOUT TODAY")
+                // Item 1, completed: prescriptive copy never headlines a
+                // finished session -- every source now gets the same
+                // retrospective "what this did" framing (the resolver
+                // returns impact copy for ai_plan too).
+                Text(String(localized: "completedWorkout.whatThisDid.eyebrow", defaultValue: "WHAT THIS DID", comment: "Completed workout: eyebrow label over the retrospective impact note, shown for sessions Soma didn't suggest"))
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.6)
                     .foregroundStyle(SomaTokens.accent)
@@ -298,7 +299,7 @@ struct CompletedWorkoutView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+        .glassCard(cornerRadius: SomaTokens.rXL)
     }
 
     // MARK: - Adherence (ai_plan only -- this app has no per-block partial
@@ -335,7 +336,7 @@ struct CompletedWorkoutView: View {
 
     private func whatYouDid(plan: AIWorkoutPlan) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("What you did")
+            Text(String(localized: "completedWorkout.whatYouDid", defaultValue: "What you did", comment: "Section header listing the blocks/exercises actually completed"))
                 .font(.system(size: 15, weight: .bold))
             ForEach(Array(plan.blocks.enumerated()), id: \.offset) { index, block in
                 VStack(alignment: .leading, spacing: 4) {
@@ -346,7 +347,7 @@ struct CompletedWorkoutView: View {
                         Text(block.name)
                             .font(.system(size: 14, weight: .semibold))
                         Spacer()
-                        Text("\(block.exercises.reduce(0) { $0 + $1.durationMinutes }) min")
+                        Text(String(localized: "completedWorkout.blockDurationMinutes", defaultValue: "\(block.exercises.reduce(0) { $0 + $1.durationMinutes }) min", comment: "Minutes spent on one completed workout block, e.g. '12 min'"))
                             .font(.system(size: 12.5))
                             .foregroundStyle(SomaTokens.ink3)
                     }
@@ -377,7 +378,7 @@ struct CompletedWorkoutView: View {
             }
             HStack(spacing: 6) {
                 metaChip(BodyPartFocus(rawValue: log.bodyPart)?.displayName ?? log.bodyPart)
-                metaChip(log.category.capitalized)
+                metaChip(Self.categoryDisplayName(log.category))
             }
         }
     }
@@ -393,7 +394,7 @@ struct CompletedWorkoutView: View {
     /// left. Every source still gets a real breakdown, just a one-row one.
     private var fallbackWhatYouDid: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("What you did")
+            Text(String(localized: "completedWorkout.whatYouDid", defaultValue: "What you did", comment: "Section header listing the blocks/exercises actually completed"))
                 .font(.system(size: 15, weight: .bold))
             HStack(alignment: .top) {
                 Image(systemName: "checkmark")
@@ -402,6 +403,12 @@ struct CompletedWorkoutView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(log.title)
                         .font(.system(size: 14, weight: .semibold))
+                    // Source note lives here now, not as a third chip
+                    // alongside body-part/category (which describe the
+                    // workout itself, not where the log came from).
+                    Text(Self.sourceDisplayName(log.source))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(SomaTokens.ink3)
                     if let feedback = log.feedback, !feedback.isEmpty {
                         Text(feedback)
                             .font(.system(size: 12.5))
@@ -418,18 +425,26 @@ struct CompletedWorkoutView: View {
             .staggerReveal(0)
             HStack(spacing: 6) {
                 metaChip(BodyPartFocus(rawValue: log.bodyPart)?.displayName ?? log.bodyPart)
-                metaChip(log.category.capitalized)
-                metaChip(Self.sourceDisplayName(log.source))
+                metaChip(Self.categoryDisplayName(log.category))
             }
         }
     }
 
     private static func sourceDisplayName(_ source: String) -> String {
         switch source {
-        case "manual": "Self-logged"
-        case "device_detected": "Detected automatically"
-        default: "AI plan"
+        case "manual": String(localized: "completedWorkout.source.manual", defaultValue: "Self-logged", comment: "Completed workout: meta chip source label for a manually-logged activity")
+        case "device_detected": String(localized: "completedWorkout.source.deviceDetected", defaultValue: "Detected automatically", comment: "Completed workout: meta chip source label for an auto-detected activity")
+        default: String(localized: "completedWorkout.source.aiPlan", defaultValue: "AI plan", comment: "Completed workout: meta chip source label for an AI-generated plan")
         }
+    }
+
+    /// Prefers the already-localized RecommendationCategory display name --
+    /// log.category is the raw enum rawValue ("moderate", "push_hard"), and
+    /// simply capitalizing it (the previous behavior) always showed English
+    /// regardless of locale. Falls back to the capitalized raw value only
+    /// for a category string that doesn't match a known case.
+    private static func categoryDisplayName(_ category: String) -> String {
+        RecommendationCategory(rawValue: category)?.displayTitle ?? category.capitalized
     }
 
     private func metaChip(_ text: String) -> some View {
@@ -445,11 +460,11 @@ struct CompletedWorkoutView: View {
 
     private var howItFelt: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("How it felt")
+            Text(String(localized: "completedWorkout.howItFelt", defaultValue: "How it felt", comment: "Section header for the post-workout feel-rating chips"))
                 .font(.system(size: 15, weight: .bold))
             HStack(spacing: 8) {
                 ForEach(WorkoutFeelRating.allCases) { rating in
-                    SomaChip(title: rating.displayName, isSelected: log.feelRating == rating) {
+                    SomaChip(title: LocalizedStringKey(rating.displayName), isSelected: log.feelRating == rating) {
                         Task { await setFeelRating(rating) }
                     }
                 }
@@ -482,7 +497,7 @@ struct CompletedWorkoutView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(SomaTokens.heart)
             }
-            Text("One more hits your weekly target")
+            Text(String(localized: "completedWorkout.oneMoreHitsTarget", defaultValue: "One more hits your weekly target", comment: "Encouragement shown near the streak row when one more workout would hit the weekly target"))
                 .font(.system(size: 12.5))
                 .foregroundStyle(SomaTokens.ink3)
                 .padding(.leading, 4)
@@ -503,10 +518,10 @@ struct CompletedWorkoutView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 9) {
-            SomaButton(title: "Do it again", size: .lg, variant: .primary, isEnabled: !isLoadingRepeat) {
+            SomaButton(title: LocalizedStringKey(String(localized: "completedWorkout.cta.doItAgain", defaultValue: "Do it again", comment: "Button: repeat this completed workout")), size: .lg, variant: .primary, isEnabled: !isLoadingRepeat) {
                 Task { await startRepeat() }
             }
-            SomaButton(title: "Edit this log", size: .md, variant: .secondary) {
+            SomaButton(title: LocalizedStringKey(String(localized: "completedWorkout.cta.editThisLog", defaultValue: "Edit this log", comment: "Button: edit the completed workout's log entry")), size: .md, variant: .secondary) {
                 showEditSheet = true
             }
         }
@@ -515,7 +530,7 @@ struct CompletedWorkoutView: View {
         .padding(.bottom, 22)
         .background(
             LinearGradient(
-                colors: [SomaTokens.surface2.opacity(0), Color(red: 0.914, green: 0.941, blue: 0.980)],
+                colors: [SomaTokens.surface2.opacity(0), SomaTokens.bgScreenBottom],
                 startPoint: .top, endPoint: .bottom
             )
         )
@@ -588,7 +603,9 @@ struct CompletedWorkoutView: View {
         }
 
         if reasonSnapshot?.isEmpty ?? true {
-            reasonSnapshot = WorkoutReasonResolver.reason(for: log, recommendation: recommendation, snapshots: snapshots)
+            let target = RecommendationCategory(rawValue: log.category)?.dayLoadTargetKcal ?? RecommendationCategory.moderate.dayLoadTargetKcal
+            let dayLoadState = DayLoadState.resolve(hasLoggedWorkout: true, loggedKcal: caloriesBurned, target: target)
+            reasonSnapshot = WorkoutReasonResolver.reason(for: log, recommendation: recommendation, snapshots: snapshots, dayLoadState: dayLoadState)
             needsWrite = true
         }
 
@@ -767,33 +784,46 @@ private struct EditWorkoutLogSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("How it felt") {
-                    HStack(spacing: 8) {
-                        ForEach(WorkoutFeelRating.allCases) { rating in
-                            SomaChip(title: rating.displayName, isSelected: feelRating == rating) {
-                                feelRating = feelRating == rating ? nil : rating
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    CardView {
+                        Text(String(localized: "completedWorkout.howItFelt", defaultValue: "How it felt", comment: "Section header for the post-workout feel-rating chips"))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(SomaTokens.ink)
+                        HStack(spacing: 8) {
+                            ForEach(WorkoutFeelRating.allCases) { rating in
+                                SomaChip(title: LocalizedStringKey(rating.displayName), isSelected: feelRating == rating) {
+                                    feelRating = feelRating == rating ? nil : rating
+                                }
                             }
                         }
                     }
+
+                    CardView {
+                        Text(String(localized: "completedWorkout.editLog.feedbackLabel", defaultValue: "Feedback for next time", comment: "Section header for the optional feedback text field when editing a workout log"))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(SomaTokens.ink)
+                        TextField(String(localized: "completedWorkout.editLog.feedbackPlaceholder", defaultValue: "Optional", comment: "Placeholder for the optional feedback text field when editing a workout log"), text: $feedbackText, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...4)
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage).font(.caption).foregroundStyle(SomaTokens.danger)
+                    }
+
+                    SomaButton(title: LocalizedStringKey(String(localized: "completedWorkout.editLog.save", defaultValue: "Save", comment: "Button: save the edited workout log")), size: .lg, variant: .primary, isEnabled: !isSaving) {
+                        Task { await save() }
+                    }
                 }
-                Section("Feedback for next time") {
-                    TextField("Optional", text: $feedbackText, axis: .vertical)
-                        .lineLimit(2...4)
-                }
-                if let errorMessage {
-                    Text(errorMessage).font(.caption).foregroundStyle(.red)
-                }
+                .padding(20)
             }
-            .navigationTitle("Edit this log")
+            .somaSheetBackground()
+            .navigationTitle(String(localized: "completedWorkout.editLog.navigationTitle", defaultValue: "Edit this log", comment: "Navigation title for the edit-workout-log sheet"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
-                        .disabled(isSaving)
+                    Button(String(localized: "completedWorkout.editLog.cancel", defaultValue: "Cancel", comment: "Button: dismiss the edit-workout-log sheet without saving")) { dismiss() }
                 }
             }
         }
@@ -814,7 +844,11 @@ private struct EditWorkoutLogSheet: View {
             ))
             dismiss()
         } catch {
-            errorMessage = "Couldn't save. Try again."
+            errorMessage = String(
+                localized: "Couldn't save. Try again.",
+                defaultValue: "Couldn't save. Try again.",
+                comment: "Error shown when saving an edited workout log's feedback fails"
+            )
         }
     }
 }

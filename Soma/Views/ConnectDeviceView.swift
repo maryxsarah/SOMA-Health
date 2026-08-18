@@ -10,14 +10,15 @@ struct ConnectDeviceView: View {
     var body: some View {
         VStack(spacing: 24) {
             VStack(spacing: 8) {
-                Text("Connect your devices.")
+                Text(String(localized: "connectDevice.headline", defaultValue: "Connect your devices.", comment: "Connect device screen: headline"))
                     .font(Theme.display)
-                Text("Connect at least one to get started.")
+                Text(String(localized: "connectDevice.body", defaultValue: "Soma plans each day from your body's signals — sleep, HRV and workouts. Connect at least one source to get a tailored plan.", comment: "Connect device screen: explanation of why a device connection is needed"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
             .multilineTextAlignment(.center)
             .padding(.top, 48)
+            .padding(.horizontal, 24)
 
             VStack(spacing: 16) {
                 ForEach(Provider.allCases) { provider in
@@ -31,6 +32,12 @@ struct ConnectDeviceView: View {
             }
             .padding(.horizontal, 20)
 
+            Text(String(localized: "connectDevice.footer", defaultValue: "Add or remove sources anytime in Settings → Health.", comment: "Connect device screen: footer note about changing sources later"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)
@@ -42,7 +49,7 @@ struct ConnectDeviceView: View {
             Spacer()
 
             PillButton(
-                title: "Continue",
+                title: LocalizedStringKey(String(localized: "connectDevice.cta.continue", defaultValue: "Continue", comment: "Connect device screen: CTA button to proceed to the next onboarding step")),
                 isEnabled: !appState.connectedProviders.isEmpty
             ) {
                 appState.advanceToNotifications()
@@ -82,7 +89,11 @@ struct ConnectDeviceView: View {
                 appState.markProviderConnected(provider)
                 AnalyticsManager.shared.deviceConnected(provider: provider.rawValue)
             } catch {
-                errorMessage = "Couldn't connect \(provider.displayName): \(error.localizedDescription)"
+                errorMessage = String(
+                    localized: "connectDevice.error",
+                    defaultValue: "Couldn't connect \(provider.displayName): \(error.localizedDescription)",
+                    comment: "Error shown when connecting a health/wearable provider fails; first placeholder is the provider name, second is the underlying error description"
+                )
             }
         }
     }

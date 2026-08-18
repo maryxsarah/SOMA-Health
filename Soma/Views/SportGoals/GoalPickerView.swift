@@ -14,7 +14,7 @@ private struct GoalListBlock: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: SomaTokens.rTile, style: .continuous)
                     .fill(plateColor)
                     .frame(width: 46, height: 46)
                     .overlay(
@@ -41,11 +41,7 @@ private struct GoalListBlock: View {
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: SomaTokens.rCard, style: .continuous)
-                    .fill(SomaTokens.surface)
-                    .shadow(color: SomaTokens.ink.opacity(0.06), radius: 2, y: 1)
-            )
+            .glassCard()
         }
         .buttonStyle(.plain)
     }
@@ -61,11 +57,11 @@ struct SportListView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("NEW GOAL · ONE AT A TIME")
+                    Text(String(localized: "goalPicker.sportList.eyebrow", defaultValue: "NEW GOAL · ONE AT A TIME", comment: "Sport picker (S1): small uppercase eyebrow label above the screen title"))
                         .font(.system(size: 12, weight: .bold))
                         .tracking(0.6)
                         .foregroundStyle(SomaTokens.ink4)
-                    Text("What do you train for?")
+                    Text(String(localized: "goalPicker.sportList.title", defaultValue: "What do you train for?", comment: "Sport picker (S1): screen title asking the user to choose a sport"))
                         .font(Theme.display)
                 }
 
@@ -79,7 +75,7 @@ struct SportListView: View {
                     }
                 }
 
-                Text("Every sport has measurable goals — plus your own coach's task, tracked the same honest way.")
+                Text(String(localized: "goalPicker.sportList.footnote", defaultValue: "Every sport has measurable goals — plus your own coach's task, tracked the same honest way.", comment: "Sport picker (S1): footnote reassuring the user every sport has trackable goals"))
                     .font(.system(size: 12))
                     .foregroundStyle(SomaTokens.ink4)
                     .padding(.top, 4)
@@ -92,8 +88,23 @@ struct SportListView: View {
         let goals = catalog.goals(for: sport)
         let count = goals.count
         let names = goals.map { $0.name.lowercased() }.joined(separator: ", ")
-        guard count > 0 else { return "Your own coach's task" }
-        return "\(count) \(count == 1 ? "goal" : "goals") · \(names)"
+        guard count > 0 else {
+            return String(
+                localized: "goalPicker.sportNote.coachTaskOnly",
+                defaultValue: "Your own coach's task",
+                comment: "Sport picker note shown for a sport with zero catalog goals -- only a custom coach-assigned goal is available"
+            )
+        }
+        let goalsText = String(
+            localized: "goalPicker.goalsStandalone",
+            defaultValue: "\(count) goals",
+            comment: "Bare goal count, pluralized by count"
+        )
+        return String(
+            localized: "goalPicker.sportNote.count",
+            defaultValue: "\(goalsText) · \(names)",
+            comment: "Sport picker note: already-pluralized goal count phrase, followed by a comma-separated list of goal names"
+        )
     }
 }
 
@@ -114,9 +125,9 @@ struct GoalPickerView: View {
                         .font(.system(size: 12, weight: .bold))
                         .tracking(0.6)
                         .foregroundStyle(SomaTokens.ink4)
-                    Text("Pick a goal")
+                    Text(String(localized: "goalPicker.title", defaultValue: "Pick a goal", comment: "Goal picker (S2): screen title"))
                         .font(Theme.display)
-                    Text("One goal at a time — measured honestly, matched to your readiness every day.")
+                    Text(String(localized: "goalPicker.subtitle", defaultValue: "One goal at a time — measured honestly, matched to your readiness every day.", comment: "Goal picker (S2): subtitle under the screen title"))
                         .font(.system(size: 14))
                         .foregroundStyle(SomaTokens.ink2)
                 }
@@ -136,12 +147,12 @@ struct GoalPickerView: View {
 
                 // Padel's known sport risk -- one caption, this screen only.
                 if sport.name.lowercased().contains("padel") {
-                    Text("Certified eye protection is recommended for all padel play.")
+                    Text(String(localized: "goalPicker.padelSafetyNote", defaultValue: "Certified eye protection is recommended for all padel play.", comment: "Goal picker (S2): safety caption shown only for padel"))
                         .font(.system(size: 12))
                         .foregroundStyle(SomaTokens.ink3)
                 }
 
-                Text("YOUR OWN")
+                Text(String(localized: "goalPicker.yourOwnEyebrow", defaultValue: "YOUR OWN", comment: "Goal picker (S2): small uppercase eyebrow above the custom coach's-task block"))
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.6)
                     .foregroundStyle(SomaTokens.ink4)
@@ -151,19 +162,19 @@ struct GoalPickerView: View {
                     icon: "list.clipboard",
                     plateColor: SomaTokens.heartSoft,
                     iconColor: SomaTokens.heart,
-                    title: "Your own — coach's task",
+                    title: String(localized: "goalPicker.customTask.title", defaultValue: "Your own — coach's task", comment: "Goal picker: title of the block for attaching a custom coach-assigned task"),
                     badge: .custom,
-                    note: "Attach your coach's assignment — Soma schedules and tracks it"
+                    note: String(localized: "goalPicker.customTask.note", defaultValue: "Attach your coach's assignment — Soma schedules and tracks it", comment: "Goal picker: note under the custom coach's-task block")
                 ) {
                     onSelectCustom()
                 }
 
-                Text("Got a task from your coach? Add it here — do the work in Soma and show them your progress: sessions and measurements export as one card.")
+                Text(String(localized: "goalPicker.customTask.footnote", defaultValue: "Got a task from your coach? Add it here — do the work in Soma and show them your progress: sessions and measurements export as one card.", comment: "Goal picker (S2): footnote explaining the custom coach's-task option"))
                     .font(.system(size: 12.5))
                     .foregroundStyle(SomaTokens.ink3)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: SomaTokens.rXL, style: .continuous).fill(SomaTokens.surface3))
+                    .glassCardFlat(cornerRadius: SomaTokens.rXL)
             }
             .padding(20)
         }

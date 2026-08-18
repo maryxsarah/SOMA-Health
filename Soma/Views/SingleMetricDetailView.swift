@@ -10,7 +10,14 @@ struct SingleMetricDetailView: View {
     private enum TrendRange: String, CaseIterable, Identifiable {
         case day, week, month, year
         var id: String { rawValue }
-        var displayTitle: String { rawValue.capitalized }
+        var displayTitle: String {
+            switch self {
+            case .day: String(localized: "trendRange.day", defaultValue: "Day", comment: "Trend range picker segment")
+            case .week: String(localized: "trendRange.week", defaultValue: "Week", comment: "Trend range picker segment")
+            case .month: String(localized: "trendRange.month", defaultValue: "Month", comment: "Trend range picker segment")
+            case .year: String(localized: "trendRange.year", defaultValue: "Year", comment: "Trend range picker segment")
+            }
+        }
 
         /// How many days back fetchSnapshots(fromDate:toDate:) should
         /// request -- the schema itself has no retention cap, only Level 1

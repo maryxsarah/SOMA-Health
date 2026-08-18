@@ -11,6 +11,9 @@ struct ExerciseDetailView: View {
 
     @State private var entry: ExerciseLibraryEntry?
     @State private var isLoading = true
+    /// Library name + how-to steps in the UI language (nil when English,
+    /// or while the translation is still in flight) -- see load().
+    @State private var translation: SupabaseClient.ExerciseGuideTranslation?
     /// True only when the library lookup itself threw (network/auth/server
     /// error) -- distinct from `entry == nil` after a *successful* lookup
     /// that genuinely found no row or an empty `image_paths`. Both used to
@@ -41,9 +44,11 @@ struct ExerciseDetailView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(exercise.name)
+                        Text(translation?.name ?? exercise.name)
                             .font(.title3.bold())
-                        Text("\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)\(exercise.restLabel.map { " — \($0)" } ?? "")")
+                        Text(exercise.restLabel.map { restLabel in
+                            String(localized: "exerciseDetail.summary.withRest", defaultValue: "\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity) — \(restLabel)", comment: "Exercise detail: sets/reps/weight/intensity/rest summary line, with a rest period")
+                        } ?? String(localized: "exerciseDetail.summary.noRest", defaultValue: "\(exercise.sets) sets × \(exercise.reps) — \(exercise.weightGuidance) — \(exercise.intensity)", comment: "Exercise detail: sets/reps/weight/intensity summary line, no rest period"))
                             .font(.subheadline)
                             .foregroundStyle(Theme.pillFill)
                         // Always-visible, no interaction needed -- someone
@@ -51,7 +56,7 @@ struct ExerciseDetailView: View {
                         // seen the plan list's own footnote) shouldn't be
                         // left guessing what "RPE 7/10" means.
                         if exercise.intensity.localizedCaseInsensitiveContains("rpe") {
-                            Text("RPE = Rate of Perceived Exertion, how hard a set feels (1 = very easy, 10 = maximum effort).")
+                            Text(String(localized: "exerciseDetail.rpeExplainer", defaultValue: "RPE = Rate of Perceived Exertion, how hard a set feels (1 = very easy, 10 = maximum effort).", comment: "Explainer for RPE shown when an exercise's intensity mentions RPE"))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -59,7 +64,7 @@ struct ExerciseDetailView: View {
 
                     if !exercise.instructions.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Coaching cue")
+                            Text(String(localized: "exerciseDetail.coachingCue", defaultValue: "Coaching cue", comment: "Header above the AI's own coaching cue text for this exercise"))
                                 .font(.caption.bold())
                                 .foregroundStyle(.secondary)
                             Text(exercise.instructions)
@@ -69,18 +74,21 @@ struct ExerciseDetailView: View {
 
                     if let entry {
                         tagsRow(entry)
-                        if !entry.instructions.isEmpty {
-                            instructionsSection(entry)
+                        // Translated steps replace the library's English
+                        // ones whenever the UI language isn't English.
+                        let steps = (translation?.instructions.isEmpty == false) ? translation!.instructions : entry.instructions
+                        if !steps.isEmpty {
+                            instructionsSection(steps)
                         }
                     }
                 }
                 .padding(20)
             }
-            .navigationTitle("Exercise")
+            .navigationTitle(String(localized: "exerciseDetail.navigationTitle", defaultValue: "Exercise", comment: "Navigation title for the exercise detail sheet"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button(String(localized: "exerciseDetail.done", defaultValue: "Done", comment: "Button closing the exercise detail sheet")) { dismiss() }
                 }
             }
         }
@@ -95,9 +103,9 @@ struct ExerciseDetailView: View {
             // A lightweight placeholder, not a full-sheet blocker -- the
             // rest of the sheet (name/sets/reps/coaching cue above) is
             // already visible and interactive while this resolves.
-            RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous)
-                .fill(Color(.systemGray6))
+            Color.clear
                 .frame(height: 220)
+                .glassCard(cornerRadius: SomaTokens.r2XL)
                 .overlay(SomaLoadingBar())
         } else if lookupFailed {
             retryPlaceholder
@@ -120,7 +128,7 @@ struct ExerciseDetailView: View {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 40))
                     .foregroundStyle(.secondary)
-                Text("Couldn't load photo, tap to retry")
+                Text(String(localized: "exerciseDetail.photoRetry", defaultValue: "Couldn't load photo, tap to retry", comment: "Placeholder button shown when the exercise photo lookup failed; tapping retries"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -138,7 +146,7 @@ struct ExerciseDetailView: View {
         }
         .tabViewStyle(.page)
         .frame(height: 260)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
+        .glassCard(cornerRadius: SomaTokens.r2XL)
         .clipShape(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous))
     }
 
@@ -188,9 +196,9 @@ struct ExerciseDetailView: View {
 
         var caption: String {
             switch self {
-            case .cardio: "No reference photo — this one's about pace and effort, not a position to copy"
-            case .breathingMobility: "No reference photo — follow the breathing/mobility cue above"
-            case .strength: "No reference photo for this exercise"
+            case .cardio: String(localized: "exerciseDetail.noMedia.cardio", defaultValue: "No reference photo — this one's about pace and effort, not a position to copy", comment: "Media placeholder caption for a cardio exercise with no reference photo")
+            case .breathingMobility: String(localized: "exerciseDetail.noMedia.breathingMobility", defaultValue: "No reference photo — follow the breathing/mobility cue above", comment: "Media placeholder caption for a breathing/mobility exercise with no reference photo")
+            case .strength: String(localized: "exerciseDetail.noMedia", defaultValue: "No reference photo for this exercise", comment: "Shown when an exercise has no reference photo/media")
             }
         }
     }
@@ -220,7 +228,7 @@ struct ExerciseDetailView: View {
                 .padding(.horizontal, 28)
         }
         .frame(maxWidth: .infinity, minHeight: 180)
-        .background(RoundedRectangle(cornerRadius: SomaTokens.r2XL, style: .continuous).fill(Color(.systemGray6)))
+        .glassCard(cornerRadius: SomaTokens.r2XL)
     }
 
     private func tagsRow(_ entry: ExerciseLibraryEntry) -> some View {
@@ -239,12 +247,12 @@ struct ExerciseDetailView: View {
         }
     }
 
-    private func instructionsSection(_ entry: ExerciseLibraryEntry) -> some View {
+    private func instructionsSection(_ steps: [String]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("How to perform it")
+            Text(String(localized: "exerciseDetail.howToPerform", defaultValue: "How to perform it", comment: "Header above the numbered exercise-library instructions"))
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
-            ForEach(Array(entry.instructions.enumerated()), id: \.offset) { index, step in
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
                 HStack(alignment: .top, spacing: 8) {
                     Text("\(index + 1).")
                         .font(.subheadline.bold())
@@ -272,6 +280,11 @@ struct ExerciseDetailView: View {
             lookupFailed = true
         }
         isLoading = false
+        // After the entry is on screen -- English steps showing is a fine
+        // intermediate state; a failed translation just stays English.
+        if let entry {
+            translation = try? await SupabaseClient.shared.translateExerciseGuide(exerciseId: entry.id)
+        }
     }
 }
 

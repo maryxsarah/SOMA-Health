@@ -43,4 +43,27 @@ enum SuperwallDiagnostics {
 
         return handler
     }
+
+    /// "Subscribe early" for TRIAL users. A trial user is ENTITLED, so
+    /// subscription-gated campaigns (audience "not subscribed" -- what
+    /// view_premium uses) silently skip for them. This registers the
+    /// dedicated `upgrade_from_trial` placement instead -- attach a
+    /// campaign to it in the Superwall dashboard with an audience that
+    /// INCLUDES active subscribers -- and, until/unless such a campaign
+    /// exists, guarantees the tap still does something by falling back
+    /// (onSkip/onError) to the caller's native manage-subscriptions sheet.
+    static func registerTrialUpgrade(onNoPaywall: @escaping @MainActor () -> Void) {
+        let handler = handler(placement: "upgrade_from_trial")
+        handler.onSkip { reason in
+            logger.warning("upgrade_from_trial skipped (\(reason.description, privacy: .public)) -- falling back to manage-subscriptions")
+            AnalyticsManager.shared.paywallSkipped(placement: "upgrade_from_trial", reason: reason.description)
+            Task { @MainActor in onNoPaywall() }
+        }
+        handler.onError { error in
+            logger.error("upgrade_from_trial error: \(String(describing: error), privacy: .public)")
+            AnalyticsManager.shared.paywallPresentationFailed(placement: "upgrade_from_trial", error: error)
+            Task { @MainActor in onNoPaywall() }
+        }
+        Superwall.shared.register(placement: "upgrade_from_trial", handler: handler)
+    }
 }

@@ -15,6 +15,7 @@
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { checkFlatDailyLimit, logGeneration } from "../_shared/generationLimits.ts";
+import { languageName } from "../_shared/language.ts";
 
 const FLAT_DAILY_LIMIT = 20;
 
@@ -41,6 +42,7 @@ Deno.serve(async (req: Request) => {
     const feedback: string | undefined = body.feedback;
     const workoutTitle: string | undefined = body.workoutTitle;
     const bodyPart: string | undefined = body.bodyPart;
+    const language = languageName(body.language);
 
     if (!feedback || !workoutTitle || !bodyPart) {
       return jsonResponse({ error: "missing 'feedback', 'workoutTitle', or 'bodyPart'" }, 400);
@@ -55,7 +57,7 @@ Deno.serve(async (req: Request) => {
 
     const prompt = `A fitness app user just finished "${workoutTitle}" (target: ${bodyPart}) and left this feedback: "${feedback}"
 
-Based on this feedback, suggest exactly 3 concrete, specific add-ons the app could include in future similar workouts -- each one a short phrase (under 10 words) naming a specific exercise, warm-up item, or adjustment, not vague advice. If the feedback already names something specific (e.g. a particular warm-up), include a version of it plus 2 closely related, fitting variations -- don't suggest something unrelated to what they said.`;
+Based on this feedback, suggest exactly 3 concrete, specific add-ons the app could include in future similar workouts -- each one a short phrase (under 10 words) naming a specific exercise, warm-up item, or adjustment, not vague advice. If the feedback already names something specific (e.g. a particular warm-up), include a version of it plus 2 closely related, fitting variations -- don't suggest something unrelated to what they said. Write every suggestion in ${language}.`;
 
     const suggestions = await callClaude(prompt);
     await logGeneration(supabase, userId, date, "addon_suggestion");

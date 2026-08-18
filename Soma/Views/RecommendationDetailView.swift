@@ -1,4 +1,5 @@
 import SwiftUI
+import SuperwallKit
 
 /// Sheet shown when tapping the Home recommendation card. Everything here
 /// is fixed, template-driven content (per-category step target/workouts,
@@ -7,6 +8,7 @@ import SwiftUI
 struct RecommendationDetailView: View {
     let recommendation: DailyRecommendation
 
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
 
     @State private var snapshots: [DailySnapshotRow] = []
@@ -14,6 +16,13 @@ struct RecommendationDetailView: View {
     @State private var todaySteps: Double?
     @State private var profile: UserProfile = .empty
     @State private var loggedTitlesToday: Set<String> = []
+    /// Sum of caloriesBurned across today's logged workouts, when any are
+    /// known -- feeds the same DayLoadState computation HomeView's
+    /// readinessCard uses, so this sheet's pick card agrees with Home about
+    /// whether today's already done (item 2 fix). Nil (not zero) when
+    /// nothing's logged, or nothing logged has a resolved calorie number
+    /// yet -- DayLoadState treats that the same as "logged, unknown load".
+    @State private var todaysLoggedCalories: Int?
     @State private var recentBodyPartCounts: [BodyPartFocus: Int] = [:]
     @State private var shuffleSeed: UInt64 = 0
     @State private var selectedTitle: String?
@@ -28,7 +37,13 @@ struct RecommendationDetailView: View {
     /// window later, instead of the whole day.
     @State private var planStartedAt: Date?
     @State private var isLoadingAIPlan = false
+    @State private var isRegenerating = false
     @State private var aiPlanError: String?
+    /// Set instead of `aiPlanError` specifically for a generation-limit
+    /// hit -- 13a turns that one case into a calm amber nudge with an
+    /// Upgrade link, distinct from the plain red text every other
+    /// generation-failure case still gets.
+    @State private var generationLimitMessage: String?
     /// True once "Add to today's plan" has been confirmed for `aiPlan` --
     /// distinct from `isCompletedToday` (a separate, later, explicit action).
     @State private var addedToPlan = false
@@ -80,6 +95,48 @@ struct RecommendationDetailView: View {
     /// model, so once true the day's pick is locked in.
     private var isCompletedToday: Bool { !loggedTitlesToday.isEmpty }
 
+    /// Same DayLoadState computation HomeView's readinessCard uses, kept in
+    /// sync so this sheet never contradicts what Home already showed
+    /// (item 2 fix).
+    private var dayLoadState: DayLoadState {
+        DayLoadState.resolve(
+            hasLoggedWorkout: isCompletedToday,
+            loggedKcal: todaysLoggedCalories,
+            target: recommendation.category.dayLoadTargetKcal
+        )
+    }
+
+    /// Same copy as HomeView.readinessHeadline, kept identical so the sheet
+    /// never contradicts the card it was opened from.
+    private var headerHeadline: String {
+        switch dayLoadState {
+        case .pending, .partiallyDone:
+            return recommendation.category.displayTitle
+        case .fulfilled:
+            return String(localized: "home.readiness.fulfilled.headline", defaultValue: "Done for today", comment: "Home: readiness card headline once today's logged activity has met the day's target")
+        case .overreached:
+            return String(localized: "home.readiness.overreached.headline", defaultValue: "Plenty today", comment: "Home: readiness card headline once today's logged activity is well past the day's target")
+        }
+    }
+
+    private var headerSubtitle: String {
+        switch dayLoadState {
+        case .pending:
+            return recommendation.message
+        case .partiallyDone:
+            let logged = todaysLoggedCalories ?? 0
+            let target = recommendation.category.dayLoadTargetKcal
+            return String(localized: "home.readiness.partiallyDone.subtitle", defaultValue: "You've logged \(logged) of \(target) kcal today. A light session would finish it off.", comment: "Home: readiness card subtitle once some, but not enough, of today's activity target is logged; both numbers are kcal")
+        case .fulfilled:
+            if let calories = todaysLoggedCalories, calories > 0 {
+                return String(localized: "home.readiness.fulfilled.subtitleWithCalories", defaultValue: "\(calories) kcal logged. Daily target met.", comment: "Home: readiness card subtitle once today's activity target is met, with a real calorie number")
+            }
+            return String(localized: "home.readiness.fulfilled.subtitle", defaultValue: "Today's activity is logged. Daily target met.", comment: "Home: readiness card subtitle once today's activity target is met, no calorie number available")
+        case .overreached:
+            return String(localized: "home.readiness.overreached.subtitle", defaultValue: "Today's already a lot. Tomorrow will be easier.", comment: "Home: readiness card subtitle once today's logged activity is well past the day's target")
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -88,12 +145,12 @@ struct RecommendationDetailView: View {
                 // with the step tracker pill. The prose that used to fill
                 // the top 40% of the screen now lives in the disclosure.
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(recommendation.category.displayTitle)
-                        .font(.system(size: 34, design: .serif).italic())
-                    Text(recommendation.message)
+                    Text(headerHeadline)
+                        .font(SomaType.screenTitle)
+                    Text(headerSubtitle)
                         .font(.system(size: 14))
                         .foregroundStyle(SomaTokens.ink2)
-                        .lineLimit(2)
+                        .lineLimit(3)
                     SomaDisclosure {
                         whyDisclosureBody
                     } triggerAccessory: {
@@ -108,9 +165,12 @@ struct RecommendationDetailView: View {
                 }
 
                 CardView {
-                    Text("AI-generated workout")
-                        .font(.body.bold())
-                    Text("Exact exercises, sets, weights, and how to do each one -- built around the workout you picked above.")
+                    HStack(spacing: 9) {
+                        sectionIcon("sparkles")
+                        Text(String(localized: "recommendationDetail.aiWorkoutCard.title", defaultValue: "AI-generated workout", comment: "Title of the AI-generated-workout card"))
+                            .font(.body.bold())
+                    }
+                    Text(String(localized: "recommendationDetail.aiWorkoutCard.subtitle", defaultValue: "Exact exercises, sets, weights, and how to do each one — built around the workout you picked above.", comment: "Subtitle explaining what the AI-generated-workout card provides"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -126,46 +186,150 @@ struct RecommendationDetailView: View {
                     }
 
                     if let aiPlan {
-                        AIWorkoutPlanView(plan: aiPlan, goalEyebrow: goalBlockEyebrow)
+                        // 11d: "Try another" becomes "Regenerate", same icon
+                        // same spot -- once a plan exists the choice is
+                        // made, so pickCard's own reshuffle affordance hides
+                        // (see `pickCard`) and this one takes over instead.
+                        if !isCompletedToday {
+                            HStack {
+                                Text(String(localized: "recommendationDetail.yourWorkoutEyebrow", defaultValue: "YOUR WORKOUT", comment: "All-caps eyebrow label over the AI-generated plan once one exists"))
+                                    .font(SomaType.eyebrow)
+                                    .tracking(0.7)
+                                    .foregroundStyle(SomaTokens.accent)
+                                Spacer()
+                                Button {
+                                    Task { await loadAIPlan(forceRegenerate: true) }
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        if isRegenerating {
+                                            ProgressView().controlSize(.mini)
+                                        } else {
+                                            Image(systemName: "arrow.triangle.2.circlepath")
+                                                .font(.system(size: 12, weight: .semibold))
+                                        }
+                                        Text(String(localized: "recommendationDetail.regenerateButton", defaultValue: "Regenerate", comment: "Button that regenerates the AI workout plan for the current pick"))
+                                            .font(.system(size: 12.5, weight: .semibold))
+                                    }
+                                    .foregroundStyle(SomaTokens.accent)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isRegenerating)
+                            }
+                            .padding(.top, 4)
+                        }
+
+                        // 13a: the conservative-weights note now lives
+                        // inside AIWorkoutPlanView itself, merged into the
+                        // same sentence/icon as the RPE explainer (used to
+                        // be two separate footnotes on two screens).
+                        AIWorkoutPlanView(plan: aiPlan, goalEyebrow: goalBlockEyebrow, isCompletedToday: isCompletedToday)
 
                         if isCompletedToday {
-                            Label("Workout completed today", systemImage: "crown.fill")
-                                .font(.subheadline.bold())
-                                .foregroundStyle(.yellow)
-                                .padding(.top, 10)
+                            // 13c: the house gel-gold-on-amber-surface
+                            // treatment -- a 30pt amber gel disc (not a flat
+                            // system-yellow circle) on the amber nudge
+                            // surface, deep-amber text -- this is the one
+                            // badge on the whole screen that reads "you're
+                            // done," so it gets a bit more visual weight
+                            // than a caption.
+                            HStack(spacing: 10) {
+                                Image(systemName: "crown.fill")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 30, height: 30)
+                                    .background(
+                                        Circle()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color(red: 245 / 255, green: 205 / 255, blue: 120 / 255).opacity(0.95),
+                                                        SomaTokens.warn.opacity(0.95)
+                                                    ],
+                                                    startPoint: .top, endPoint: .bottom
+                                                )
+                                            )
+                                            .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 1))
+                                            .overlay(
+                                                Circle().strokeBorder(
+                                                    LinearGradient(
+                                                        stops: [
+                                                            .init(color: .white.opacity(0.6), location: 0),
+                                                            .init(color: .white.opacity(0), location: 0.5)
+                                                        ],
+                                                        startPoint: .top, endPoint: .bottom
+                                                    ),
+                                                    lineWidth: 1.5
+                                                )
+                                            )
+                                            .shadow(color: SomaTokens.warn.opacity(0.3), radius: 4.5, x: 0, y: 4)
+                                    )
+                                Text(String(localized: "recommendationDetail.completedBadge", defaultValue: "Workout completed today", comment: "Badge shown once today's workout has been marked complete"))
+                                    .font(.system(size: 13.5, weight: .bold))
+                                    .foregroundStyle(Color(red: 0x9A / 255, green: 0x6A / 255, blue: 0x15 / 255))
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 11)
+                            .background(amberSurface(cornerRadius: 18))
+                            .padding(.top, 10)
 
                             if isFetchingAddons {
                                 HStack {
                                     ProgressView()
-                                    Text("Thinking of ideas for next time…")
+                                    Text(String(localized: "recommendationDetail.addonSuggestions.loading", defaultValue: "Thinking of ideas for next time…", comment: "Loading state while follow-up workout ideas are being fetched"))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                                 .padding(.top, 6)
                             } else if !addonSuggestions.isEmpty {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("Ideas for next time, based on your feedback")
+                                    Text(String(localized: "recommendationDetail.addonSuggestions.title", defaultValue: "Ideas for next time, based on your feedback", comment: "Header above the list of follow-up workout ideas"))
                                         .font(.caption.bold())
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(SomaTokens.ink3)
                                     ForEach(addonSuggestions, id: \.self) { suggestion in
-                                        Text("• \(suggestion)")
+                                        Text(String(localized: "recommendationDetail.addonSuggestions.bullet", defaultValue: "• \(suggestion)", comment: "One bulleted follow-up workout idea; placeholder is the server-provided suggestion text"))
                                             .font(.caption)
+                                            .foregroundStyle(SomaTokens.inkParagraph)
                                     }
                                 }
                                 .padding(.top, 6)
                             }
                         } else {
-                            if let aiPlanError {
+                            if let generationLimitMessage {
+                                generationLimitNudge(generationLimitMessage)
+                            } else if let aiPlanError {
                                 Text(aiPlanError)
                                     .font(.caption)
                                     .foregroundStyle(.red)
                             }
 
                             if addedToPlan {
-                                Label("Added to today's plan", systemImage: "checkmark.circle.fill")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(.green)
-                                    .padding(.top, 4)
+                                // 13a: a 20pt green gel disc + success-toned
+                                // bold line, not a flat SF checkmark label.
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 9, weight: .heavy))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 20, height: 20)
+                                        .background(
+                                            Circle()
+                                                .fill(
+                                                    LinearGradient(
+                                                        colors: [
+                                                            Color(red: 94 / 255, green: 200 / 255, blue: 150 / 255).opacity(0.9),
+                                                            SomaTokens.success.opacity(0.92)
+                                                        ],
+                                                        startPoint: .top, endPoint: .bottom
+                                                    )
+                                                )
+                                                .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 1))
+                                                .shadow(color: SomaTokens.success.opacity(0.28), radius: 3.5, x: 0, y: 3)
+                                        )
+                                    Text(String(localized: "recommendationDetail.addedToPlanBadge", defaultValue: "Added to today's plan", comment: "Badge confirming the AI plan was added to today's plan"))
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(SomaTokens.success)
+                                }
+                                .padding(.top, 4)
                             } else if let addToPlanError {
                                 Text(addToPlanError)
                                     .font(.caption)
@@ -175,32 +339,47 @@ struct RecommendationDetailView: View {
                             // Committing (complete / add to plan) moved to
                             // the bottom bar -- one commitment area per
                             // screen (guide 00 §6), not buttons mid-card.
-                            TextField("Feedback for next time (optional)", text: $feedbackText, axis: .vertical)
-                                .textFieldStyle(.roundedBorder)
-                                .lineLimit(2...4)
+                            // No upper bound -- an upper-bounded lineLimit
+                            // makes the field scroll its own text once full,
+                            // which fights the outer ScrollView's drag when
+                            // you touch down over the text itself.
+                            TextField(
+                                "",
+                                text: $feedbackText,
+                                prompt: Text(String(localized: "recommendationDetail.feedbackField.placeholder", defaultValue: "Feedback for next time (optional)", comment: "Placeholder for the optional post-workout feedback text field"))
+                                    .foregroundStyle(SomaTokens.inkPlaceholder),
+                                axis: .vertical
+                            )
+                            .lineLimit(2...)
+                            .glassInput(cornerRadius: SomaTokens.rRow)
                                 .padding(.top, 8)
                         }
                     } else if isLoadingAIPlan {
                         GenerationProgressView(estimatedSeconds: 8)
                             .padding(.top, 4)
                     } else {
-                        if let aiPlanError {
+                        if let generationLimitMessage {
+                            generationLimitNudge(generationLimitMessage)
+                        } else if let aiPlanError {
                             Text(aiPlanError)
                                 .font(.caption)
                                 .foregroundStyle(.red)
                         }
                         // Generation itself fires from the bottom bar's
                         // "Start workout" -- only the optional note lives here.
-                        TextField("Anything Soma should know for today's workout? (optional)", text: $preGenerationNotes, axis: .vertical)
+                        // See the feedback field above -- no upper bound,
+                        // same reason (avoids the internal-scroll-vs-outer-
+                        // ScrollView drag conflict).
+                        TextField(String(localized: "recommendationDetail.preGenNotes.placeholder", defaultValue: "Anything Soma should know for today's workout? (optional)", comment: "Placeholder for the optional pre-generation notes text field"), text: $preGenerationNotes, axis: .vertical)
                             .textFieldStyle(.roundedBorder)
-                            .lineLimit(2...4)
+                            .lineLimit(2...)
                             .padding(.top, 4)
                     }
                 }
 
                 if !openInjuryCheckins.isEmpty {
                     CardView {
-                        Text("Injury check-in")
+                        Text(String(localized: "recommendationDetail.injuryCheckin.title", defaultValue: "Injury check-in", comment: "Title of the injury check-in card"))
                             .font(.body.bold())
                         ForEach(openInjuryCheckins) { state in
                             injuryCheckinRow(state)
@@ -215,76 +394,214 @@ struct RecommendationDetailView: View {
                 }
 
                 CardView {
-                    Text("Look out for tomorrow")
-                        .font(.body.bold())
-                    Text(personalizedTomorrowTip)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    HStack(alignment: .top, spacing: 12) {
+                        sectionIcon("moon.fill")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(String(localized: "recommendationDetail.tomorrowCard.title", defaultValue: "Look out for tomorrow", comment: "Title of the tomorrow's-tip card"))
+                                .font(.body.bold())
+                            Text(personalizedTomorrowTip)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .padding(20)
-            .padding(.bottom, 90)
+            // A fixed safety margin, not a value sized to clear bottomBar --
+            // bottomBar reserves its OWN exact space via the safeAreaInset
+            // below (and reserves none at all once isCompletedToday, when
+            // it renders nothing), so double-padding for its height here
+            // was pure guesswork that either wasted scroll distance or (once
+            // completed) left content sitting right at the edge.
+            .padding(.bottom, 24)
         }
+        // 11a: this sheet had no visible dismiss affordance at all (swipe-
+        // down only) -- a back chevron + "TODAY" eyebrow row, same glass-
+        // circle recipe as the step pill/section icons. Pinned via
+        // safeAreaInset(.top) rather than living inside the ScrollView's
+        // own VStack -- as scroll content, it used to scroll away instead
+        // of staying put like a real nav bar, which is what read as the
+        // previous screen's own header showing through on top.
+        .safeAreaInset(edge: .top) { topNavRow }
         .safeAreaInset(edge: .bottom) { bottomBar }
-        .somaBackground()
+        .somaSheetBackground()
         .task {
             await loadContext()
         }
     }
 
+    // MARK: - Top nav row
+
+    private var topNavRow: some View {
+        HStack {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(SomaTokens.accent)
+                    .frame(width: 40, height: 40)
+                    .glassLens(cornerRadius: SomaTokens.rPill)
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            Text(String(localized: "recommendationDetail.topNav.eyebrow", defaultValue: "TODAY", comment: "All-caps eyebrow label in the top navigation row"))
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.8)
+                .foregroundStyle(SomaTokens.ink4)
+            Spacer()
+            Color.clear.frame(width: 40, height: 40)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .background {
+            LinearGradient(
+                colors: [SomaTokens.surface.opacity(0.98), SomaTokens.surface.opacity(0.98), SomaTokens.surface.opacity(0)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .padding(.bottom, -20)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Small glass-circle icon badge -- same recipe as `topNavRow`'s
+    /// chevron, just 30pt, for the AI-workout/tomorrow-tip card headers.
+    private func sectionIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 13, weight: .regular))
+            .foregroundStyle(SomaTokens.accent)
+            .frame(width: 30, height: 30)
+            .glassLens(cornerRadius: SomaTokens.rPill)
+    }
+
+    /// 13a/13c's amber nudge surface -- soft warn-toned gradient with an
+    /// inset amber hairline, never a flat system-orange fill.
+    private func amberSurface(cornerRadius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        SomaTokens.warnSoft,
+                        Color(red: 240 / 255, green: 190 / 255, blue: 100 / 255).opacity(0.08)
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color(red: 240 / 255, green: 190 / 255, blue: 100 / 255).opacity(0.25), lineWidth: 1)
+            )
+    }
+
+    /// 13a: replaces the old plain-red error text for a generation-limit
+    /// hit with a calm amber nudge + a real "Upgrade" action -- the server
+    /// message itself is shown verbatim (it already spells out the current
+    /// tier's quota and reset timing), only the container changes. Icon
+    /// disc is solid `warn`, body copy the design's muted amber-brown --
+    /// system orange appears nowhere in this recipe.
+    private func generationLimitNudge(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(SomaTokens.warn))
+                .padding(.top, 1)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(Color(red: 0x8A / 255, green: 0x75 / 255, blue: 0x50 / 255))
+            Spacer(minLength: 8)
+            Button {
+                let handler = SuperwallDiagnostics.handler(placement: "view_premium")
+                handler.onDismiss { _, result in
+                    WinBackOfferManager.maybePresentAfterDecline(result: result)
+                }
+                Superwall.shared.register(placement: "view_premium", handler: handler)
+            } label: {
+                Text(String(localized: "recommendationDetail.generationLimit.upgrade", defaultValue: "Upgrade", comment: "Button in the amber generation-limit nudge card that opens the premium paywall"))
+                    .font(.caption.bold())
+                    .foregroundStyle(SomaTokens.accent)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(amberSurface(cornerRadius: SomaTokens.rRow))
+        .padding(.top, 4)
+    }
+
     // MARK: - Why this? disclosure (was the "Why today" card)
+
+    private var stepTargetText: String {
+        let target = recommendation.category.stepTarget
+        if let averageSteps {
+            return String(localized: "recommendationDetail.stepTarget.withAverage", defaultValue: "Today's step target: \(target) — you've averaged ~\(Int(averageSteps.rounded()))/day over the last week.", comment: "Step-target sentence in the Why-this disclosure, shown when a recent average step count is available. First placeholder is the target range (e.g. '7,000–9,000 steps'), second is the rounded daily average.")
+        }
+        return String(localized: "recommendationDetail.stepTarget.noAverage", defaultValue: "Today's step target: \(target).", comment: "Step-target sentence in the Why-this disclosure, shown when no recent average step count is available. Placeholder is the target range (e.g. '7,000–9,000 steps').")
+    }
 
     private var whyDisclosureBody: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Item 4 fix: the collapsed message line above is capped short
+            // server-side and may have dropped the specific "why a cap
+            // applied" clause -- messageDetail is the uncapped version of
+            // that same sentence, so it still surfaces here rather than
+            // disappearing. Nil for rows written before this column
+            // existed, or when there was nothing more to add beyond the
+            // (already short) message itself.
+            if let messageDetail = recommendation.messageDetail, !messageDetail.isEmpty {
+                Text(messageDetail)
+            }
             Text(explanationText)
-            Text("Today's step target: \(recommendation.category.stepTarget)\(averageSteps.map { String(format: " — you've averaged ~%.0f/day over the last week.", $0) } ?? ".")")
+            Text(stepTargetText)
                 .font(.system(size: 12.5))
             if let requested = recommendation.userRequestedCategory {
                         // Not styled as a warning (unlike the caps below) --
                         // this wasn't a safety downgrade, it's what the user
                         // themselves asked for.
-                        Text("You asked for a \(requested == .rest ? "rest" : "active recovery") day today.")
+                        Text(requested == .rest
+                            ? String(localized: "recommendationDetail.requestedRest", defaultValue: "You asked for a rest day today.", comment: "Shown when the user explicitly requested a rest day")
+                            : String(localized: "recommendationDetail.requestedActiveRecovery", defaultValue: "You asked for an active recovery day today.", comment: "Shown when the user explicitly requested an active recovery day"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     if recommendation.sleepCapApplied {
-                        Text("Note: today's intensity was capped because of short sleep, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.sleep", defaultValue: "Note: today's intensity was capped because of short sleep, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to short sleep"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.hrvCapApplied {
-                        Text("Note: today's intensity was capped because your HRV is noticeably below your usual baseline, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.hrv", defaultValue: "Note: today's intensity was capped because your HRV is noticeably below your usual baseline, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to low HRV"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.stressCapApplied {
-                        Text("Note: today's intensity was capped because of a high-stress day, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.stress", defaultValue: "Note: today's intensity was capped because of a high-stress day, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to high stress"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.injuryCapApplied {
-                        Text("Note: today's intensity was capped because of a noted injury, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.injury", defaultValue: "Note: today's intensity was capped because of a noted injury, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to a noted injury"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.loadCapApplied {
-                        Text("Note: today's intensity was capped because of a strenuous session very recently, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.load", defaultValue: "Note: today's intensity was capped because of a strenuous session very recently, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to a recent strenuous session"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.volumeCapApplied {
-                        Text("Note: today's intensity was capped because of a high training volume over the last week, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.volume", defaultValue: "Note: today's intensity was capped because of a high training volume over the last week, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was reduced due to high recent training volume"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.consecutiveDaysCapApplied, overrideCategory == nil {
                         Text(recommendation.category == .rest
-                            ? "Note: you've trained several days in a row without a break, so today is a full rest day, even though recovery looked strong."
-                            : "Note: you've trained 5+ days in a row, so today is active recovery -- light movement only, even though recovery looked strong.")
+                            ? String(localized: "recommendationDetail.cap.consecutiveDaysRest", defaultValue: "Note: you've trained several days in a row without a break, so today is a full rest day, even though recovery looked strong.", comment: "Cap explanation shown when several consecutive training days forced a full rest day")
+                            : String(localized: "recommendationDetail.cap.consecutiveDaysActiveRecovery", defaultValue: "Note: you've trained 5+ days in a row, so today is active recovery -- light movement only, even though recovery looked strong.", comment: "Cap explanation shown when 5+ consecutive training days forced an active-recovery day"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                         if let preCapCategory = recommendation.preCapCategory, preCapCategory != recommendation.category {
-                            Button("Give me a standard workout anyway") {
+                            Button(String(localized: "recommendationDetail.overrideCapButton", defaultValue: "Give me a standard workout anyway", comment: "Button offered when a consecutive-days cap forced a lighter day, letting the user override back to the pre-cap category")) {
                                 overrideCategory = preCapCategory
                             }
                             .font(.caption.bold())
@@ -293,30 +610,30 @@ struct RecommendationDetailView: View {
                     }
                     if let overrideCategory, recommendation.consecutiveDaysCapApplied {
                         HStack(spacing: 4) {
-                            Text("Showing \(overrideCategory.displayTitle) workouts instead.")
+                            Text(String(localized: "recommendationDetail.overrideActive.message", defaultValue: "Showing \(overrideCategory.displayTitle) workouts instead.", comment: "Shown after the user overrides a consecutive-days cap back to a standard workout. Placeholder is the workout category's display title (e.g. 'Moderate')."))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Button("Undo") { self.overrideCategory = nil }
+                            Button(String(localized: "recommendationDetail.overrideActive.undoButton", defaultValue: "Undo", comment: "Button that reverts the standard-workout override back to the original capped recommendation")) { self.overrideCategory = nil }
                                 .font(.caption.bold())
                         }
                     }
                     if recommendation.injuryProtocolCapApplied {
-                        Text("Note: today's intensity was capped to light because of an active severe-injury recovery protocol, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.injuryProtocolSevere", defaultValue: "Note: today's intensity was capped to light because of an active severe-injury recovery protocol, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was capped to light due to an active severe-injury recovery protocol"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.injuryProtocolModerateCapApplied {
-                        Text("Note: today's intensity was capped to moderate because of an active injury recovery protocol, even though recovery looked strong enough for push hard.")
+                        Text(String(localized: "recommendationDetail.cap.injuryProtocolModerate", defaultValue: "Note: today's intensity was capped to moderate because of an active injury recovery protocol, even though recovery looked strong enough for push hard.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was capped to moderate due to an active injury recovery protocol"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.injuryProtocolRestApplied {
-                        Text("Note: today is a full rest day because of a severe injury you reported recently, or one that's been trending worse -- your safety comes before intensity here.")
+                        Text(String(localized: "recommendationDetail.cap.injuryProtocolRest", defaultValue: "Note: today is a full rest day because of a severe injury you reported recently, or one that's been trending worse -- your safety comes before intensity here.", comment: "Cap explanation shown in the Why-this disclosure when today is a full rest day due to a severe injury recovery protocol"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
                     if recommendation.moodCapApplied {
-                        Text("Note: today's intensity was eased based on how you said you're feeling, even though recovery looked strong.")
+                        Text(String(localized: "recommendationDetail.cap.mood", defaultValue: "Note: today's intensity was eased based on how you said you're feeling, even though recovery looked strong.", comment: "Cap explanation shown in the Why-this disclosure when today's intensity was eased due to reported mood"))
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -343,14 +660,19 @@ struct RecommendationDetailView: View {
             if let steps = todaySteps.map({ Int($0.rounded()) }) {
                 let reached = steps >= target
                 let overshoot = target > 0 ? Int((Double(steps - target) / Double(target) * 100).rounded()) : 0
+                let progressText: String = {
+                    if reached && overshoot >= 5 {
+                        return String(localized: "recommendationDetail.steps.ahead", defaultValue: "\(steps.formatted()) / \(target.formatted()) · +\(overshoot)%", comment: "Step count vs today's target, shown once the user has exceeded the target by 5% or more. First two placeholders are the done/target step counts, third is the overshoot percentage.")
+                    } else if reached {
+                        return String(localized: "recommendationDetail.steps.goalHit", defaultValue: "\(steps.formatted()) / \(target.formatted()) · Goal hit", comment: "Step count vs today's target, shown once the target is reached. Placeholders are the done/target step counts.")
+                    } else {
+                        return String(localized: "recommendationDetail.steps.inProgress", defaultValue: "\(steps.formatted()) / \(target.formatted())", comment: "Step count vs today's target, still in progress. Placeholders are the done/target step counts.")
+                    }
+                }()
                 HStack(spacing: 6) {
                     Image(systemName: reached ? "checkmark" : "figure.walk")
                         .font(.system(size: 11, weight: .bold))
-                    Text(reached && overshoot >= 5
-                        ? "\(steps.formatted()) / \(target.formatted()) · +\(overshoot)%"
-                        : reached
-                            ? "\(steps.formatted()) / \(target.formatted()) · Goal hit"
-                            : "\(steps.formatted()) / \(target.formatted())")
+                    Text(progressText)
                         .font(.system(size: 12, weight: .semibold))
                     Capsule()
                         .fill(reached ? SomaTokens.success.opacity(0.25) : SomaTokens.surface4)
@@ -364,11 +686,13 @@ struct RecommendationDetailView: View {
                 .foregroundStyle(reached ? SomaTokens.success : SomaTokens.accentDeep)
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(
-                    Capsule()
-                        .fill(reached ? SomaTokens.successSoft : SomaTokens.surface)
-                        .overlay(Capsule().stroke(reached ? SomaTokens.successSoft : SomaTokens.hairline, lineWidth: 1))
-                )
+                .background {
+                    if reached {
+                        Capsule().fill(SomaTokens.successSoft)
+                    } else {
+                        Color.clear.glassLens()
+                    }
+                }
             } else if appState.connectedProviders.isEmpty {
                 // No device at all -- say so instead of a silent target.
                 // (Step counts come from Apple Health on-device; Oura/Whoop
@@ -376,30 +700,22 @@ struct RecommendationDetailView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "antenna.radiowaves.left.and.right")
                         .font(.system(size: 10, weight: .semibold))
-                    Text("Connect a device to track steps")
+                    Text(String(localized: "recommendationDetail.stepPill.noDevice", defaultValue: "Connect a device to track steps", comment: "Step-tracker pill, shown when no health/fitness device is connected"))
                         .font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundStyle(SomaTokens.ink3)
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(
-                    Capsule()
-                        .fill(SomaTokens.surface)
-                        .overlay(Capsule().stroke(SomaTokens.hairline, lineWidth: 1))
-                )
+                .glassLens()
             } else {
                 // A device is connected but reported no steps (yet) --
                 // state the target plainly rather than fabricating a count.
-                Text("Target \(target.formatted()) steps")
+                Text(String(localized: "recommendationDetail.stepPill.targetOnly", defaultValue: "Target \(target.formatted()) steps", comment: "Step-tracker pill, shown when a device is connected but has reported no steps yet. Placeholder is the formatted step target count."))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(SomaTokens.accentDeep)
                     .padding(.horizontal, 10)
                     .frame(height: 30)
-                    .background(
-                        Capsule()
-                            .fill(SomaTokens.surface)
-                            .overlay(Capsule().stroke(SomaTokens.hairline, lineWidth: 1))
-                    )
+                    .glassLens()
             }
         }
     }
@@ -423,17 +739,20 @@ struct RecommendationDetailView: View {
     private var pickCard: some View {
         CardView {
             HStack {
-                Text("SOMA'S PICK")
+                Text(String(localized: "recommendationDetail.pickCard.eyebrow", defaultValue: "SOMA'S PICK", comment: "All-caps eyebrow label on the pick card"))
                     .font(.system(size: 10.5, weight: .bold))
                     .tracking(0.5)
                     .foregroundStyle(SomaTokens.accent)
                 Spacer()
-                if !isCompletedToday {
+                // 11d: hides once a plan exists -- the choice is made, and
+                // "Regenerate" (inside the AI-workout card below) takes over
+                // as this screen's one reshuffle affordance.
+                if !isCompletedToday, aiPlan == nil {
                     Button {
                         shuffleSeed += 1
                         selectTopSuggestion()
                     } label: {
-                        Label("Try another", systemImage: "arrow.triangle.2.circlepath")
+                        Label(String(localized: "recommendationDetail.tryAnotherButton", defaultValue: "Try another", comment: "Button that reshuffles the pick card's suggested workout"), systemImage: "arrow.triangle.2.circlepath")
                             .font(.system(size: 12.5, weight: .semibold))
                             .foregroundStyle(SomaTokens.accent)
                     }
@@ -441,7 +760,7 @@ struct RecommendationDetailView: View {
                 }
             }
 
-            Text(selectedTitle ?? "Loading today's pick…")
+            Text(selectedTitle ?? String(localized: "recommendationDetail.loadingPick", defaultValue: "Loading today's pick…", comment: "Placeholder shown on the pick card while today's suggested workout is still loading"))
                 .font(.system(size: 20, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -450,18 +769,37 @@ struct RecommendationDetailView: View {
                 .foregroundStyle(SomaTokens.ink3)
 
             HStack(spacing: 8) {
-                pickTile(label: "Duration", value: pickDurationText)
-                pickTile(label: "Effort", value: effectiveCategory.displayTitle)
-                pickTile(label: "Exercises", value: pickExerciseCountText)
+                pickTile(label: LocalizedStringKey(String(localized: "recommendationDetail.pickTile.duration", defaultValue: "Duration", comment: "Label under the workout duration value on the pick card")), value: pickDurationText)
+                pickTile(label: LocalizedStringKey(String(localized: "recommendationDetail.pickTile.effort", defaultValue: "Effort", comment: "Label under the workout effort/intensity value on the pick card")), value: effectiveCategory.displayTitle)
+                pickTile(label: LocalizedStringKey(String(localized: "recommendationDetail.pickTile.exercises", defaultValue: "Exercises", comment: "Label under the exercise count value on the pick card")), value: pickExerciseCountText)
             }
 
-            Text(isCompletedToday
-                ? "Today's pick, completed."
-                : aiPlan != nil
-                    ? "Exact sets, weights and how to do each one — ready below."
-                    : "Exact sets, weights and how to do each one — built when you start.")
-                .font(.caption)
-                .foregroundStyle(SomaTokens.ink3)
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(SomaTokens.success)
+                    .padding(.top, 1)
+                Text(pickStatusText)
+                    .font(.caption)
+                    .foregroundStyle(SomaTokens.ink3)
+            }
+        }
+    }
+
+    /// Extends the old binary isCompletedToday check with the graded
+    /// DayLoadState -- "completed" alone didn't distinguish "closed
+    /// today's quota" from "already went well past it" (item 2 fix).
+    private var pickStatusText: String {
+        guard isCompletedToday else {
+            return aiPlan != nil
+                ? String(localized: "recommendationDetail.pickStatus.planReady", defaultValue: "Exact sets, weights and how to do each one — ready below.", comment: "Pick-card status line once an AI plan has been generated")
+                : String(localized: "recommendationDetail.pickStatus.planPending", defaultValue: "Exact sets, weights and how to do each one — built when you start.", comment: "Pick-card status line before an AI plan has been generated")
+        }
+        switch dayLoadState {
+        case .overreached:
+            return String(localized: "recommendationDetail.pickStatus.overreached", defaultValue: "Today's pick, completed — and then some.", comment: "Pick-card status line once today's workout is logged well past the day's target")
+        default:
+            return String(localized: "recommendationDetail.pickStatus.completed", defaultValue: "Today's pick, completed.", comment: "Pick-card status line once today's workout has been logged as complete")
         }
     }
 
@@ -469,23 +807,32 @@ struct RecommendationDetailView: View {
         if let suggestion = currentPickSuggestion {
             return suggestion.equipment.displayName
         }
-        if aiPlan?.source == "gym_photo" { return "From your gym scan" }
-        return "Matched to your equipment"
+        if aiPlan?.source == "gym_photo" {
+            return String(localized: "recommendationDetail.gearLine.gymScan", defaultValue: "From your gym scan", comment: "Equipment/source line on the pick card, shown when the workout came from a scanned gym photo")
+        }
+        return String(localized: "recommendationDetail.gearLine.matched", defaultValue: "Matched to your equipment", comment: "Equipment/source line on the pick card, default case")
     }
 
     private var pickDurationText: String {
-        if let actual = aiPlan?.actualDurationMinutes { return "\(actual) min" }
+        if let actual = aiPlan?.actualDurationMinutes {
+            return String(localized: "recommendationDetail.duration.minutes", defaultValue: "\(actual) min", comment: "Workout duration tile value, e.g. '45 min'")
+        }
         guard let range = currentPickSuggestion?.targetDurationMinutes ?? selectedDurationRange else { return "—" }
-        return range.lowerBound == range.upperBound ? "\(range.lowerBound) min" : "\(range.lowerBound)–\(range.upperBound) min"
+        if range.lowerBound == range.upperBound {
+            return String(localized: "recommendationDetail.duration.minutes", defaultValue: "\(range.lowerBound) min", comment: "Workout duration tile value, e.g. '45 min'")
+        }
+        return String(localized: "recommendationDetail.duration.range", defaultValue: "\(range.lowerBound)–\(range.upperBound) min", comment: "Workout duration range tile value, e.g. '30–40 min'")
     }
 
     private var pickExerciseCountText: String {
-        guard let aiPlan else { return "AI-built" }
+        guard let aiPlan else {
+            return String(localized: "recommendationDetail.exercises.aiBuilt", defaultValue: "AI-built", comment: "Exercise-count tile value shown before a plan has been generated")
+        }
         let count = aiPlan.warmUp.count + aiPlan.blocks.reduce(0) { $0 + $1.exercises.count } + aiPlan.coolDown.count
         return "\(count)"
     }
 
-    private func pickTile(label: String, value: String) -> some View {
+    private func pickTile(label: LocalizedStringKey, value: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
                 .font(.system(size: 14, weight: .semibold))
@@ -497,10 +844,7 @@ struct RecommendationDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous)
-                .fill(SomaTokens.surface3)
-        )
+        .glassCardFlat(cornerRadius: SomaTokens.rTile)
     }
 
     // MARK: - Alternatives (guide 04: single-line rows, choosing opens it)
@@ -508,7 +852,7 @@ struct RecommendationDetailView: View {
     private var alternativesCard: some View {
         CardView {
             HStack {
-                Text("Workouts that fit today")
+                Text(String(localized: "recommendationDetail.alternativesCard.title", defaultValue: "Workouts that fit today", comment: "Title of the card listing alternative workout suggestions for today"))
                     .font(.body.bold())
                 Spacer()
                 Text("\(visibleSuggestions.count)")
@@ -528,23 +872,34 @@ struct RecommendationDetailView: View {
                             Text(suggestion.title)
                                 .font(.system(size: 14, weight: .medium))
                                 .multilineTextAlignment(.leading)
-                            Text("\(suggestion.bodyPart.displayName) · \(suggestion.equipment.displayName)")
+                                // Muted once selected -- this same title is
+                                // already the pick card's own headline right
+                                // above, at full emphasis; repeating that
+                                // emphasis here would just be visual noise.
+                                .foregroundStyle(isSelected ? SomaTokens.ink4 : SomaTokens.ink)
+                            Text(String(localized: "recommendationDetail.alternativeRow.subtitle", defaultValue: "\(suggestion.bodyPart.displayName) · \(suggestion.equipment.displayName)", comment: "Subtitle under an alternative workout suggestion's title, joining its body part and equipment. Both placeholders are already-localized display names."))
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(SomaTokens.ink4)
                         }
                         Spacer()
                         if isSelected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(SomaTokens.accent)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 22, height: 22)
+                                .glassGel(.blue, cornerRadius: 11)
                         } else {
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(SomaTokens.ink4)
                         }
                     }
-                    .contentShape(Rectangle())
                     .padding(.vertical, 6)
+                    // Must come after the padding above, not before -- a
+                    // contentShape fixed on the pre-padding HStack leaves
+                    // the row's own vertical padding as a dead tap zone
+                    // (row visually spans it, but taps there don't land).
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 // Already the pick -- tapping again would be a no-op; only
@@ -577,21 +932,32 @@ struct RecommendationDetailView: View {
         if !isCompletedToday {
             VStack(spacing: 9) {
                 if aiPlan == nil {
-                    SomaButton(title: "Start workout", size: .lg, variant: .primary, isEnabled: selectedTitle != nil && !isLoadingAIPlan) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "recommendationDetail.startWorkoutButton", defaultValue: "Start workout", comment: "Primary bottom-bar CTA that generates the AI workout plan")), size: .lg, variant: .primary, isEnabled: selectedTitle != nil && !isLoadingAIPlan) {
                         Task { await loadAIPlan() }
                     }
                 } else {
-                    SomaButton(title: "Complete workout", size: .lg, variant: .primary, isEnabled: !isMarkingComplete) {
+                    SomaButton(title: LocalizedStringKey(String(localized: "recommendationDetail.completeWorkoutButton", defaultValue: "Complete workout", comment: "Primary bottom-bar CTA that marks today's workout as done")), size: .lg, variant: .primary, isEnabled: !isMarkingComplete) {
                         Task { await markWorkoutComplete() }
                     }
                     if !addedToPlan {
-                        SomaButton(title: "Add to today's plan", size: .md, variant: .secondary, isEnabled: !isAddingToPlan) {
+                        SomaButton(title: LocalizedStringKey(String(localized: "recommendationDetail.addToPlanButton", defaultValue: "Add to today's plan", comment: "Secondary bottom-bar CTA that confirms the AI plan into today's plan")), size: .md, variant: .secondary, isEnabled: !isAddingToPlan) {
                             Task { await addToTodaysPlan() }
                         }
                     }
                 }
             }
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 22)
+            // Docks over a fade, not a hard white bar -- scrolled content
+            // (the alternatives list, tomorrow's tip) reads through softly
+            // instead of hard-clipping under an opaque strip.
+            .background(
+                LinearGradient(
+                    colors: [SomaTokens.surface.opacity(0), SomaTokens.surface.opacity(0.85), SomaTokens.surface.opacity(0.98)],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .padding(.top, -34)
+                .allowsHitTesting(false)
+            )
         }
     }
 
@@ -605,34 +971,35 @@ struct RecommendationDetailView: View {
     /// original per-reason tip only when none of the richer signals apply.
     private var personalizedTomorrowTip: String {
         if recommendation.injuryProtocolRestApplied {
-            return "Today is a full rest day for your injury's sake. Tomorrow, only resume light activity if a check-in shows things are trending better -- pushing through too soon is what turns a short setback into a long one."
+            return String(localized: "recommendationDetail.tomorrowTip.injuryProtocolRest", defaultValue: "Today is a full rest day for your injury's sake. Tomorrow, only resume light activity if a check-in shows things are trending better -- pushing through too soon is what turns a short setback into a long one.", comment: "Tomorrow's-tip card, shown when today is a full rest day due to a severe injury recovery protocol")
         }
         if recommendation.volumeCapApplied {
-            return "Today was capped for high training volume over the last week. Tomorrow, favor a lighter session or full rest -- accumulated fatigue, not just last night's sleep, is driving this one."
+            return String(localized: "recommendationDetail.tomorrowTip.volumeCap", defaultValue: "Today was capped for high training volume over the last week. Tomorrow, favor a lighter session or full rest -- accumulated fatigue, not just last night's sleep, is driving this one.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for high training volume")
         }
         if recommendation.consecutiveDaysCapApplied {
-            return "You've trained several days in a row. A genuine rest or active-recovery day tomorrow (short walk, light mobility) will do more for your next hard session than pushing through again."
+            return String(localized: "recommendationDetail.tomorrowTip.consecutiveDays", defaultValue: "You've trained several days in a row. A genuine rest or active-recovery day tomorrow (short walk, light mobility) will do more for your next hard session than pushing through again.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for consecutive training days")
         }
         if recommendation.injuryProtocolCapApplied || recommendation.injuryProtocolModerateCapApplied {
-            return "You're in an active injury-recovery window. Keep tomorrow's intensity conservative even if recovery data looks good -- the check-ins are what actually clear you to progress, not a single good reading."
+            return String(localized: "recommendationDetail.tomorrowTip.injuryProtocol", defaultValue: "You're in an active injury-recovery window. Keep tomorrow's intensity conservative even if recovery data looks good -- the check-ins are what actually clear you to progress, not a single good reading.", comment: "Tomorrow's-tip card, shown during an active injury-recovery protocol")
         }
         if recommendation.pregnancyCapApplied {
-            return "General guidance for tomorrow: favor controlled, moderate sessions and listen to how your body responds -- your care provider's advice takes priority over this app's recommendation."
+            return String(localized: "recommendationDetail.tomorrowTip.pregnancy", defaultValue: "General guidance for tomorrow: favor controlled, moderate sessions and listen to how your body responds -- your care provider's advice takes priority over this app's recommendation.", comment: "Tomorrow's-tip card, shown when today's intensity was capped for pregnancy")
         }
         if recommendation.moodCapApplied {
-            return "Today's session eased off based on how you said you were feeling. If tomorrow's check-in is better, intensity can pick back up -- this app tracks how you feel, not just how your wearable reads you."
+            return String(localized: "recommendationDetail.tomorrowTip.mood", defaultValue: "Today's session eased off based on how you said you were feeling. If tomorrow's check-in is better, intensity can pick back up -- this app tracks how you feel, not just how your wearable reads you.", comment: "Tomorrow's-tip card, shown when today's intensity was eased due to reported mood")
         }
         // Body-part imbalance: the same focus trained on most of the last
         // 4 logged days -- a real, evidence-based nudge toward variety
         // (recovery and balanced development both benefit from it),
         // not a fabricated observation.
         if let (dominant, count) = recentBodyPartCounts.max(by: { $0.value < $1.value }), count >= 3 {
-            return "You've focused on \(dominant.displayName.lowercased()) \(count) of your last 4 logged sessions. Consider shifting focus tomorrow -- both recovery and balanced progress benefit from rotating which areas you load."
+            let bodyPart = dominant.displayName.lowercased()
+            return String(localized: "recommendationDetail.tomorrowTip.bodyPartImbalance", defaultValue: "You've focused on \(bodyPart) \(count) of your last 4 logged sessions. Consider shifting focus tomorrow -- both recovery and balanced progress benefit from rotating which areas you load.", comment: "Tomorrow's-tip card, shown when one body part dominated recent sessions. First placeholder is the lowercased body-part name (from Models, not translated here), second is a session count.")
         }
         // Goal-aware: cardio-focused goal but no cardio-tagged session in
         // recent history (recentBodyPartCounts has no .cardio entry at all).
         if profile.goals.contains(.cardioEndurance), recentBodyPartCounts[.cardio] == nil {
-            return "Your goals include cardio endurance, but recent sessions haven't included one. If tomorrow's intensity allows, a cardio-focused session would round things out."
+            return String(localized: "recommendationDetail.tomorrowTip.cardioGoalGap", defaultValue: "Your goals include cardio endurance, but recent sessions haven't included one. If tomorrow's intensity allows, a cardio-focused session would round things out.", comment: "Tomorrow's-tip card, shown when the user has a cardio-endurance goal but no recent cardio sessions")
         }
         return recommendation.reason.tomorrowTip
     }
@@ -715,12 +1082,18 @@ struct RecommendationDetailView: View {
     /// looking the title up in `recommendation.category.workoutSuggestions`
     /// -- a gym-photo-generated workout's title/bodyPart aren't in that
     /// fixed list, so a lookup would silently fail for it.
-    private func loadAIPlan() async {
+    /// `forceRegenerate` is 11d's "Regenerate" -- same call, just telling
+    /// the server to skip today's cached plan for this selection and build
+    /// a fresh one. Shares this function (rather than a near-duplicate)
+    /// since both are "get me a plan for the current selection", differing
+    /// only in whether the cache is honored and which loading flag to flip.
+    private func loadAIPlan(forceRegenerate: Bool = false) async {
         guard let selectedTitle, let selectedBodyPart else { return }
 
-        isLoadingAIPlan = true
+        if forceRegenerate { isRegenerating = true } else { isLoadingAIPlan = true }
         aiPlanError = nil
-        defer { isLoadingAIPlan = false }
+        generationLimitMessage = nil
+        defer { if forceRegenerate { isRegenerating = false } else { isLoadingAIPlan = false } }
         let trimmedNotes = preGenerationNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         AnalyticsManager.shared.promptSubmitted()
         do {
@@ -729,7 +1102,8 @@ struct RecommendationDetailView: View {
                 selectedTitle: selectedTitle,
                 selectedBodyPart: selectedBodyPart,
                 notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
-                targetDurationMinutes: selectedDurationRange
+                targetDurationMinutes: selectedDurationRange,
+                forceRegenerate: forceRegenerate
             )
             AnalyticsManager.shared.aiResponseReceived()
             if planStartedAt == nil { planStartedAt = Date() }
@@ -746,14 +1120,16 @@ struct RecommendationDetailView: View {
         } catch SupabaseError.workoutLocked(let message) {
             aiPlanError = message
         } catch SupabaseError.generationLimitReached(let message) {
-            aiPlanError = message
+            // 13a: this specific case gets the amber nudge, not plain red
+            // text -- see generationLimitNudge.
+            generationLimitMessage = message
         } catch SupabaseError.serviceUnavailable {
             // Distinct from the generic case below -- an Anthropic-side
             // failure (rate limit, exhausted credits, bad key), not
             // something a retry can fix. See classifyGenerationError.
             aiPlanError = SupabaseError.serviceUnavailable.errorDescription
         } catch {
-            aiPlanError = "Couldn't generate a plan right now. Try again in a moment."
+            aiPlanError = String(localized: "recommendationDetail.aiPlanError.generic", defaultValue: "Couldn't generate a plan right now. Try again in a moment.", comment: "Fallback error shown when AI workout plan generation fails for an unclassified reason")
         }
     }
 
@@ -765,7 +1141,7 @@ struct RecommendationDetailView: View {
             try await SupabaseClient.shared.confirmAIPlan(date: recommendation.date)
             addedToPlan = true
         } catch {
-            addToPlanError = "Couldn't add to today's plan. Try again."
+            addToPlanError = String(localized: "recommendationDetail.addToPlanError", defaultValue: "Couldn't add to today's plan. Try again.", comment: "Error shown when confirming/adding the AI plan to today's plan fails")
         }
     }
 
@@ -790,7 +1166,8 @@ struct RecommendationDetailView: View {
                 feedback: trimmedFeedback.isEmpty ? nil : trimmedFeedback,
                 planSnapshot: aiPlan,
                 startedAt: planStartedAt,
-                endedAt: planStartedAt != nil ? Date() : nil
+                endedAt: planStartedAt != nil ? Date() : nil,
+                reasonSnapshot: WorkoutReasonResolver.impactNote(source: "ai_plan", dayLoadState: dayLoadState)
             )
             loggedTitlesToday.insert(selectedTitle)
             // The evening reminder exists to nudge an UNlogged workout --
@@ -798,11 +1175,16 @@ struct RecommendationDetailView: View {
             // identifier is day-stamped) pending request rather than
             // nagging someone who already finished.
             NotificationManager.shared.cancelEveningWorkoutReminder(for: recommendation.date)
+            // Streak protection reminder for tomorrow + milestone
+            // celebration if this log just crossed a tier -- best-effort,
+            // fire-and-forget so a slow/failed fetch inside it never
+            // blocks or fails the workout log that already succeeded above.
+            Task { await NotificationManager.shared.handleWorkoutLogged(at: Date()) }
             if !trimmedFeedback.isEmpty {
                 await fetchAddonSuggestions(feedback: trimmedFeedback, title: selectedTitle, bodyPart: selectedBodyPart)
             }
         } catch {
-            aiPlanError = "Couldn't log this workout. Try again."
+            aiPlanError = String(localized: "recommendationDetail.markCompleteError", defaultValue: "Couldn't log this workout. Try again.", comment: "Error shown when logging a completed workout fails")
         }
     }
 
@@ -824,7 +1206,8 @@ struct RecommendationDetailView: View {
     private var goalBlockEyebrow: String? {
         guard Config.enableSportGoals, aiPlan?.goalBlock != nil,
               let activeSportGoal, activeSportGoal.status == .active else { return nil }
-        return "\(activeSportGoal.displayName(in: sportGoalCatalog).uppercased()) · GOAL BLOCK"
+        let goalName = activeSportGoal.displayName(in: sportGoalCatalog).uppercased()
+        return String(localized: "recommendationDetail.goalBlockEyebrow", defaultValue: "\(goalName) · GOAL BLOCK", comment: "Eyebrow label over the AI plan's first block when it's built around an active sport goal, e.g. 'VERTICAL JUMP · GOAL BLOCK'. Placeholder is the goal name, already uppercased.")
     }
 
     private func loadContext() async {
@@ -858,6 +1241,8 @@ struct RecommendationDetailView: View {
         injurySubstitutions = await injurySubstitutionsFetch
         let todaysLogs = await todaysLogsFetch
         loggedTitlesToday = Set(todaysLogs.map(\.title))
+        let todaysCalories = todaysLogs.compactMap(\.caloriesBurned)
+        todaysLoggedCalories = todaysCalories.isEmpty ? nil : todaysCalories.reduce(0, +)
         recentBodyPartCounts = await recentLogsFetch.compactMap { BodyPartFocus(rawValue: $0.bodyPart) }
             .reduce(into: [:]) { counts, bodyPart in counts[bodyPart, default: 0] += 1 }
 
@@ -907,19 +1292,28 @@ struct RecommendationDetailView: View {
     private func injuryCheckinRow(_ state: InjuryRecoveryState) -> some View {
         let tag = InjuryTag(rawValue: state.injuryTag)
         return VStack(alignment: .leading, spacing: 6) {
-            Text("How's your \(tag?.displayName.lowercased() ?? state.injuryTag) feeling today?")
+            Text(String(localized: "recommendationDetail.injuryCheckin.question", defaultValue: "How's your \(tag?.displayName.lowercased() ?? state.injuryTag) feeling today?", comment: "Injury check-in question. Placeholder is the lowercased injury tag display name."))
                 .font(.subheadline)
             HStack(spacing: 10) {
                 ForEach([InjuryCheckinResponse.better, .same, .worse], id: \.self) { response in
-                    Button(response.rawValue.capitalized) {
+                    SomaChip(title: LocalizedStringKey(Self.checkinResponseLabel(response))) {
                         Task { await submitCheckin(tag: state.injuryTag, response: response) }
                     }
-                    .buttonStyle(.bordered)
-                    .font(.caption.bold())
                 }
             }
         }
         .padding(.top, 4)
+    }
+
+    /// `response.rawValue.capitalized` alone would build a plain String at
+    /// the call site (not a literal), which skips catalog lookup entirely --
+    /// hence the explicit per-case localization here.
+    private static func checkinResponseLabel(_ response: InjuryCheckinResponse) -> String {
+        switch response {
+        case .better: String(localized: "recommendationDetail.checkinResponse.better", defaultValue: "Better", comment: "Injury check-in response button: things feel better today")
+        case .same: String(localized: "recommendationDetail.checkinResponse.same", defaultValue: "Same", comment: "Injury check-in response button: things feel the same today")
+        case .worse: String(localized: "recommendationDetail.checkinResponse.worse", defaultValue: "Worse", comment: "Injury check-in response button: things feel worse today")
+        }
     }
 
     private func submitCheckin(tag: String, response: InjuryCheckinResponse) async {
@@ -929,14 +1323,14 @@ struct RecommendationDetailView: View {
             checkedInTagsToday.insert(tag)
             injuryCheckinMessage = result.escalate ? result.escalationMessage : nil
         } catch {
-            injuryCheckinMessage = "Couldn't record that check-in. Try again."
+            injuryCheckinMessage = String(localized: "recommendationDetail.checkinError", defaultValue: "Couldn't record that check-in. Try again.", comment: "Error shown when submitting an injury check-in response fails")
         }
     }
 
     /// Mirrors pregnancyGuidance.ts's PREGNANCY_DISCLAIMER verbatim -- fixed
     /// UI copy, not sourced from the LLM response, so it always renders
     /// regardless of what the model actually returned.
-    static let pregnancyDisclaimer = "This is general guidance only, not medical advice -- please follow your doctor's or midwife's recommendations, especially if you have any pregnancy complications."
+    static let pregnancyDisclaimer = String(localized: "recommendationDetail.pregnancyDisclaimer", defaultValue: "This is general guidance only, not medical advice -- please follow your doctor's or midwife's recommendations, especially if you have any pregnancy complications.", comment: "Fixed safety disclaimer shown when the user's profile indicates pregnancy; mirrors pregnancyGuidance.ts's PREGNANCY_DISCLAIMER verbatim")
 
     private func fetchProfileSafely() async -> UserProfile {
         guard let userId = SupabaseClient.shared.currentUserID else { return .empty }
@@ -974,6 +1368,7 @@ private struct SeededGenerator: RandomNumberGenerator {
             date: "2026-07-21",
             category: .light,
             message: "Take it easier today — a short walk, mobility work, or light yoga (20-30 min) is ideal.",
+            messageDetail: nil,
             reason: .healthkitMedium,
             sleepCapApplied: false,
             injuryCapApplied: false,

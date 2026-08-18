@@ -4,6 +4,7 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
+  developmentLanguage: en
 
 configs:
   Debug: debug
@@ -80,13 +81,26 @@ targets:
         # Bump this before every new archive you upload to App Store
         # Connect -- Apple rejects re-uploading the same build number
         # under the same version, even for internal/bug-fix changes.
-        CFBundleVersion: "17"
+        CFBundleVersion: "29"
         # Declares Soma only uses exempt encryption (standard HTTPS via
         # URLSession -- no bundled/custom crypto) so every future archive
         # skips the "Missing Compliance" App Store Connect dialog
         # entirely, instead of having to answer it by hand each time.
         ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
+        # Explicit language list so the per-app language override in
+        # iOS Settings (Settings -> Soma -> Language) shows all shipped
+        # languages even though only en has UI chrome (LaunchScreen etc).
+        CFBundleLocalizations:
+          - en
+          - es
+          - fr
+          - it
+          - de
+          - ru
+          - ka
+          - hy
+          - sr
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -140,6 +154,8 @@ targets:
         com.apple.developer.healthkit.background-delivery: true
         com.apple.developer.applesignin:
           - Default
+        com.apple.developer.associated-domains:
+          - applinks:www.soma4health.com
     # `configFiles` (not `settings.configs.<name>.xcconfig`, which silently
     # creates a meaningless literal build setting named "xcconfig" instead
     # of attaching the file) is XcodeGen's actual key for wiring a real
@@ -151,9 +167,9 @@ targets:
     # points CODE_SIGN_ENTITLEMENTS at it, but it does NOT register the
     # capabilities on your App ID in the Apple Developer portal -- that
     # still requires opening Signing & Capabilities in Xcode once and
-    # adding HealthKit, Background Modes, and Sign in with Apple via the
-    # "+ Capability" button (with automatic signing on) so Xcode can
-    # provision them for your Team. See SETUP.md.
+    # adding HealthKit, Background Modes, Sign in with Apple, and
+    # Associated Domains via the "+ Capability" button (with automatic
+    # signing on) so Xcode can provision them for your Team. See SETUP.md.
 
   # Unit tests for the pure, non-UI logic that decisions actually hang on --
   # sleep aggregation, metric medians, and the models the Edge Functions

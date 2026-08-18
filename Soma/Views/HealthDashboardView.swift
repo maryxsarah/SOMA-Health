@@ -14,19 +14,25 @@ struct HealthDashboardView: View {
     @State private var profile: UserProfile?
     @State private var recentMoods: [DailyMoodEntry] = []
     @State private var isLoading = true
-    @State private var selectedSection: DashboardSection = .overview
+    @State private var selectedSection: DashboardSection
     @State private var openAccordionTitle: String?
 
-    private enum DashboardSection: String, CaseIterable, Identifiable {
+    /// Lets a caller (e.g. the dock's separate "Activity" quick action) open
+    /// straight into a specific section instead of always landing on Overview.
+    init(initialSection: DashboardSection = .overview) {
+        _selectedSection = State(initialValue: initialSection)
+    }
+
+    enum DashboardSection: String, CaseIterable, Identifiable {
         case overview, sleep, activity, body
 
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .overview: "Overview"
-            case .sleep: "Sleep"
-            case .activity: "Activity"
-            case .body: "Body"
+            case .overview: String(localized: "dashboardSection.overview", defaultValue: "Overview", comment: "Dashboard section chip: overview tab")
+            case .sleep: String(localized: "dashboardSection.sleep", defaultValue: "Sleep", comment: "Dashboard section chip: sleep tab")
+            case .activity: String(localized: "dashboardSection.activity", defaultValue: "Activity", comment: "Dashboard section chip: activity tab")
+            case .body: String(localized: "dashboardSection.body", defaultValue: "Body", comment: "Dashboard section chip: body tab")
             }
         }
     }
@@ -76,17 +82,16 @@ struct HealthDashboardView: View {
                 } label: {
                     Text(section.title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isSelected ? SomaTokens.accent : SomaTokens.ink2)
+                        .foregroundStyle(isSelected ? .white : SomaTokens.ink2)
                         .frame(maxWidth: .infinity)
                         .frame(height: 34)
-                        .background(
-                            RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous)
-                                .fill(isSelected ? SomaTokens.accentSoft : SomaTokens.surface)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SomaTokens.rMD, style: .continuous)
-                                .strokeBorder(isSelected ? SomaTokens.accent : SomaTokens.hairline, lineWidth: isSelected ? 2 : 1)
-                        )
+                        .background {
+                            if isSelected {
+                                Color.clear.glassGel(.blue)
+                            } else {
+                                Color.clear.glassLens()
+                            }
+                        }
                 }
                 .buttonStyle(.plain)
             }
@@ -118,9 +123,9 @@ struct HealthDashboardView: View {
         }
 
         metricRowsCard(rows: [
-            metricRow(family: .sleep, label: "Sleep", unit: "h", format: "%.1f", upIsGood: true) { $0.sleepHours },
-            metricRow(family: .hrv, label: "HRV", unit: "ms", format: "%.0f", upIsGood: true) { $0.hrvMs },
-            metricRow(family: .restingHR, label: "Resting HR", unit: "bpm", format: "%.0f", upIsGood: false) { $0.restingHr },
+            metricRow(family: .sleep, label: "Sleep", unit: HealthMetricFamily.sleep.unit, format: "%.1f", upIsGood: true) { $0.sleepHours },
+            metricRow(family: .hrv, label: "HRV", unit: HealthMetricFamily.hrv.unit, format: "%.0f", upIsGood: true) { $0.hrvMs },
+            metricRow(family: .restingHR, label: "Resting HR", unit: HealthMetricFamily.restingHR.unit, format: "%.0f", upIsGood: false) { $0.restingHr },
         ])
 
         trendCard(title: "Recovery", series: series { $0.recoveryScore ?? $0.readinessScore }, format: "%.0f")
@@ -128,19 +133,27 @@ struct HealthDashboardView: View {
         moodTrendCard
 
         accordionCard(items: [
-            ("Recovery / Readiness", todaysValueText(format: "%.0f", unit: "") { $0.recoveryScore ?? $0.readinessScore }, "A single score blending your heart rate variability, resting heart rate, and sleep from last night -- Whoop calls it Recovery, Oura calls it Readiness. Higher generally means your body is better prepared for a harder effort today."),
-            ("HRV", todaysValueText(format: "%.0f", unit: " ms") { $0.hrvMs }, "The variation in time between heartbeats. Generally, a higher HRV relative to your own baseline suggests your nervous system is well-recovered; a lower one can signal fatigue, stress, or incomplete recovery."),
-            ("Resting HR", todaysValueText(format: "%.0f", unit: " bpm") { $0.restingHr }, "Your heart rate at rest, usually measured overnight. A notably higher-than-usual resting heart rate can be an early sign of accumulated fatigue, illness, or poor sleep."),
-            ("Sleep", todaysValueText(format: "%.1f", unit: " h") { $0.sleepHours }, "Total time asleep. Both duration and consistency matter for recovery -- see the Sleep section for how that time was split between light, deep, and REM sleep."),
+            (String(localized: "overviewAccordion.recovery.title", defaultValue: "Recovery / Readiness", comment: "Accordion item title for the combined recovery/readiness score explainer"),
+             todaysValueText(format: "%.0f", unit: "") { $0.recoveryScore ?? $0.readinessScore },
+             String(localized: "overviewAccordion.recovery.text", defaultValue: "A single score blending your heart rate variability, resting heart rate, and sleep from last night -- Whoop calls it Recovery, Oura calls it Readiness. Higher generally means your body is better prepared for a harder effort today.", comment: "Accordion explainer text for the Recovery/Readiness score")),
+            (String(localized: "overviewAccordion.hrv.title", defaultValue: "HRV", comment: "Accordion item title for heart rate variability (kept as the HRV acronym)"),
+             todaysValueText(format: "%.0f", unit: " \(HealthMetricFamily.hrv.unit)") { $0.hrvMs },
+             String(localized: "overviewAccordion.hrv.text", defaultValue: "The variation in time between heartbeats. Generally, a higher HRV relative to your own baseline suggests your nervous system is well-recovered; a lower one can signal fatigue, stress, or incomplete recovery.", comment: "Accordion explainer text for HRV")),
+            (String(localized: "overviewAccordion.restingHR.title", defaultValue: "Resting HR", comment: "Accordion item title for resting heart rate"),
+             todaysValueText(format: "%.0f", unit: " \(HealthMetricFamily.restingHR.unit)") { $0.restingHr },
+             String(localized: "overviewAccordion.restingHR.text", defaultValue: "Your heart rate at rest, usually measured overnight. A notably higher-than-usual resting heart rate can be an early sign of accumulated fatigue, illness, or poor sleep.", comment: "Accordion explainer text for resting heart rate")),
+            (String(localized: "overviewAccordion.sleep.title", defaultValue: "Sleep", comment: "Accordion item title for total sleep duration"),
+             todaysValueText(format: "%.1f", unit: " \(HealthMetricFamily.sleep.unit)") { $0.sleepHours },
+             String(localized: "overviewAccordion.sleep.text", defaultValue: "Total time asleep. Both duration and consistency matter for recovery -- see the Sleep section for how that time was split between light, deep, and REM sleep.", comment: "Accordion explainer text for total sleep duration")),
         ])
     }
 
     private func overviewHeadline(score: Double, isWhoop: Bool) -> String {
         switch HealthMetricFamily.qualitativeBand(recoveryOrReadiness: score, isWhoopRecovery: isWhoop) {
-        case .high: return "High — a good day to push"
-        case .mediumHigh: return "Medium-High — quality work fits today"
-        case .medium: return "Medium — moderate effort fits"
-        case .low: return "Low — favor recovery today"
+        case .high: return String(localized: "overviewHero.headline.high", defaultValue: "High — a good day to push", comment: "Overview hero headline when recovery/readiness is in the high band")
+        case .mediumHigh: return String(localized: "overviewHero.headline.mediumHigh", defaultValue: "Medium-High — quality work fits today", comment: "Overview hero headline when recovery/readiness is in the medium-high band")
+        case .medium: return String(localized: "overviewHero.headline.medium", defaultValue: "Medium — moderate effort fits", comment: "Overview hero headline when recovery/readiness is in the medium band")
+        case .low: return String(localized: "overviewHero.headline.low", defaultValue: "Low — favor recovery today", comment: "Overview hero headline when recovery/readiness is in the low band")
         }
     }
 
@@ -154,23 +167,25 @@ struct HealthDashboardView: View {
             heroCard(
                 ringValue: min(hours, 8), ringMax: 8, ringText: String(format: "%.1f", hours), ringUnit: "OF 8 H",
                 eyebrow: "LAST NIGHT",
-                headline: hours >= 7 ? "Solid night's sleep" : "Shorter than ideal",
-                context: averageDeltaContext(values: seriesValues { $0.sleepHours }, current: hours, unit: " h", format: "%+.1f")
+                headline: hours >= 7
+                    ? String(localized: "sleepHero.headline.good", defaultValue: "Solid night's sleep", comment: "Sleep hero headline when last night's sleep was 7 hours or more")
+                    : String(localized: "sleepHero.headline.short", defaultValue: "Shorter than ideal", comment: "Sleep hero headline when last night's sleep was under 7 hours"),
+                context: averageDeltaContext(values: seriesValues { $0.sleepHours }, current: hours, unit: " \(HealthMetricFamily.sleep.unit)", format: "%+.1f")
             )
         } else {
             CardView {
-                Text("No sleep recorded last night")
+                Text(String(localized: "sleepSection.noData.title", defaultValue: "No sleep recorded last night", comment: "Sleep section title shown when no sleep data is available for last night"))
                     .font(.body.bold())
-                Text("Wear your device overnight to see sleep here.")
+                Text(String(localized: "sleepSection.noData.subtitle", defaultValue: "Wear your device overnight to see sleep here.", comment: "Sleep section subtitle shown when no sleep data is available for last night"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
 
         metricRowsCard(rows: [
-            metricRow(family: .sleep, label: "Deep", unit: "h", format: "%.1f", upIsGood: true) { $0.sleepDeepHours },
-            metricRow(family: .sleep, label: "REM", unit: "h", format: "%.1f", upIsGood: true) { $0.sleepRemHours },
-            metricRow(family: .sleep, label: "Awake", unit: "h", format: "%.1f", upIsGood: false) { $0.sleepAwakeHours },
+            metricRow(family: .sleep, label: "Deep", unit: HealthMetricFamily.sleep.unit, format: "%.1f", upIsGood: true) { $0.sleepDeepHours },
+            metricRow(family: .sleep, label: "REM", unit: HealthMetricFamily.sleep.unit, format: "%.1f", upIsGood: true) { $0.sleepRemHours },
+            metricRow(family: .sleep, label: "Awake", unit: HealthMetricFamily.sleep.unit, format: "%.1f", upIsGood: false) { $0.sleepAwakeHours },
         ])
 
         let stageEntries = sleepStageEntries
@@ -206,20 +221,26 @@ struct HealthDashboardView: View {
         heroCard(
             ringValue: Double(min(done, target)), ringMax: Double(target), ringText: "\(done)", ringUnit: "OF \(target)",
             eyebrow: "SESSIONS THIS WEEK",
-            headline: done >= target ? "Weekly target hit" : "\(target - done) to go this week",
+            headline: done >= target
+                ? String(localized: "activityHero.headline.hit", defaultValue: "Weekly target hit", comment: "Activity hero headline when the weekly session target is met")
+                : String(localized: "activityHero.headline.remaining", defaultValue: "\(target - done) to go this week", comment: "Activity hero headline showing sessions remaining to hit the weekly target; the number is sessions left"),
             context: nil
         )
 
         metricRowsCard(rows: [
             metricRow(family: .strain, label: "Strain", unit: "", format: "%.1f", upIsGood: false) { $0.strainScore },
-            metricRow(family: .stress, label: "High stress", unit: "min", format: "%.0f", upIsGood: false) { $0.stressScore },
+            metricRow(family: .stress, label: "High stress", unit: HealthMetricFamily.stress.unit, format: "%.0f", upIsGood: false) { $0.stressScore },
         ])
 
         trendCard(title: "Strain", series: series { $0.strainScore }, format: "%.1f")
 
         accordionCard(items: [
-            ("Strain", todaysValueText(format: "%.1f", unit: "") { $0.strainScore }, "How much cardiovascular and muscular load your body has taken on. Whoop scores this 0-21; other sources report the count of harder sessions. Consistently high strain without matching recovery is what today's training caps are designed to catch."),
-            ("Stress", todaysValueText(format: "%.0f", unit: " min") { $0.stressScore }, "Time spent in a high-stress physiological state today, as reported by Oura. This reflects the body's stress response generally, not necessarily how you feel emotionally."),
+            (String(localized: "activityAccordion.strain.title", defaultValue: "Strain", comment: "Accordion item title for training strain"),
+             todaysValueText(format: "%.1f", unit: "") { $0.strainScore },
+             String(localized: "activityAccordion.strain.text", defaultValue: "How much cardiovascular and muscular load your body has taken on. Whoop scores this 0-21; other sources report the count of harder sessions. Consistently high strain without matching recovery is what today's training caps are designed to catch.", comment: "Accordion explainer text for strain")),
+            (String(localized: "activityAccordion.stress.title", defaultValue: "Stress", comment: "Accordion item title for high-stress minutes"),
+             todaysValueText(format: "%.0f", unit: " \(HealthMetricFamily.stress.unit)") { $0.stressScore },
+             String(localized: "activityAccordion.stress.text", defaultValue: "Time spent in a high-stress physiological state today, as reported by Oura. This reflects the body's stress response generally, not necessarily how you feel emotionally.", comment: "Accordion explainer text for stress")),
         ])
     }
 
@@ -231,16 +252,14 @@ struct HealthDashboardView: View {
             CardView {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(String(format: "%.1f", weight))
-                        .font(.system(size: 34, design: .serif).italic())
+                        .font(SomaType.screenTitle)
                     Text("KG")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(SomaTokens.ink4)
                 }
                 if let goal = profile?.desiredWeightKg {
                     let delta = weight - goal
-                    Text(abs(delta) < 0.05
-                        ? "At your goal weight"
-                        : String(format: "%.1f kg %@ your goal of %.1f kg", abs(delta), delta > 0 ? "above" : "below", goal))
+                    Text(weightGoalComparisonText(delta: delta, goal: goal))
                         .font(.system(size: 13))
                         .foregroundStyle(SomaTokens.ink2)
                 }
@@ -252,16 +271,16 @@ struct HealthDashboardView: View {
             if let bmi = BodyMetrics.bmi(weightKg: weight, heightCm: profile?.heightCm) {
                 CardView {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("BMI")
+                        Text(String(localized: "bodySection.bmi.label", defaultValue: "BMI", comment: "Label for the BMI value card in the Body section"))
                             .font(.subheadline.bold())
                         Spacer()
                         Text(String(format: "%.1f", bmi))
-                            .font(.system(size: 22, design: .serif).italic())
+                            .font(SomaType.widgetValue)
                     }
                     Text(BodyMetrics.bmiCategory(bmi))
                         .font(.caption.bold())
                         .foregroundStyle(SomaTokens.ink2)
-                    Text("A general population screening measure, not a fitness or body-composition score -- it doesn't distinguish muscle from fat.")
+                    Text(String(localized: "bodySection.bmi.explainer", defaultValue: "A general population screening measure, not a fitness or body-composition score -- it doesn't distinguish muscle from fat.", comment: "Explainer text under the BMI value clarifying what it does and doesn't measure"))
                         .font(.caption2)
                         .foregroundStyle(SomaTokens.ink4)
                 }
@@ -274,7 +293,7 @@ struct HealthDashboardView: View {
                 goalPace: profile?.goalPace
             ) {
                 CardView {
-                    Text("Progress toward your goal")
+                    Text(String(localized: "bodySection.progress.title", defaultValue: "Progress toward your goal", comment: "Title for the goal progress bar in the Body section"))
                         .font(.subheadline.bold())
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
@@ -286,7 +305,7 @@ struct HealthDashboardView: View {
                     }
                     .frame(height: 10)
                     .clipShape(Capsule())
-                    Text("Day \(journey.daysElapsed) of roughly \(journey.estimatedTotalDays), at your chosen pace.")
+                    Text(String(localized: "bodySection.progress.caption", defaultValue: "Day \(journey.daysElapsed) of roughly \(journey.estimatedTotalDays), at your chosen pace.", comment: "Caption under the goal progress bar; both numbers are day counts"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -302,9 +321,25 @@ struct HealthDashboardView: View {
         }
     }
 
+    /// Above/below are two full sentences, not a word swapped into a shared
+    /// template -- word order and agreement can differ per language.
+    private func weightGoalComparisonText(delta: Double, goal: Double) -> String {
+        let absDelta = abs(delta)
+        guard absDelta >= 0.05 else {
+            return String(localized: "bodySection.weightGoal.atGoal", defaultValue: "At your goal weight", comment: "Shown in the Body section when current weight matches the goal weight")
+        }
+        let absDeltaText = String(format: "%.1f", absDelta)
+        let goalText = String(format: "%.1f", goal)
+        if delta > 0 {
+            return String(localized: "bodySection.weightGoal.above", defaultValue: "\(absDeltaText) kg above your goal of \(goalText) kg", comment: "Shown in the Body section when current weight is above the goal weight; both values are formatted kg amounts")
+        } else {
+            return String(localized: "bodySection.weightGoal.below", defaultValue: "\(absDeltaText) kg below your goal of \(goalText) kg", comment: "Shown in the Body section when current weight is below the goal weight; both values are formatted kg amounts")
+        }
+    }
+
     // MARK: - Shared cards
 
-    private func heroCard(ringValue: Double, ringMax: Double, ringText: String, ringUnit: String, eyebrow: String, headline: String, context: String?) -> some View {
+    private func heroCard(ringValue: Double, ringMax: Double, ringText: String, ringUnit: LocalizedStringKey, eyebrow: LocalizedStringKey, headline: String, context: String?) -> some View {
         CardView {
             HStack(spacing: 18) {
                 ZStack {
@@ -316,7 +351,7 @@ struct HealthDashboardView: View {
                         .rotationEffect(.degrees(-90))
                     VStack(spacing: 0) {
                         Text(ringText)
-                            .font(.system(size: 26, design: .serif).italic())
+                            .font(SomaType.sheetTitle)
                         Text(ringUnit)
                             .font(.system(size: 9, weight: .bold))
                             .tracking(0.5)
@@ -368,7 +403,7 @@ struct HealthDashboardView: View {
             let avg = prior.reduce(0, +) / Double(prior.count)
             let change = avg == 0 ? 0 : (current - avg) / avg * 100
             if abs(change) < 3 {
-                deltaText = "steady"
+                deltaText = String(localized: "steady", defaultValue: "steady", comment: "Metric row delta shown when the value hasn't moved meaningfully vs the prior average")
             } else {
                 deltaText = String(format: "%@ %.0f%%", change > 0 ? "↑" : "↓", abs(change))
                 deltaIsGood = (change > 0) == upIsGood
@@ -378,7 +413,7 @@ struct HealthDashboardView: View {
         return MetricRowModel(
             id: label,
             family: family,
-            row: SomaSparklineRow(label: label, valueText: valueText, series: values, deltaText: deltaText, deltaIsGood: deltaIsGood)
+            row: SomaSparklineRow(label: LocalizedStringKey(label), valueText: valueText, series: values, deltaText: deltaText, deltaIsGood: deltaIsGood)
         )
     }
 
@@ -401,7 +436,7 @@ struct HealthDashboardView: View {
     }
 
     @ViewBuilder
-    private func trendCard(title: String, series values: [(date: String, value: Double)], format: String) -> some View {
+    private func trendCard(title: LocalizedStringKey, series values: [(date: String, value: Double)], format: String) -> some View {
         if values.count > 1 {
             let raw = values.map(\.value)
             let avg = raw.reduce(0, +) / Double(raw.count)
@@ -430,7 +465,7 @@ struct HealthDashboardView: View {
         if recentMoods.count > 1 {
             let values = recentMoods.map { (date: $0.date, value: Double($0.rating)) }
             CardView {
-                Text("How you've been feeling")
+                Text(String(localized: "moodTrend.title", defaultValue: "How you've been feeling", comment: "Title for the mood trend chart card"))
                     .font(.body.bold())
                 AxisLabeledTrendChart(values: values, showAverageLine: true)
                 if let comparison = Self.moodComparisonText(recentMoods) {
@@ -456,12 +491,14 @@ struct HealthDashboardView: View {
         let earlierAvg = Double(earlier.reduce(0) { $0 + $1.rating }) / Double(earlier.count)
         let recentAvg = Double(recent.reduce(0) { $0 + $1.rating }) / Double(recent.count)
         let delta = recentAvg - earlierAvg
+        let recentAvgText = String(format: "%.1f", recentAvg)
+        let earlierAvgText = String(format: "%.1f", earlierAvg)
         if abs(delta) < 0.3 {
-            return "Holding steady around \(String(format: "%.1f", recentAvg))/5 lately."
+            return String(localized: "moodTrend.comparison.steady", defaultValue: "Holding steady around \(recentAvgText)/5 lately.", comment: "Mood trend comparison when the recent average hasn't moved meaningfully; the value is a formatted rating out of 5")
         }
         return delta > 0
-            ? "Averaging \(String(format: "%.1f", recentAvg))/5 lately, up from \(String(format: "%.1f", earlierAvg))/5 earlier."
-            : "Averaging \(String(format: "%.1f", recentAvg))/5 lately, down from \(String(format: "%.1f", earlierAvg))/5 earlier."
+            ? String(localized: "moodTrend.comparison.up", defaultValue: "Averaging \(recentAvgText)/5 lately, up from \(earlierAvgText)/5 earlier.", comment: "Mood trend comparison when the recent average is higher than the earlier average; both values are formatted ratings out of 5")
+            : String(localized: "moodTrend.comparison.down", defaultValue: "Averaging \(recentAvgText)/5 lately, down from \(earlierAvgText)/5 earlier.", comment: "Mood trend comparison when the recent average is lower than the earlier average; both values are formatted ratings out of 5")
     }
 
     /// Guide 08's "What these mean": one open at a time, collapsed rows
@@ -544,7 +581,7 @@ struct HealthDashboardView: View {
 
     private func bestInRangeContext(values: [Double], current: Double) -> String? {
         guard values.count > 2, current >= (values.max() ?? current) else { return nil }
-        return "Best in \(values.count) days"
+        return String(localized: "heroContext.bestInRange", defaultValue: "Best in \(values.count) days", comment: "Hero card badge shown when today's value is the best in the recent range; the number is a count of days")
     }
 
     private func averageDeltaContext(values: [Double], current: Double, unit: String, format: String) -> String? {
@@ -553,7 +590,8 @@ struct HealthDashboardView: View {
         let avg = prior.reduce(0, +) / Double(prior.count)
         let delta = current - avg
         guard delta > 0 else { return nil }
-        return "\(String(format: format, delta))\(unit) vs your average"
+        let deltaText = "\(String(format: format, delta))\(unit)"
+        return String(localized: "heroContext.vsAverage", defaultValue: "\(deltaText) vs your average", comment: "Hero card badge showing today's value relative to the recent average; the value is a formatted number with its unit")
     }
 
     private func load() async {

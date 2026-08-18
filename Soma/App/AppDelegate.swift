@@ -84,6 +84,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                 message: recommendation.message
             )
             NotificationManager.shared.markSentToday()
+            // 16b: same daily affirmation pass BackgroundTaskManager's
+            // fallback runs -- server-cached per (user, date), so whichever
+            // trigger fires first generates and the other is a cheap hit.
+            if BackgroundTaskManager.affirmationFeatureInUse {
+                _ = try? await SupabaseClient.shared.fetchOrGenerateDailyAffirmation(date: Self.todayDateString())
+            }
         } catch {
             // Trigger B (BGAppRefreshTask fallback) will retry later today.
         }

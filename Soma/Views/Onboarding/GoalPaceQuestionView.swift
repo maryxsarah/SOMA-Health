@@ -23,9 +23,9 @@ struct GoalPaceQuestionView: View {
             OnboardingTopBar(progress: progress, onBack: onBack)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("How fast do you want to reach your goal?")
+                Text(String(localized: "goalPace.title", defaultValue: "How fast do you want to reach your goal?", comment: "Headline on the goal pace question step"))
                     .font(Theme.display)
-                Text("Your speed to reach your goal.")
+                Text(String(localized: "goalPace.subtitle", defaultValue: "Your speed to reach your goal.", comment: "Subtitle on the goal pace question step"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -48,15 +48,21 @@ struct GoalPaceQuestionView: View {
 
                 HStack {
                     ForEach(paceOrder) { option in
-                        VStack(spacing: 6) {
-                            Image(systemName: option.systemImageName)
-                                .font(.title2)
-                                .foregroundStyle(pace == option ? Theme.pillFill : Color.secondary)
-                            Text(option.displayName)
-                                .font(.caption.bold())
-                                .foregroundStyle(pace == option ? Theme.pillFill : Color.secondary)
+                        Button {
+                            pace = option
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(systemName: option.systemImageName)
+                                    .font(.title2)
+                                    .foregroundStyle(pace == option ? Theme.pillFill : Color.secondary)
+                                Text(option.displayName)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(pace == option ? Theme.pillFill : Color.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(.plain)
                     }
                 }
 
@@ -80,10 +86,11 @@ struct GoalPaceQuestionView: View {
             }
             .padding(.horizontal, 24)
             .animation(.easeInOut(duration: 0.25), value: pace)
+            .sensoryFeedback(.selection, trigger: pace)
 
             Spacer()
 
-            PillButton(title: "Continue", action: onContinue)
+            PillButton(title: LocalizedStringKey(String(localized: "goalPace.continueButton", defaultValue: "Continue", comment: "Continue button on the goal pace question step")), action: onContinue)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
         }
@@ -95,14 +102,21 @@ struct GoalPaceQuestionView: View {
     }
 
     private var estimateHeadline: String {
-        "You should reach your goal in \(estimatedMonths) month\(estimatedMonths == 1 ? "" : "s")"
+        String(
+            localized: "onboarding.estimatedMonths",
+            defaultValue: "You should reach your goal in \(estimatedMonths) months",
+            comment: "Estimated time to reach the user's goal, pluralized by month count"
+        )
     }
 
     private var estimateDescription: String {
         switch pace {
-        case .slow: "Going slow means a gentler, more sustainable daily plan."
-        case .recommended: "A balanced pace that fits steady, lasting progress."
-        case .fast: "A faster pace means a more demanding daily plan."
+        case .slow:
+            String(localized: "goalPace.slow.description", defaultValue: "Going slow means a gentler, more sustainable daily plan.")
+        case .recommended:
+            String(localized: "goalPace.recommended.description", defaultValue: "A balanced pace that fits steady, lasting progress.")
+        case .fast:
+            String(localized: "goalPace.fast.description", defaultValue: "A faster pace means a more demanding daily plan.")
         }
     }
 }

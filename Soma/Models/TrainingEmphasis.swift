@@ -14,10 +14,10 @@ enum TrainingEmphasis: String, Codable {
     /// always as a description of what today's PLAN is doing for them.
     var planDirectionSentence: String {
         switch self {
-        case .cut: "Right now, your plan is focused on leaning out."
-        case .bulk: "Right now, your plan is focused on building size."
-        case .recomp: "Right now, your plan is focused on building strength while leaning out."
-        case .maintain: "Right now, your plan is focused on maintaining where you are."
+        case .cut: return String(localized: "trainingEmphasis.cut", defaultValue: "Right now, your plan is focused on leaning out.", comment: "Encouraging sentence describing the current plan's training emphasis, shown on the Progress screen")
+        case .bulk: return String(localized: "trainingEmphasis.bulk", defaultValue: "Right now, your plan is focused on building size.", comment: "Encouraging sentence describing the current plan's training emphasis, shown on the Progress screen")
+        case .recomp: return String(localized: "trainingEmphasis.recomp", defaultValue: "Right now, your plan is focused on building strength while leaning out.", comment: "Encouraging sentence describing the current plan's training emphasis, shown on the Progress screen")
+        case .maintain: return String(localized: "trainingEmphasis.maintain", defaultValue: "Right now, your plan is focused on maintaining where you are.", comment: "Encouraging sentence describing the current plan's training emphasis, shown on the Progress screen")
         }
     }
 }

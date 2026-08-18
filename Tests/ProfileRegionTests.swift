@@ -8,7 +8,7 @@ final class ProfileRegionTests: XCTestCase {
     func testDecodesRegionFieldsWhenPresent() throws {
         let profile = try JSONDecoder().decode(UserProfile.self, from: Data("""
         {"goals": [], "equipment": [], "household_equipment": [], "injury_tags": [], "injury_severity": {},
-         "injury_type": {}, "injury_pain_level": {}, "anchor_session_days": [], "country": "US", "city": "Austin"}
+         "injury_type": {}, "injury_pain_level": {}, "anchor_sessions": [], "country": "US", "city": "Austin"}
         """.utf8))
         XCTAssertEqual(profile.country, "US")
         XCTAssertEqual(profile.city, "Austin")
@@ -17,7 +17,7 @@ final class ProfileRegionTests: XCTestCase {
     func testRegionFieldsAbsentDecodeAsNil() throws {
         let profile = try JSONDecoder().decode(UserProfile.self, from: Data("""
         {"goals": [], "equipment": [], "household_equipment": [], "injury_tags": [], "injury_severity": {},
-         "injury_type": {}, "injury_pain_level": {}, "anchor_session_days": []}
+         "injury_type": {}, "injury_pain_level": {}, "anchor_sessions": []}
         """.utf8))
         XCTAssertNil(profile.country)
         XCTAssertNil(profile.city)

@@ -29,10 +29,10 @@ struct GenerationProgressView: View {
     /// Default stage list for the AI-generated-workout flow. Other flows
     /// (e.g. gym-photo) pass their own via the `stages:` initializer.
     static let workoutPlanStages = [
-        "Reading your health data…",
-        "Matching exercises…",
-        "Sequencing your workout…",
-        "Finishing touches…",
+        String(localized: "generationProgress.workoutPlanStages.stage1", defaultValue: "Reading your health data…", comment: "Loading stage while Soma reads the user's health data to build an AI workout plan"),
+        String(localized: "generationProgress.workoutPlanStages.stage2", defaultValue: "Matching exercises…", comment: "Loading stage while Soma matches exercises to the user's profile and equipment for an AI workout plan"),
+        String(localized: "generationProgress.workoutPlanStages.stage3", defaultValue: "Sequencing your workout…", comment: "Loading stage while Soma orders/sequences the exercises into the AI workout plan"),
+        String(localized: "generationProgress.workoutPlanStages.stage4", defaultValue: "Finishing touches…", comment: "Final loading stage while Soma finishes building the AI workout plan"),
     ]
 
     init(stages: [String] = GenerationProgressView.workoutPlanStages, estimatedSeconds: Double = 6) {
@@ -45,8 +45,29 @@ struct GenerationProgressView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ProgressView(value: progress, total: 1.0)
-                .tint(Theme.pillFill)
+            // 13b: a 5pt capsule bar -- soft accent track, light-to-deep
+            // accent gradient fill -- not the system ProgressView.
+            GeometryReader { geo in
+                Capsule()
+                    .fill(SomaTokens.accent.opacity(0.12))
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0x4A / 255, green: 0x75 / 255, blue: 0xF2 / 255),
+                                        SomaTokens.accent
+                                    ],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            )
+                            .frame(width: geo.size.width * progress)
+                    }
+            }
+            .frame(height: 5)
+            .accessibilityElement()
+            .accessibilityLabel(stages[stageIndex])
+            .accessibilityValue("\(Int(progress * 100))%")
             HStack {
                 Text(stages[stageIndex])
                     .contentTransition(.opacity)
@@ -56,7 +77,7 @@ struct GenerationProgressView: View {
                     .monospacedDigit()
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SomaTokens.ink3)
         }
         .onAppear { advance() }
     }

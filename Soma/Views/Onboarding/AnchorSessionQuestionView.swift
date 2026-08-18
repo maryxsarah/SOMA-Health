@@ -22,10 +22,10 @@ struct AnchorSessionQuestionView: View {
             OnboardingTopBar(progress: progress, onBack: onBack)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Do you have a weekly class or activity to plan around?")
+                Text(String(localized: "anchorSessionQuestion.title", defaultValue: "Do you have a weekly class or activity to plan around?", comment: "Onboarding anchor-session question screen title"))
                     .font(Theme.display)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Optional -- e.g. a Tuesday hot yoga class or a Saturday tennis league. We'll build the rest of your week so you're not gassed going in, or wiped out after.")
+                Text(String(localized: "anchorSessionQuestion.subtitle", defaultValue: "Optional -- e.g. a Tuesday hot yoga class or a Saturday tennis league. We'll build the rest of your week so you're not gassed going in, or wiped out after.", comment: "Onboarding anchor-session question screen subtitle/explainer"))
                     .font(.body)
                     .foregroundStyle(.secondary)
             }
@@ -34,11 +34,13 @@ struct AnchorSessionQuestionView: View {
             .padding(.top, 24)
 
             VStack(alignment: .leading, spacing: 20) {
-                TextField("e.g. \"Hot Yoga\", \"Tennis league\"", text: $name)
-                    .textFieldStyle(.roundedBorder)
+                TextField(String(localized: "anchorSessionQuestion.namePlaceholder", defaultValue: "e.g. \"Hot Yoga\", \"Tennis league\"", comment: "Placeholder for the anchor-session name text field"), text: $name)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .glassCardFlat(cornerRadius: SomaTokens.rXL)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Which day(s) is it usually on?")
+                    Text(String(localized: "anchorSessionQuestion.daysLabel", defaultValue: "Which day(s) is it usually on?", comment: "Label above the weekday picker for the anchor session"))
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.secondary)
                     WeekdayMiniPicker(selected: $days)

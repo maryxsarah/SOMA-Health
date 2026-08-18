@@ -77,11 +77,11 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
         case .notHandled, .unknown:
             // Overwhelmingly this means no Apple ID is signed in on the
             // device, so name that rather than making the user guess.
-            return "Couldn't sign in with Apple. Check that you're signed in to an Apple ID in Settings, then try again."
+            return String(localized: "signIn.apple.error.noAppleID", defaultValue: "Couldn't sign in with Apple. Check that you're signed in to an Apple ID in Settings, then try again.", comment: "Sign in with Apple error shown when no Apple ID appears to be signed in on the device")
         case .invalidResponse, .failed:
-            return "Apple couldn't complete the sign-in. Please try again in a moment."
+            return String(localized: "signIn.apple.error.failed", defaultValue: "Apple couldn't complete the sign-in. Please try again in a moment.", comment: "Sign in with Apple error shown when Apple's own sign-in flow failed or returned an invalid response")
         default:
-            return "Couldn't sign in with Apple. Please try again."
+            return String(localized: "signIn.apple.error.generic", defaultValue: "Couldn't sign in with Apple. Please try again.", comment: "Sign in with Apple error shown for any other authorization failure")
         }
     }
 
@@ -155,19 +155,19 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
             return nil
         }
         guard case SupabaseError.requestFailed(_, let message) = error else {
-            return "Something went wrong. Please try again."
+            return String(localized: "signIn.generic.error.somethingWrong", defaultValue: "Something went wrong. Please try again.", comment: "Generic sign-in/sign-up error shown when the underlying error isn't a recognized Supabase request failure")
         }
         print("[Auth] \(message)")
         if message.contains("already registered") || message.contains("already exists") {
-            return "An account with that email already exists -- try logging in instead."
+            return String(localized: "signIn.generic.error.accountExists", defaultValue: "An account with that email already exists -- try logging in instead.", comment: "Sign-up error shown when the email is already registered")
         }
         if message.contains("Invalid login credentials") {
-            return "That email or password isn't right. Try again."
+            return String(localized: "signIn.generic.error.invalidCredentials", defaultValue: "That email or password isn't right. Try again.", comment: "Sign-in error shown when the email/password combination is wrong")
         }
         if message.contains("Password") {
-            return "That password doesn't meet the requirements -- try a longer one."
+            return String(localized: "signIn.generic.error.passwordRequirements", defaultValue: "That password doesn't meet the requirements -- try a longer one.", comment: "Sign-up error shown when the password fails Supabase's own validation")
         }
-        return "Couldn't complete that. Please try again."
+        return String(localized: "signIn.generic.error.fallback", defaultValue: "Couldn't complete that. Please try again.", comment: "Fallback sign-in/sign-up error for any other recognized Supabase request failure")
     }
 
     /// Aliases the anonymous on-device Superwall ID to Soma's real user id

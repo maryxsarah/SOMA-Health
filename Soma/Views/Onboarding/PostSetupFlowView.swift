@@ -20,11 +20,29 @@ private enum PostSetupStep: Int {
 struct PostSetupFlowView: View {
     @EnvironmentObject private var appState: AppState
 
-    @State private var step: PostSetupStep = .referralCode
+    @State private var step: PostSetupStep = {
+        // Fixture shortcut for the onboarding-paywall matrix -- see
+        // UITestSupport.postSetupStartStep. Always .referralCode in
+        // Release (the accessor is nil there).
+        if UITestSupport.postSetupStartStep == "paywall" { return .paywall }
+        return .referralCode
+    }()
     /// Fails closed (false) until the profile fetch below actually confirms
     /// an 18+ date_of_birth -- an in-flight fetch or a fetch failure must
     /// never show the photo-comparison step to an unconfirmed user.
     @State private var isConfirmedAdultForBodyPhotos = false
+    /// Set only on `PaywallPresentationHandler.onError` -- a real
+    /// presentation failure (no network, webview failed to load), not a
+    /// skip. The SDK deliberately never calls `feature` in this case ("otherwise
+    /// turning internet off would give unlimited access" -- its own comment),
+    /// so without this the user was stuck on a blank `Color.clear` forever
+    /// with no way forward. `.skipped` (no audience match, holdout, etc.)
+    /// already calls `feature` on its own and needs no handling here.
+    @State private var paywallError: String?
+    /// Guards presentOnboardingPaywall() against a double-registration
+    /// race during the entitlement/bonus-sync await window (a double-tap
+    /// on "Try again", or this screen's own .task re-firing).
+    @State private var isPresentingPaywall = false
 
     var body: some View {
         Group {
@@ -61,9 +79,15 @@ struct PostSetupFlowView: View {
                 // this placement must be configured non-dismissible (no
                 // close button) in the Superwall dashboard paywall editor
                 // -- that's what used to be `allowsDismissal: false`.
-                Color.clear
-                    .somaBackground()
-                    .task { presentOnboardingPaywall() }
+                Group {
+                    if let paywallError {
+                        paywallErrorContent(paywallError)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .somaBackground()
+                .task { presentOnboardingPaywall() }
             }
         }
         .transition(.opacity)
@@ -117,16 +141,65 @@ struct PostSetupFlowView: View {
     /// paywall's feature closure runs (a purchase, a restore, or -- if the
     /// dashboard paywall is ever set to Non Gated -- any dismissal).
     private func presentOnboardingPaywall() {
+        // Guards two things at once: (1) a double-tap on the error
+        // screen's "Try again" during the entitlement-sync await below
+        // used to start a second concurrent registration -- now a no-op;
+        // (2) this view's own .task re-firing needs the same guard for
+        // the same reason.
+        guard !isPresentingPaywall else { return }
+        isPresentingPaywall = true
+        Task { await presentOnboardingPaywallAfterEntitlementSync() }
+    }
+
+    /// Superwall PERSISTS subscriptionStatus across launches, and our
+    /// mirror lands asynchronously at startup -- registering the paywall
+    /// against a stale persisted status (e.g. a previous account's active
+    /// entitlement on this device) silently skips the audience and eats
+    /// the paywall. Await a fresh entitlement read first, then register.
+    /// Also re-checks the referral bonus itself (not just entitlement):
+    /// the flow's own top-level .task already refreshes it once, but
+    /// nothing enforces that finishing before this step is reached (the
+    /// UITEST_POSTSETUP=paywall shortcut lands here immediately, and nothing
+    /// stops a future entry point from doing the same) -- awaiting it here
+    /// too makes the bonus check correct regardless of arrival order.
+    @MainActor
+    private func presentOnboardingPaywallAfterEntitlementSync() async {
+        defer { isPresentingPaywall = false }
+        await appState.refreshReferralBonus()
         if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
             appState.markOnboardingComplete()
             return
         }
-        Superwall.shared.register(
-            placement: "onboarding_paywall",
-            handler: SuperwallDiagnostics.handler(placement: "onboarding_paywall")
-        ) {
+        await SubscriptionManager.shared.refreshEntitlement()
+        paywallError = nil
+        // Diagnostics handler (onSkip logging/analytics) + this screen's
+        // own retry UI. onError REPLACES the diagnostics one (the handler
+        // stores a single block), so re-report the failure to analytics
+        // here alongside setting the visible error state. No win-back
+        // onDismiss here on purpose -- onboarding_paywall is not a
+        // dismissible-decline placement (see WinBackOfferManager).
+        let handler = SuperwallDiagnostics.handler(placement: "onboarding_paywall")
+        handler.onError { error in
+            AnalyticsManager.shared.paywallPresentationFailed(placement: "onboarding_paywall", error: error)
+            paywallError = String(localized: "postSetup.paywall.error", defaultValue: "Couldn't load the checkout screen. Check your connection and try again.", comment: "Shown when Superwall's onboarding paywall fails to present, with a retry button below it")
+        }
+        Superwall.shared.register(placement: "onboarding_paywall", handler: handler) {
             appState.markOnboardingComplete()
         }
+    }
+
+    private func paywallErrorContent(_ message: String) -> some View {
+        VStack(spacing: 16) {
+            Text(message)
+                .font(.body)
+                .foregroundStyle(SomaTokens.ink2)
+                .multilineTextAlignment(.center)
+            SomaButton(title: LocalizedStringKey(String(localized: "postSetup.paywall.retry", defaultValue: "Try again", comment: "Button that retries loading the failed onboarding paywall")), size: .lg, variant: .primary) {
+                presentOnboardingPaywall()
+            }
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func saveConsent(marketingOptIn: Bool) async {

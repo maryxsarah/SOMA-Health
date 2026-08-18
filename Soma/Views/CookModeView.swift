@@ -67,7 +67,7 @@ struct CookModeView: View {
 
     private var progressBar: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Step \(index + 1) of \(steps.count)")
+            Text(String(localized: "cookMode.progress.stepLabel", defaultValue: "Step \(index + 1) of \(steps.count)", comment: "Step progress indicator in cook mode, e.g. 'Step 2 of 5'"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(SomaTokens.ink3)
                 .padding(.top, 18)
@@ -101,7 +101,10 @@ struct CookModeView: View {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { index -= 1 }
                 }
             }
-            SomaButton(title: isLastStep ? "Done cooking" : "Next step", size: .lg, variant: .primary) {
+            let nextButtonTitle = LocalizedStringKey(isLastStep
+                ? String(localized: "cookMode.controls.doneCooking", defaultValue: "Done cooking", comment: "Button on the last cook mode step to finish cooking")
+                : String(localized: "cookMode.controls.nextStep", defaultValue: "Next step", comment: "Button to advance to the next cook mode step"))
+            SomaButton(title: nextButtonTitle, size: .lg, variant: .primary) {
                 if isLastStep {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     onFinish()

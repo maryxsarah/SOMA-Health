@@ -15,20 +15,22 @@ enum UpcomingSessions {
         case .weekdays:
             let days = Set(scheduleDays ?? [])
             guard !days.isEmpty, let dates = nextMatchingDates(matching: days, count: count, from: start) else {
-                return .qualitative("Whenever readiness allows")
+                return .qualitative(Self.wheneverReadinessAllows)
             }
             return .dates(dates)
         case .beforeCourtDays:
             let courtSet = Set(courtDays ?? [])
             let matchDays = Set((0...6).filter { courtSet.contains(($0 + 1) % 7) })
             guard !matchDays.isEmpty, let dates = nextMatchingDates(matching: matchDays, count: count, from: start) else {
-                return .qualitative("Whenever readiness allows")
+                return .qualitative(Self.wheneverReadinessAllows)
             }
             return .dates(dates)
         case .everyOtherDay:
-            return .qualitative("Every other day")
+            return .qualitative(
+                String(localized: "upcomingSessions.everyOtherDay", defaultValue: "Every other day", comment: "Fallback qualitative schedule description shown when no forward dates can be computed")
+            )
         case .readiness, .unknown, nil:
-            return .qualitative("Whenever readiness allows")
+            return .qualitative(Self.wheneverReadinessAllows)
         }
     }
 
@@ -45,5 +47,9 @@ enum UpcomingSessions {
             offset += 1
         }
         return results.isEmpty ? nil : results
+    }
+
+    private static var wheneverReadinessAllows: String {
+        String(localized: "upcomingSessions.wheneverReadinessAllows", defaultValue: "Whenever readiness allows", comment: "Fallback qualitative schedule description shown when no forward dates can be computed")
     }
 }

@@ -17,7 +17,21 @@ extension Sex: SurveyOption {}
 extension WorkoutFrequency: SurveyOption {}
 extension ReferralSource: SurveyOption {}
 extension DietType: SurveyOption {
-    var systemImageName: String { "leaf.fill" }
+    var systemImageName: String {
+        switch self {
+        case .balanced: "scalemass.fill"
+        case .wholeFood: "carrot.fill"
+        case .mediterranean: "sun.max.fill"
+        case .pescatarian: "fish.fill"
+        case .flexitarian: "arrow.left.arrow.right"
+        case .vegetarian: "leaf.fill"
+        case .vegan: "tree.fill"
+        case .lowCarb: "circle.slash"
+        case .keto: "drop.fill"
+        case .paleo: "flame.fill"
+        case .noDiet: "fork.knife"
+        }
+    }
 }
 extension AccomplishmentGoal: SurveyOption {}
 extension BlockerTag: SurveyOption {}

@@ -13,6 +13,15 @@ final class SupabaseClient {
     // for a fixture-serving stub (nil outside `--ui-test-fixtures` runs).
     private let urlSession = UITestSupport.stubbedSession ?? URLSession.shared
 
+    /// Fires when `refreshSession()` gets a definitive rejection (the
+    /// refresh token itself is dead -- expired, revoked, or the account
+    /// was deleted) rather than a transient network failure. `AppState`
+    /// wires this to `signOut()` so a dead session bounces the user to
+    /// sign-in once, globally, instead of every screen independently
+    /// showing its own "check your connection" for what's actually an
+    /// unrecoverable auth state.
+    var onSessionExpired: (() -> Void)?
+
     private init() {}
 
     // MARK: - Session state
@@ -44,7 +53,7 @@ final class SupabaseClient {
         ])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         let auth = try JSONDecoder().decode(AuthResponse.self, from: data)
         let session = StoredSession(
@@ -90,7 +99,7 @@ final class SupabaseClient {
         ])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         let auth = try JSONDecoder().decode(AuthResponse.self, from: data)
         keychain.save(StoredSession(
@@ -126,7 +135,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["email": email, "password": password])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         guard let auth = try? JSONDecoder().decode(AuthResponse.self, from: data) else {
             return false
@@ -152,7 +161,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["email": email, "password": password])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         let auth = try JSONDecoder().decode(AuthResponse.self, from: data)
         keychain.save(StoredSession(
@@ -233,7 +242,39 @@ final class SupabaseClient {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
+    private let refreshLock = NSLock()
+    private var inFlightRefresh: Task<Void, Error>?
+
+    /// Single-flights concurrent refreshes -- Supabase rotates the refresh
+    /// token on every use, so if two callers both read the same (still
+    /// valid) token and race their own POSTs, only the first succeeds; the
+    /// second gets a definitive 400/401 on an already-consumed token and
+    /// would otherwise fire `onSessionExpired` and sign out a user whose
+    /// session is actually fine. Concurrent callers instead await the one
+    /// in-flight request's result.
     private func refreshSession() async throws {
+        refreshLock.lock()
+        if let inFlight = inFlightRefresh {
+            refreshLock.unlock()
+            return try await inFlight.value
+        }
+        let task = Task { try await self.performRefreshSession() }
+        inFlightRefresh = task
+        refreshLock.unlock()
+
+        defer {
+            refreshLock.lock()
+            inFlightRefresh = nil
+            refreshLock.unlock()
+        }
+        try await task.value
+    }
+
+    private func performRefreshSession() async throws {
+        try await performRefreshSession(allowRetry: true)
+    }
+
+    private func performRefreshSession(allowRetry: Bool) async throws {
         guard let current = keychain.load() else {
             throw SupabaseError.notSignedIn
         }
@@ -249,7 +290,49 @@ final class SupabaseClient {
         ])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        do {
+            // reactToUnauthorized: false -- this call already has its own
+            // definitive 400/401 handling right below; the generic hook
+            // (handleLiveUnauthorized) would otherwise kick off a second,
+            // redundant refresh attempt on top of the one already failing.
+            try assertSuccess(response, data: data, reactToUnauthorized: false)
+        } catch SupabaseError.requestFailed(let status, let message) where status == 400 || status == 401 {
+            // Supabase's own rejection of the refresh token, not a dropped
+            // connection -- a URLError (timeout, offline) skips this catch
+            // entirely and surfaces to the caller as-is, retryable next
+            // time.
+            //
+            // One deliberate second chance before the nuclear sign-out:
+            // tokens rotate on every exchange and the rotated one is saved
+            // only AFTER the network call, so a kill in that window (or a
+            // racing parallel refresh) leaves a just-consumed token on
+            // disk -- and Supabase's reuse interval (~10s) means an
+            // immediate retry with it can legitimately succeed. Prod
+            // incident 2026-08-15: a single such 400 signed the tester
+            // out; they re-registered via email and their Apple-account
+            // data "disappeared". A second definitive rejection is a real
+            // dead session. Hopped onto the main actor explicitly --
+            // `onSessionExpired` (AppState.signOut) is @MainActor.
+            if allowRetry {
+                // Not `try?` -- a cancelled Task.sleep must unwind here,
+                // not fall through into a second network request and a
+                // possible wrongful sign-out on behalf of a caller that no
+                // longer exists.
+                try await Task.sleep(for: .seconds(1))
+                // Compare the token itself, not just "is someone signed
+                // in": keychain.load() != nil alone can't tell this
+                // account's dead session apart from a DIFFERENT account
+                // the user signed into during the 1s wait, which would
+                // otherwise retry (and possibly sign out) the wrong one.
+                if keychain.load()?.refreshToken == current.refreshToken {
+                    try await performRefreshSession(allowRetry: false)
+                    return
+                }
+            }
+            let expired = onSessionExpired
+            Task { @MainActor in expired?() }
+            throw SupabaseError.requestFailed(status: status, message: message)
+        }
 
         let auth = try JSONDecoder().decode(AuthResponse.self, from: data)
         keychain.save(StoredSession(
@@ -302,7 +385,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// One-time batch write at the end of the onboarding survey. Only
@@ -346,10 +429,17 @@ final class SupabaseClient {
         // saved (there's nothing to name the day against); a name with no
         // day is still saved as context even though it can't drive
         // scheduling yet, same "save what we have" rule as blockersNotes.
+        // Onboarding's own question view only ever collects one anchor
+        // (item 6 kept it a single-anchor form -- it's a linear wizard,
+        // not list-management UI); ProfileView's dedicated screen is where
+        // a user adds more, up to 5.
         let trimmedAnchorName = answers.anchorSessionName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedAnchorName.isEmpty {
-            body["anchor_session_name"] = trimmedAnchorName
-            if !answers.anchorSessionDays.isEmpty { body["anchor_session_days"] = Array(answers.anchorSessionDays).sorted() }
+            body["anchor_sessions"] = [[
+                "id": UUID().uuidString,
+                "name": trimmedAnchorName,
+                "days": Array(answers.anchorSessionDays).sorted(),
+            ]]
         }
         body["marketing_opt_in"] = answers.marketingOptIn
 
@@ -358,7 +448,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Plain read via RLS -- used by ProfileView on appear.
@@ -368,10 +458,10 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,household_equipment,other_household_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_session_name,anchor_session_days,last_period_start_date,typical_cycle_length_days&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,household_equipment,other_household_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_sessions,last_period_start_date,typical_cycle_length_days&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([UserProfile].self, from: data)
         return rows.first ?? .empty
     }
@@ -415,20 +505,21 @@ final class SupabaseClient {
         // UserProfile.dateOfBirth's doc comment for why this needed to
         // stop being read-only.
         body["date_of_birth"] = profile.dateOfBirth ?? NSNull()
-        // Name is the primary signal here too, same "save what we have"
-        // rule as saveOnboardingSurvey -- clearing the name also clears
-        // the days, rather than leaving orphaned days with no name to
-        // anchor them to.
-        let trimmedAnchorName = profile.anchorSessionName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        body["anchor_session_name"] = trimmedAnchorName.isEmpty ? NSNull() : trimmedAnchorName
-        body["anchor_session_days"] = trimmedAnchorName.isEmpty ? [] : profile.anchorSessionDays
+        // Item 6 fix: a list, up to 5 -- ProfileView's list editor already
+        // enforces the name/day validation and the 5-item cap client-side,
+        // so this just round-trips whatever it hands back.
+        body["anchor_sessions"] = profile.anchorSessions.map { anchor -> [String: Any] in
+            var entry: [String: Any] = ["id": anchor.id, "name": anchor.name, "days": anchor.days]
+            if let timeOfDay = anchor.timeOfDay { entry["timeOfDay"] = timeOfDay }
+            return entry
+        }
 
         var request = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Calls the report-injury Edge Function -- the sole writer of
@@ -452,7 +543,7 @@ final class SupabaseClient {
             "injuryPainLevel": painLevelBody,
         ])
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Every body-part redirect currently active for the caller's noted
@@ -463,7 +554,7 @@ final class SupabaseClient {
     func fetchInjurySubstitutions() async throws -> [String: String] {
         let request = try await authorizedRequest(path: "functions/v1/resolve-injury-substitutions", method: "POST")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         struct Response: Decodable { let substitutions: [String: String] }
         return try JSONDecoder().decode(Response.self, from: data).substitutions
     }
@@ -474,7 +565,7 @@ final class SupabaseClient {
         let path = "rest/v1/injury_recovery_state?status=in.(active,recovering)&select=injury_tag,severity,status,consecutive_good_days,consecutive_bad_days,last_checkin_date"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([InjuryRecoveryState].self, from: data)
     }
 
@@ -493,7 +584,7 @@ final class SupabaseClient {
         if let painLevel { body["painLevel"] = painLevel }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, httpResponse) = try await urlSession.data(for: request)
-        try Self.assertSuccess(httpResponse, data: data)
+        try assertSuccess(httpResponse, data: data)
         return try JSONDecoder().decode(InjuryCheckinResult.self, from: data)
     }
 
@@ -503,7 +594,7 @@ final class SupabaseClient {
         let path = "rest/v1/users?id=eq.\(id)&select=referral_bonus_until&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Row: Decodable {
             let referral_bonus_until: String?
@@ -513,6 +604,23 @@ final class SupabaseClient {
         return Self.parsePostgRESTDate(iso)
     }
 
+    /// The caller's personal share code -- fetch-or-create via the
+    /// get-referral-code Edge Function ("show + share" scope; no owner
+    /// reward is granted automatically yet).
+    struct MyReferralCode: Decodable {
+        let code: String
+        let bonusDays: Int
+        let redemptionCount: Int
+    }
+
+    func fetchMyReferralCode() async throws -> MyReferralCode {
+        var request = try await authorizedRequest(path: "functions/v1/get-referral-code", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [:])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode(MyReferralCode.self, from: data)
+    }
+
     /// Calls the redeem-referral-code Edge Function; returns the new
     /// referral_bonus_until on success.
     func redeemReferralCode(_ code: String) async throws -> Date {
@@ -520,7 +628,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["code": code])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Response: Decodable {
             let referral_bonus_until: String
@@ -538,7 +646,7 @@ final class SupabaseClient {
         let path = "rest/v1/users?id=eq.\(id)&select=exit_offer_shown_at&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Row: Decodable {
             let exit_offer_shown_at: String?
@@ -561,7 +669,7 @@ final class SupabaseClient {
             "exit_offer_shown_at": ISO8601DateFormatter().string(from: Date()),
         ])
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Calls the sign-promotional-offer Edge Function; returns a compact
@@ -582,7 +690,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Response: Decodable { let compactJWS: String }
         return try JSONDecoder().decode(Response.self, from: data).compactJWS
@@ -627,14 +735,14 @@ final class SupabaseClient {
         request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
         request.httpBody = imageData
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         let column = kind == .goal ? "goal_body_photo_path" : "current_body_photo_path"
         var upsertRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         upsertRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
         upsertRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, column: path])
         let (d2, r2) = try await urlSession.data(for: upsertRequest)
-        try Self.assertSuccess(r2, data: d2)
+        try assertSuccess(r2, data: d2)
 
         var historyRequest = try await authorizedRequest(path: "rest/v1/body_photo", method: "POST")
         historyRequest.setValue("return=minimal", forHTTPHeaderField: "Prefer")
@@ -642,7 +750,7 @@ final class SupabaseClient {
             "user_id": userId, "kind": kind == .goal ? "goal" : "current", "storage_path": path,
         ])
         let (d3, r3) = try await urlSession.data(for: historyRequest)
-        try Self.assertSuccess(r3, data: d3)
+        try assertSuccess(r3, data: d3)
     }
 
     /// Full upload history for one kind, newest first -- feeds the Profile
@@ -652,7 +760,7 @@ final class SupabaseClient {
         let path = "rest/v1/body_photo?kind=eq.\(dbKind)&select=id,kind,storage_path,taken_at&order=taken_at.desc"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([BodyPhotoEntry].self, from: data)
     }
 
@@ -665,7 +773,7 @@ final class SupabaseClient {
         var request = try await authorizedRequest(path: "functions/v1/analyze-body-photo", method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: [String: Any]())
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// The bucket is private, so viewing a stored photo needs a short-lived
@@ -674,7 +782,7 @@ final class SupabaseClient {
         var request = try await authorizedRequest(path: "storage/v1/object/sign/body-photos/\(path)", method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["expiresIn": expiresInSeconds])
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         struct Response: Decodable { let signedURL: String }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         guard let url = URL(string: "\(Config.supabaseURL.absoluteString)/storage/v1\(decoded.signedURL)") else {
@@ -698,7 +806,7 @@ final class SupabaseClient {
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         let dbKind = kind == .goal ? "goal" : "current"
         let encodedPath = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
@@ -707,7 +815,7 @@ final class SupabaseClient {
             method: "DELETE"
         )
         let (dRow, rRow) = try await urlSession.data(for: deleteRowRequest)
-        try Self.assertSuccess(rRow, data: dRow)
+        try assertSuccess(rRow, data: dRow)
 
         let column = kind == .goal ? "goal_body_photo_path" : "current_body_photo_path"
         var clearRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
@@ -718,7 +826,7 @@ final class SupabaseClient {
             "id": userId, column: NSNull(), "body_photo_emphasis_tags": NSNull(),
         ])
         let (d2, r2) = try await urlSession.data(for: clearRequest)
-        try Self.assertSuccess(r2, data: d2)
+        try assertSuccess(r2, data: d2)
     }
 
     /// Downloads and decodes a body photo via its signed URL -- shared by
@@ -741,7 +849,7 @@ final class SupabaseClient {
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, column: path])
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     // MARK: - Profile picture (avatar)
@@ -762,13 +870,13 @@ final class SupabaseClient {
         request.setValue("true", forHTTPHeaderField: "x-upsert")
         request.httpBody = imageData
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         var upsertRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         upsertRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
         upsertRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, "avatar_photo_path": path])
         let (d2, r2) = try await urlSession.data(for: upsertRequest)
-        try Self.assertSuccess(r2, data: d2)
+        try assertSuccess(r2, data: d2)
     }
 
     /// The bucket is private, same signed-URL requirement as body photos.
@@ -797,13 +905,13 @@ final class SupabaseClient {
         request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         var clearRequest = try await authorizedRequest(path: "rest/v1/users", method: "POST")
         clearRequest.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
         clearRequest.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, "avatar_photo_path": NSNull()])
         let (d2, r2) = try await urlSession.data(for: clearRequest)
-        try Self.assertSuccess(r2, data: d2)
+        try assertSuccess(r2, data: d2)
     }
 
     // MARK: - nutrition_targets / meal_log
@@ -816,17 +924,17 @@ final class SupabaseClient {
         let path = "rest/v1/nutrition_targets?user_id=eq.\(userId)&select=daily_calories,daily_protein_g,daily_carbs_g,daily_fat_g,computed_at,basis&limit=1"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([NutritionTargets].self, from: data)
         return rows.first
     }
 
     /// Today's (or any date's) logged food entries, most recent first.
     func fetchMealLogs(date: String) async throws -> [MealLogEntry] {
-        let path = "rest/v1/meal_log?date=eq.\(date)&select=id,date,label,calories,protein_g,carbs_g,fat_g,source,logged_at,score,rationale&order=logged_at.desc"
+        let path = "rest/v1/meal_log?date=eq.\(date)&select=id,date,label,calories,protein_g,carbs_g,fat_g,source,logged_at,score,rationale,score_breakdown&order=logged_at.desc"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([MealLogEntry].self, from: data)
     }
 
@@ -837,7 +945,7 @@ final class SupabaseClient {
         let path = "rest/v1/meal_log?date=eq.\(date)&select=id&limit=1"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         struct Row: Decodable { let id: String }
         return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
     }
@@ -848,7 +956,7 @@ final class SupabaseClient {
         let path = "rest/v1/meal_log?select=id&limit=1"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         struct Row: Decodable { let id: String }
         return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
     }
@@ -861,7 +969,7 @@ final class SupabaseClient {
         let path = "rest/v1/workout_log?select=id&limit=1"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         struct Row: Decodable { let id: String }
         return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
     }
@@ -890,13 +998,36 @@ final class SupabaseClient {
         request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     func deleteMealLog(id: String) async throws {
         let request = try await authorizedRequest(path: "rest/v1/meal_log?id=eq.\(id)", method: "DELETE")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
+    }
+
+    /// Item 8's "Edit macros" affordance -- corrects a wrong AI-estimated
+    /// or mistyped macro entry. Clears score/rationale/score_breakdown
+    /// (rather than leaving a stale rating computed from the old numbers)
+    /// so the caller re-rates against the corrected macros, same "clear on
+    /// edit, re-derive lazily" shape as WorkoutLogEntry's reasonSnapshot
+    /// would need if a completed workout were ever editable this way.
+    func updateMealLog(id: String, calories: Int, proteinG: Int, carbsG: Int?, fatG: Int?) async throws {
+        let body: [String: Any] = [
+            "calories": calories,
+            "protein_g": proteinG,
+            "carbs_g": carbsG ?? NSNull(),
+            "fat_g": fatG ?? NSNull(),
+            "score": NSNull(),
+            "rationale": NSNull(),
+            "score_breakdown": NSNull(),
+        ]
+        var request = try await authorizedRequest(path: "rest/v1/meal_log?id=eq.\(id)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
     }
 
     /// Freeform "what did you eat" text -> an estimated calorie/macro
@@ -905,10 +1036,10 @@ final class SupabaseClient {
     /// fields for review before saving via logMeal(...).
     func parseMealText(_ text: String) async throws -> MealEstimate {
         var request = try await authorizedRequest(path: "functions/v1/parse-meal-text", method: "POST")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "language": await currentAILanguageCode()])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode(MealEstimate.self, from: data)
     }
 
@@ -921,10 +1052,10 @@ final class SupabaseClient {
     /// meal", same estimate-then-review shape as parseMealText.
     func generateMealRecommendation(ingredients: String) async throws -> MealRecommendation {
         var request = try await authorizedRequest(path: "functions/v1/generate-meal-recommendation", method: "POST")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["ingredients": ingredients])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["ingredients": ingredients, "language": await currentAILanguageCode()])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode(MealRecommendation.self, from: data)
     }
 
@@ -933,15 +1064,15 @@ final class SupabaseClient {
     /// result back onto the row server-side -- this call both rates AND
     /// persists in one round trip, so the caller only needs the return
     /// value to update its own local copy of the entry.
-    func rateMeal(id: String) async throws -> (score: Int, rationale: String) {
+    func rateMeal(id: String) async throws -> (score: Int, rationale: String, breakdown: [String]) {
         var request = try await authorizedRequest(path: "functions/v1/rate-meal", method: "POST")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["mealLogId": id])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["mealLogId": id, "language": await currentAILanguageCode()])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
-        struct Response: Decodable { let score: Int; let rationale: String }
+        try assertSuccess(response, data: data)
+        struct Response: Decodable { let score: Int; let rationale: String; let breakdown: [String] }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
-        return (decoded.score, decoded.rationale)
+        return (decoded.score, decoded.rationale, decoded.breakdown)
     }
 
     // MARK: - daily_mood
@@ -951,7 +1082,7 @@ final class SupabaseClient {
         let path = "rest/v1/daily_mood?date=eq.\(date)&select=date,rating,logged_at&limit=1"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([DailyMoodEntry].self, from: data)
         return rows.first
     }
@@ -968,7 +1099,7 @@ final class SupabaseClient {
         let path = "rest/v1/daily_mood?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&select=date,rating,logged_at&order=date.asc"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([DailyMoodEntry].self, from: data)
     }
 
@@ -984,7 +1115,197 @@ final class SupabaseClient {
             "user_id": userId, "date": date, "rating": rating,
         ])
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
+    }
+
+    // MARK: - daily_sleep_log
+
+    /// Plain read via RLS -- nil when the user hasn't manually logged a
+    /// sleep bucket today (also nil, and irrelevant, once a wearable
+    /// reports real hours for the day -- callers prefer that over this).
+    func fetchTodaysSleepLog(date: String) async throws -> DailySleepLogEntry? {
+        let path = "rest/v1/daily_sleep_log?date=eq.\(date)&select=date,bucket,logged_at&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([DailySleepLogEntry].self, from: data)
+        return rows.first
+    }
+
+    /// Upsert -- same "one row per day, re-tap to correct yourself" posture
+    /// as `logMood`.
+    func logSleep(date: String, bucket: SleepDurationBucket) async throws {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/daily_sleep_log", method: "POST")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        // logged_at must be explicit, not left to the column default --
+        // PostgREST's ON CONFLICT DO UPDATE only touches columns present in
+        // the payload, so re-logging a different bucket the same day would
+        // otherwise leave the original logged_at (and thus the "tap to
+        // change" caption's timestamp) stale.
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId, "date": date, "bucket": bucket.rawValue,
+            "logged_at": ISO8601DateFormatter().string(from: Date()),
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    // MARK: - Affirmations (16a/16b)
+
+    /// Passive read via RLS -- nil when nothing has been generated today.
+    /// Never triggers generation, so NotificationManager's reminder
+    /// scheduling and plain widget refreshes can't burn the daily quota.
+    func fetchTodaysAffirmation(date: String) async throws -> DailyAffirmation? {
+        struct Row: Decodable { let text: String; let generated_at: String? }
+        let path = "rest/v1/daily_affirmation?date=eq.\(date)&select=text,generated_at&limit=1"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([Row].self, from: data)
+        return rows.first.map { DailyAffirmation(text: $0.text, generatedAt: $0.generated_at, regenerationAvailable: nil) }
+    }
+
+    /// Server-cached per (user, date) like the AI workout plan, so the
+    /// morning background pass, the widget, and the sheet share one
+    /// generation. forceRegenerate ("New line") is bounded server-side to
+    /// one manual regeneration a day on top of the automatic one.
+    /// `count` (1-10, 16b batch mode): still ONE generation request and one
+    /// quota unit -- the model returns all lines in a single call; the
+    /// first becomes today's line, the rest land in the user's list
+    /// server-side (source "generated").
+    func fetchOrGenerateDailyAffirmation(date: String, forceRegenerate: Bool = false, count: Int = 1) async throws -> DailyAffirmation {
+        var request = try await authorizedRequest(path: "functions/v1/generate-affirmation", method: "POST", timeout: 120)
+        var body: [String: Any] = [
+            "date": date,
+            "language": await currentAILanguageCode(),
+        ]
+        if forceRegenerate { body["forceRegenerate"] = true }
+        if count > 1 { body["count"] = min(count, 10) }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+
+        // Same 200-with-a-flag convention as generate-workout-plan --
+        // being limited is a normal outcome, checked before the decode
+        // that would otherwise mask it as a generic failure.
+        struct LimitResponse: Decodable { let generation_limit_reached: Bool; let message: String? }
+        if let limit = try? JSONDecoder().decode(LimitResponse.self, from: data), limit.generation_limit_reached {
+            throw SupabaseError.generationLimitReached(message: limit.message ?? String(localized: "supabase.affirmation.generationLimitFallback", defaultValue: "Today's new line is used up -- a fresh one arrives tomorrow morning.", comment: "Fallback message when the daily affirmation regeneration quota is spent and the server sends no message of its own"))
+        }
+        return try JSONDecoder().decode(DailyAffirmation.self, from: data)
+    }
+
+    /// 16b "Edit" -- rewrites today's generated line in place. Update-only
+    /// by design: the table has no client insert policy, so editing can
+    /// never conjure a row generation didn't create. `edited: true` is
+    /// what later auto-promotes this line into the list if a regeneration
+    /// replaces it ("your words are never discarded").
+    func updateTodaysAffirmationText(date: String, text: String) async throws {
+        var request = try await authorizedRequest(path: "rest/v1/daily_affirmation?date=eq.\(date)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "edited": true])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    /// 16b "Recent · kept 7 days" -- past days' generated lines, newest
+    /// first. Purely a windowed read of old daily_affirmation rows;
+    /// "expiry" is just this query's lower bound.
+    func fetchRecentAffirmations(before date: String, days: Int = 7) async throws -> [RecentAffirmation] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        guard let today = formatter.date(from: date),
+              let start = Calendar.current.date(byAdding: .day, value: -days, to: today)
+        else { return [] }
+        let path = "rest/v1/daily_affirmation?date=lt.\(date)&date=gte.\(formatter.string(from: start))&select=date,text&order=date.desc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode([RecentAffirmation].self, from: data)
+    }
+
+    /// The user's own kept/written lines, newest first.
+    func fetchAffirmationLines() async throws -> [AffirmationLine] {
+        let path = "rest/v1/user_affirmations?select=id,text,source,in_rotation,created_at&order=created_at.desc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode([AffirmationLine].self, from: data)
+    }
+
+    /// 16b "Keep" (source "generated") and "Write your own" (source
+    /// "custom") -- returns the created row so the list can show it with
+    /// its real server id immediately.
+    func addAffirmationLine(text: String, source: String) async throws -> AffirmationLine {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var request = try await authorizedRequest(path: "rest/v1/user_affirmations", method: "POST")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "user_id": userId, "text": text, "source": source,
+        ])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        guard let line = try JSONDecoder().decode([AffirmationLine].self, from: data).first else {
+            throw SupabaseError.requestFailed(status: 200, message: "empty insert response")
+        }
+        return line
+    }
+
+    /// The row heart (16b) -- in or out of the reminder rotation, never a delete.
+    func setAffirmationLineRotation(id: String, inRotation: Bool) async throws {
+        var request = try await authorizedRequest(path: "rest/v1/user_affirmations?id=eq.\(id)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["in_rotation": inRotation])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    /// Swipe-left delete (16b).
+    func deleteAffirmationLine(id: String) async throws {
+        let request = try await authorizedRequest(path: "rest/v1/user_affirmations?id=eq.\(id)", method: "DELETE")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    // MARK: - Account deletion (App Review 5.1.1(v))
+
+    /// Identity providers on the current auth user ("apple", "google",
+    /// "email") -- DeleteAccountView uses this to decide whether Apple's
+    /// mandated token revocation (a fresh SIWA prompt) applies.
+    func fetchAuthProviders() async throws -> [String] {
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL)/auth/v1/user")!)
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        struct AuthUser: Decodable {
+            struct Identity: Decodable { let provider: String }
+            let identities: [Identity]?
+        }
+        return (try JSONDecoder().decode(AuthUser.self, from: data).identities ?? []).map(\.provider)
+    }
+
+    /// Full server-side erasure -- see supabase/functions/delete-account
+    /// for the order of operations (SIWA revocation, Storage, analytics,
+    /// DB, auth). The caller is resolved from the JWT server-side; the
+    /// only input is the fresh Apple authorization code (nil for
+    /// Google/email users). The caller MUST sign out locally on success --
+    /// the deleted account's JWT isn't instantly invalidated server-side.
+    func deleteAccount(appleAuthorizationCode: String?) async throws {
+        var request = try await authorizedRequest(path: "functions/v1/delete-account", method: "POST", timeout: 120)
+        var body: [String: Any] = [:]
+        if let appleAuthorizationCode { body["appleAuthorizationCode"] = appleAuthorizationCode }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        struct Response: Decodable { let deleted: Bool }
+        guard (try? JSONDecoder().decode(Response.self, from: data))?.deleted == true else {
+            throw SupabaseError.requestFailed(status: 500, message: "deletion not confirmed")
+        }
     }
 
     // MARK: - daily_recommendation
@@ -1000,10 +1321,10 @@ final class SupabaseClient {
         // carried them. injury_protocol_rest_applied/mood_cap_applied are
         // new columns added alongside this fix, so they'd have shipped
         // with the same gap if not caught here.
-        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,injury_protocol_rest_applied,hrv_cap_applied,stress_cap_applied,mood_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category,user_requested_category&limit=1"
+        let path = "rest/v1/daily_recommendation?date=eq.\(date)&select=date,category,message,message_detail,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,injury_protocol_rest_applied,hrv_cap_applied,stress_cap_applied,mood_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category,user_requested_category&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([DailyRecommendation].self, from: data)
         return rows.first
     }
@@ -1022,10 +1343,10 @@ final class SupabaseClient {
         let endStr = formatter.string(from: end)
 
         // Same select= gap as fetchTodaysRecommendation above -- see its comment.
-        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,injury_protocol_rest_applied,hrv_cap_applied,stress_cap_applied,mood_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category,user_requested_category&order=date.asc"
+        let path = "rest/v1/daily_recommendation?date=gte.\(startStr)&date=lte.\(endStr)&select=date,category,message,message_detail,reason,data_confidence,sleep_cap_applied,injury_cap_applied,load_cap_applied,consecutive_days_cap_applied,injury_protocol_cap_applied,injury_protocol_moderate_cap_applied,injury_protocol_rest_applied,hrv_cap_applied,stress_cap_applied,mood_cap_applied,pregnancy_cap_applied,volume_cap_applied,pre_cap_category,user_requested_category&order=date.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([DailyRecommendation].self, from: data)
     }
 
@@ -1037,7 +1358,7 @@ final class SupabaseClient {
         let path = "rest/v1/daily_snapshot?date=eq.\(date)&select=source,recovery_score,readiness_score,hrv_ms,sleep_hours,resting_hr,strain_score,stress_score,sleep_light_hours,sleep_deep_hours,sleep_rem_hours,sleep_awake_hours"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([DailySnapshotRow].self, from: data)
     }
 
@@ -1047,7 +1368,7 @@ final class SupabaseClient {
         let path = "rest/v1/daily_snapshot?date=gte.\(fromDate)&date=lte.\(toDate)&select=date,source,recovery_score,readiness_score,hrv_ms,sleep_hours,resting_hr,strain_score,stress_score,sleep_light_hours,sleep_deep_hours,sleep_rem_hours,sleep_awake_hours&order=date.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([DailySnapshotRow].self, from: data)
     }
 
@@ -1074,7 +1395,8 @@ final class SupabaseClient {
         planSnapshot: AIWorkoutPlan? = nil,
         startedAt: Date? = nil,
         endedAt: Date? = nil,
-        source: String = "ai_plan"
+        source: String = "ai_plan",
+        reasonSnapshot: String? = nil
     ) async throws {
         guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
         var body: [String: Any] = [
@@ -1090,6 +1412,13 @@ final class SupabaseClient {
         }
         if let feelRating {
             body["feel_rating"] = feelRating.rawValue
+        }
+        // Frozen at log time (spec item 1): what the completed screen says
+        // about this session must never drift with a same-day
+        // recommendation regeneration. CompletedWorkoutView's lazy
+        // backfill remains only for legacy rows logged before this.
+        if let reasonSnapshot, !reasonSnapshot.isEmpty {
+            body["reason_snapshot"] = reasonSnapshot
         }
         // Real workout start/end, distinct from completed_at (the log
         // action's own timestamp) -- needed to match wearable HR data to
@@ -1113,7 +1442,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Plain read via RLS -- used both by RecommendationDetailView (to show
@@ -1123,7 +1452,7 @@ final class SupabaseClient {
         let path = "rest/v1/workout_log?date=eq.\(date)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source,calories_burned,calories_estimated,reason_snapshot&order=completed_at.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([WorkoutLogEntry].self, from: data)
     }
 
@@ -1134,7 +1463,7 @@ final class SupabaseClient {
         let path = "rest/v1/workout_log?date=gte.\(fromDate)&date=lte.\(toDate)&select=id,date,title,body_part,category,completed_at,feedback,plan_snapshot,started_at,ended_at,feel_rating,source,calories_burned,calories_estimated,reason_snapshot&order=date.desc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([WorkoutLogEntry].self, from: data)
     }
 
@@ -1152,7 +1481,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// System-computed backfill, not a user edit -- kept separate from
@@ -1170,7 +1499,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Turns freeform post-workout feedback into 3 concrete add-on
@@ -1184,10 +1513,11 @@ final class SupabaseClient {
             "feedback": feedback,
             "workoutTitle": workoutTitle,
             "bodyPart": bodyPart,
+            "language": await currentAILanguageCode(),
         ])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Response: Decodable { let suggestions: [String] }
         return try JSONDecoder().decode(Response.self, from: data).suggestions
@@ -1207,7 +1537,7 @@ final class SupabaseClient {
         let path = "rest/v1/workout_log?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&select=date"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Row: Decodable { let date: String }
         let rows = try JSONDecoder().decode([Row].self, from: data)
@@ -1227,7 +1557,7 @@ final class SupabaseClient {
         }
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([DailyChecklistStateRow].self, from: data)
     }
 
@@ -1242,7 +1572,7 @@ final class SupabaseClient {
             "user_id": userId, "scope": scope, "item_key": itemKey, "date": date,
         ])
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Un-checks a manual item -- only ever called for "daily" scope rows
@@ -1252,7 +1582,7 @@ final class SupabaseClient {
         let path = "rest/v1/daily_checklist_state?item_key=eq.\(itemKey)&date=eq.\(date)"
         let request = try await authorizedRequest(path: path, method: "DELETE")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Which of the last N days had a real sport-goal training session --
@@ -1272,7 +1602,7 @@ final class SupabaseClient {
         let path = "rest/v1/ai_workout_plan?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&select=date,goal_block:plan->goal_block"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Row: Decodable { let date: String; let goalBlock: AIGoalBlockMarker?
             enum CodingKeys: String, CodingKey { case date; case goalBlock = "goal_block" }
@@ -1295,28 +1625,25 @@ final class SupabaseClient {
         let path = "rest/v1/ai_generation_log?date=gte.\(formatter.string(from: start))&date=lte.\(formatter.string(from: end))&source=eq.gym_photo&select=date"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Row: Decodable { let date: String }
         let rows = try JSONDecoder().decode([Row].self, from: data)
         return Set(rows.map(\.date))
     }
 
-    /// Count of actual AI *workout* generations logged for `date` -- mirrors
-    /// the server's tiered quota check (generationLimits.ts's
-    /// WORKOUT_GENERATION_SOURCES). Must stay source-filtered the same way:
-    /// the server used to count every row in ai_generation_log with no
-    /// source filter, which silently consumed the daily workout-generation
-    /// quota on meal ratings/text parses/addon suggestions that log into
-    /// this same shared table. This client mirror had the identical bug --
-    /// counting every source made Home's scan row (and its "N generations
-    /// used" copy) lock out based on unrelated AI activity for the day, not
-    /// on actual workout generations.
+    /// Count of workout-shaped generations (suggestion + gym_photo) for
+    /// `date` -- mirrors the server's shared-bucket quota
+    /// (generationLimits.ts, product decision 2026-08-18: back to ONE
+    /// bucket across both sources, 1/3/10 free/monthly/annual). Drives
+    /// Home's SCAN row lock, so a plain workout suggestion also counts
+    /// against the scan quota and vice versa -- that's the point of the
+    /// shared bucket, not a bug.
     func fetchTodaysGenerationCount(date: String) async throws -> Int {
         let path = "rest/v1/ai_generation_log?date=eq.\(date)&source=in.(suggestion,gym_photo)&select=id"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Row: Decodable { let id: String }
         return try JSONDecoder().decode([Row].self, from: data).count
@@ -1338,12 +1665,31 @@ final class SupabaseClient {
         let path = Self.exerciseLibraryLookupPath(libraryId: libraryId, name: name)
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([ExerciseLibraryEntry].self, from: data)
         if let entry = rows.first {
             await ExerciseLibraryCache.shared.store(entry, for: cacheKey)
         }
         return rows.first
+    }
+
+    struct ExerciseGuideTranslation: Decodable {
+        let name: String
+        let instructions: [String]
+    }
+
+    /// The library entry's name + how-to steps in the user's UI language,
+    /// via translate-exercise-guide's shared per-exercise cache. Returns
+    /// nil for English (the row itself is already English) so callers keep
+    /// the original untouched.
+    func translateExerciseGuide(exerciseId: String) async throws -> ExerciseGuideTranslation? {
+        let language = await currentAILanguageCode()
+        guard language != "en" else { return nil }
+        var request = try await authorizedRequest(path: "functions/v1/translate-exercise-guide", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["exerciseId": exerciseId, "language": language])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode(ExerciseGuideTranslation.self, from: data)
     }
 
     /// Today's actual recorded workout sessions from connected wearables
@@ -1363,7 +1709,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct DTO: Decodable {
             let source: String
@@ -1452,7 +1798,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: rows)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Reads back what previous syncs stored, so a workout recorded on one
@@ -1470,10 +1816,26 @@ final class SupabaseClient {
         // activityType == nil, i.e. isWalk == false: an honest "we don't
         // know" rather than a false positive that would wrongly block a
         // real workout from being auto-logged for another device's entries.
-        let path = "rest/v1/healthkit_workout_sync?select=source,title,start_time,duration_minutes,calories&start_time=gte.\(date)T00:00:00&start_time=lt.\(date)T23:59:59.999&order=start_time.asc"
+        //
+        // Window is the LOCAL day converted to UTC instants -- a bare
+        // "\(date)T00:00:00" read as UTC pulled yesterday evening's
+        // session into today for any user west of UTC (BUG-134).
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        dayFormatter.timeZone = .current
+        let iso = ISO8601DateFormatter()
+        let (windowStart, windowEnd): (String, String)
+        if let day = dayFormatter.date(from: date) {
+            let start = Calendar.current.startOfDay(for: day)
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
+            (windowStart, windowEnd) = (iso.string(from: start), iso.string(from: end))
+        } else {
+            (windowStart, windowEnd) = ("\(date)T00:00:00", "\(date)T23:59:59.999")
+        }
+        let path = "rest/v1/healthkit_workout_sync?select=source,title,start_time,duration_minutes,calories&start_time=gte.\(windowStart)&start_time=lt.\(windowEnd)&order=start_time.asc"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct Row: Decodable {
             let source: String
@@ -1510,20 +1872,26 @@ final class SupabaseClient {
     /// `notes` is optional freeform text the user typed right after
     /// checking a workout (e.g. "sore shoulder today") -- folded into the
     /// generation prompt for this call only, not persisted.
-    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, notes: String? = nil, targetDurationMinutes: ClosedRange<Int>? = nil) async throws -> AIWorkoutPlan {
+    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, notes: String? = nil, targetDurationMinutes: ClosedRange<Int>? = nil, forceRegenerate: Bool = false) async throws -> AIWorkoutPlan {
         var request = try await authorizedRequest(path: "functions/v1/generate-workout-plan", method: "POST", timeout: 180)
         var body: [String: Any] = [
             "date": date,
             "selection": ["title": selectedTitle, "bodyPart": selectedBodyPart],
+            "language": await currentAILanguageCode(),
         ]
         if let notes { body["notes"] = notes }
         if let targetDurationMinutes {
             body["targetDurationRange"] = ["min": targetDurationMinutes.lowerBound, "max": targetDurationMinutes.upperBound]
         }
+        // 11d "Regenerate" -- bypasses the server's per-(date, selection)
+        // cache for a fresh take on the SAME workout. The already-logged
+        // guard on the server still wins regardless, so this can't swap a
+        // plan out from under a completed workout.
+        if forceRegenerate { body["forceRegenerate"] = true }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         // The guardrail answers 200 with a flag rather than an error status,
         // since being withheld is a normal outcome, not a failure. Checked
@@ -1532,16 +1900,16 @@ final class SupabaseClient {
         struct SafetyResponse: Decodable { let safety_flag: Bool; let message: String? }
         if let safety = try? JSONDecoder().decode(SafetyResponse.self, from: data), safety.safety_flag {
             throw SupabaseError.safetyBlocked(
-                message: safety.message ?? "Please check with a healthcare professional before starting a new workout."
+                message: safety.message ?? String(localized: "supabase.workout.safetyBlockedFallback", defaultValue: "Please check with a healthcare professional before starting a new workout.", comment: "Fallback message shown when the server's safety guardrail withholds workout generation and sends no message of its own")
             )
         }
         struct LockedResponse: Decodable { let locked: Bool; let message: String? }
         if let locked = try? JSONDecoder().decode(LockedResponse.self, from: data), locked.locked {
-            throw SupabaseError.workoutLocked(message: locked.message ?? "Today's workout is already logged.")
+            throw SupabaseError.workoutLocked(message: locked.message ?? String(localized: "supabase.workout.alreadyLoggedFallback", defaultValue: "Today's workout is already logged.", comment: "Fallback message shown when the server refuses to regenerate an already-completed day's workout and sends no message of its own"))
         }
         struct LimitResponse: Decodable { let generation_limit_reached: Bool; let message: String? }
         if let limit = try? JSONDecoder().decode(LimitResponse.self, from: data), limit.generation_limit_reached {
-            throw SupabaseError.generationLimitReached(message: limit.message ?? "You've used today's AI workout generations.")
+            throw SupabaseError.generationLimitReached(message: limit.message ?? String(localized: "supabase.workout.generationLimitFallback", defaultValue: "You've used today's AI workout generations.", comment: "Fallback message shown when the user's daily AI workout generation quota is used up and the server sends no message of its own"))
         }
         return try JSONDecoder().decode(AIWorkoutPlan.self, from: data)
     }
@@ -1557,7 +1925,7 @@ final class SupabaseClient {
         ])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode(GymPhotoEquipmentResult.self, from: data)
     }
 
@@ -1578,7 +1946,7 @@ final class SupabaseClient {
         }
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode(GoalAssignmentParseResult.self, from: data)
     }
 
@@ -1592,22 +1960,23 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "date": date,
             "confirmedEquipment": confirmedEquipment,
+            "language": await currentAILanguageCode(),
         ])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         struct SafetyResponse: Decodable { let safety_flag: Bool; let message: String? }
         if let safety = try? JSONDecoder().decode(SafetyResponse.self, from: data), safety.safety_flag {
-            return .safetyBlocked(message: safety.message ?? "Please check with a healthcare professional before starting a new workout.")
+            return .safetyBlocked(message: safety.message ?? String(localized: "supabase.workout.safetyBlockedFallback", defaultValue: "Please check with a healthcare professional before starting a new workout.", comment: "Fallback message shown when the server's safety guardrail withholds workout generation and sends no message of its own"))
         }
         struct LockedResponse: Decodable { let locked: Bool; let message: String? }
         if let locked = try? JSONDecoder().decode(LockedResponse.self, from: data), locked.locked {
-            throw SupabaseError.workoutLocked(message: locked.message ?? "Today's workout is already logged.")
+            throw SupabaseError.workoutLocked(message: locked.message ?? String(localized: "supabase.workout.alreadyLoggedFallback", defaultValue: "Today's workout is already logged.", comment: "Fallback message shown when the server refuses to regenerate an already-completed day's workout and sends no message of its own"))
         }
         struct LimitResponse: Decodable { let generation_limit_reached: Bool; let message: String? }
         if let limit = try? JSONDecoder().decode(LimitResponse.self, from: data), limit.generation_limit_reached {
-            return .generationLimitReached(message: limit.message ?? "You've used today's AI workout generations.")
+            return .generationLimitReached(message: limit.message ?? String(localized: "supabase.workout.generationLimitFallback", defaultValue: "You've used today's AI workout generations.", comment: "Fallback message shown when the user's daily AI workout generation quota is used up and the server sends no message of its own"))
         }
         struct TitleDTO: Decodable { let title: String; let bodyPart: String }
         let titleInfo = try JSONDecoder().decode(TitleDTO.self, from: data)
@@ -1623,7 +1992,7 @@ final class SupabaseClient {
         let path = "rest/v1/ai_workout_plan?date=eq.\(date)&select=category,plan,selected_title,added_to_plan,source&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([TodaysAIPlan].self, from: data)
         return rows.first
     }
@@ -1634,7 +2003,7 @@ final class SupabaseClient {
         var request = try await authorizedRequest(path: "functions/v1/confirm-ai-plan", method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["date": date])
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Fire-and-forget from SubscriptionManager.refreshEntitlement -- lets
@@ -1647,11 +2016,11 @@ final class SupabaseClient {
         request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["id": userId, "subscription_tier": tier])
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     func invokeGenerateRecommendation(date: String, healthkit: HealthKitSnapshot?) async throws -> DailyRecommendation {
-        var body: [String: Any] = ["date": date]
+        var body: [String: Any] = ["date": date, "language": await currentAILanguageCode()]
         if let healthkit {
             var hk: [String: Any] = [:]
             if let v = healthkit.sleepHours { hk["sleepHours"] = v }
@@ -1669,7 +2038,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode(DailyRecommendation.self, from: data)
     }
 
@@ -1689,7 +2058,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     struct ConnectionStatus: Decodable {
@@ -1709,7 +2078,7 @@ final class SupabaseClient {
     func fetchConnectionStatus() async throws -> ConnectionStatus {
         let request = try await authorizedRequest(path: "functions/v1/fetch-connection-status", method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode(ConnectionStatus.self, from: data)
     }
 
@@ -1750,39 +2119,7 @@ final class SupabaseClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
-    }
-
-    // MARK: - Beta opt-in (self-service beta_optins table, RLS own-row)
-
-    /// Whether the caller has opted into beta features -- own-row select.
-    func fetchBetaOptIn() async throws -> Bool {
-        let path = "rest/v1/beta_optins?select=user_id&limit=1"
-        let request = try await authorizedRequest(path: path, method: "GET")
-        let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
-        struct Row: Decodable { let user_id: String }
-        return !(try JSONDecoder().decode([Row].self, from: data)).isEmpty
-    }
-
-    /// Inserts (opt in) or deletes (opt out) the caller's own row -- direct
-    /// RLS write, same trust model as logWorkout.
-    func setBetaOptIn(_ enabled: Bool) async throws {
-        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
-        if enabled {
-            var request = try await authorizedRequest(path: "rest/v1/beta_optins", method: "POST")
-            // ignore-duplicates: re-enabling after a missed response must
-            // not 409 on the already-present pk row.
-            request.setValue("resolution=ignore-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["user_id": userId])
-            let (data, response) = try await urlSession.data(for: request)
-            try Self.assertSuccess(response, data: data)
-        } else {
-            var request = try await authorizedRequest(path: "rest/v1/beta_optins?user_id=eq.\(userId)", method: "DELETE")
-            request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
-            let (data, response) = try await urlSession.data(for: request)
-            try Self.assertSuccess(response, data: data)
-        }
+        try assertSuccess(response, data: data)
     }
 
     // MARK: - user_feedback
@@ -1813,7 +2150,7 @@ final class SupabaseClient {
         ])
 
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     // MARK: - Sport goals (feature-flagged, see Config.enableSportGoals)
@@ -1823,13 +2160,13 @@ final class SupabaseClient {
     func fetchSportCatalog() async throws -> SportCatalog {
         let sportsRequest = try await authorizedRequest(path: "rest/v1/sports?select=*&order=name.asc", method: "GET")
         let (sportsData, sportsResponse) = try await urlSession.data(for: sportsRequest)
-        try Self.assertSuccess(sportsResponse, data: sportsData)
+        try assertSuccess(sportsResponse, data: sportsData)
         let sports = try JSONDecoder().decode([Sport].self, from: sportsData)
         guard !sports.isEmpty else { return SportCatalog() }
 
         let goalsRequest = try await authorizedRequest(path: "rest/v1/sport_goals?select=*&order=name.asc", method: "GET")
         let (goalsData, goalsResponse) = try await urlSession.data(for: goalsRequest)
-        try Self.assertSuccess(goalsResponse, data: goalsData)
+        try assertSuccess(goalsResponse, data: goalsData)
         // Goals are re-filtered to visible sports so a sport flipped dark
         // can never leak its goals through a laxer sport_goals policy.
         let visibleSportIds = Set(sports.map(\.id))
@@ -1866,7 +2203,7 @@ final class SupabaseClient {
         var request = try await authorizedRequest(path: "functions/v1/create-goal", method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
 
         // Conflicts come back as 200 + {conflicts} -- a normal outcome that
         // needs the user's acknowledgment, not an error.
@@ -1885,7 +2222,7 @@ final class SupabaseClient {
         let path = "rest/v1/user_goal?status=eq.active&select=*&limit=1"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([UserGoal].self, from: data).first
     }
 
@@ -1895,7 +2232,7 @@ final class SupabaseClient {
         let path = "rest/v1/user_goal?status=neq.active&select=*&order=created_at.desc"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([UserGoal].self, from: data)
     }
 
@@ -1912,7 +2249,7 @@ final class SupabaseClient {
         request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Chart history for one goal, oldest first.
@@ -1920,7 +2257,7 @@ final class SupabaseClient {
         let path = "rest/v1/goal_measurement_log?user_goal_id=eq.\(userGoalId)&select=*&order=measured_at.asc"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return try JSONDecoder().decode([GoalMeasurement].self, from: data)
     }
 
@@ -1937,7 +2274,7 @@ final class SupabaseClient {
             "measured_at": Date().ISO8601Format(),
         ])
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
     }
 
     /// Coach-assignment photo into its private bucket (body-photos
@@ -1953,7 +2290,7 @@ final class SupabaseClient {
         request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
         request.httpBody = imageData
         let (data, response) = try await urlSession.data(for: request)
-        try Self.assertSuccess(response, data: data)
+        try assertSuccess(response, data: data)
         return path
     }
 
@@ -1975,7 +2312,40 @@ final class SupabaseClient {
         return request
     }
 
-    private static func assertSuccess(_ response: URLResponse, data: Data) throws {
+    /// `LanguageManager` is `@MainActor`-isolated; this is the one hop
+    /// point every AI-generation call below uses to read the user's
+    /// selected language without making the whole client `@MainActor`.
+    private func currentAILanguageCode() async -> String {
+        await MainActor.run { LanguageManager.shared.selected.aiRequestCode }
+    }
+
+    /// Any authorized call that comes back 401 is the server telling us
+    /// this session is dead right now -- distinct from validAccessToken's
+    /// own pre-emptive check, which only ever looks at the LOCALLY stored
+    /// expiry and has no way to catch a token that's dead server-side
+    /// (revoked, or a stale/foreign token stamped with a bogus far-future
+    /// expiresAt -- e.g. a UI-test fixture session's keychain entry
+    /// leaking into a real run on the same simulator) while still looking
+    /// "fresh" by the clock. Forces the stored expiry into the past so the
+    /// next validAccessToken() call takes the real refresh path, and kicks
+    /// that refresh off right now so a genuinely dead refresh token still
+    /// reaches onSessionExpired via performRefreshSession's own handling,
+    /// without every caller here having to retry itself. Fire-and-forget
+    /// side effect on the way to throwing the original error -- not
+    /// something callers await.
+    private func handleLiveUnauthorized() {
+        guard var session = keychain.load() else { return }
+        session.expiresAt = .distantPast
+        keychain.save(session)
+        Task { try? await refreshSession() }
+    }
+
+    /// `reactToUnauthorized` is false only for the refresh-token exchange
+    /// itself (performRefreshSession) -- that call already has its own
+    /// definitive 400/401 handling one level up, so this generic hook
+    /// would otherwise fire a second, redundant refresh attempt right on
+    /// top of it.
+    private func assertSuccess(_ response: URLResponse, data: Data, reactToUnauthorized: Bool = true) throws {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
             // Generation functions (generate-workout-plan, generate-gym-
@@ -1987,6 +2357,9 @@ final class SupabaseClient {
             struct ServiceUnavailableResponse: Decodable { let service_unavailable: Bool }
             if let flagged = try? JSONDecoder().decode(ServiceUnavailableResponse.self, from: data), flagged.service_unavailable {
                 throw SupabaseError.serviceUnavailable
+            }
+            if reactToUnauthorized, http.statusCode == 401 {
+                handleLiveUnauthorized()
             }
             let message = String(data: data, encoding: .utf8) ?? "unknown error"
             throw SupabaseError.requestFailed(status: http.statusCode, message: message)
@@ -2034,7 +2407,7 @@ enum SupabaseError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            return "Not signed in."
+            return String(localized: "supabase.error.notSignedIn", defaultValue: "Not signed in.", comment: "Error shown when an API call is made without a valid session")
         case .safetyBlocked(let message):
             return message
         case .workoutLocked(let message):
@@ -2042,7 +2415,7 @@ enum SupabaseError: LocalizedError {
         case .generationLimitReached(let message):
             return message
         case .serviceUnavailable:
-            return "Soma's AI service is temporarily unavailable. We've been notified -- please try again later."
+            return String(localized: "supabase.error.serviceUnavailable", defaultValue: "Soma's AI service is temporarily unavailable. We've been notified -- please try again later.", comment: "Error shown when the server's AI generation backend itself is down or rate-limited")
         case .requestFailed(let status, let message):
             return "Request failed (\(status)): \(message)"
         }

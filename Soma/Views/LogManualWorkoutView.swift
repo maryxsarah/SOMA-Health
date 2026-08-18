@@ -28,70 +28,240 @@ struct LogManualWorkoutView: View {
     private static let intensityOptions: [RecommendationCategory] = [.pushHard, .moderate, .light]
     private static let focusOptions: [BodyPartFocus] = [.cardio, .fullBody, .upperBody, .lowerBody, .core, .recovery]
 
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSaving
     }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("e.g. Soccer training, Hot yoga, Volleyball", text: $title)
-                    Picker("Focus", selection: $bodyPart) {
-                        ForEach(Self.focusOptions, id: \.self) { part in
-                            Text(part.displayName).tag(part)
-                        }
-                    }
-                    Picker("Effort", selection: $category) {
-                        ForEach(Self.intensityOptions, id: \.self) { intensity in
-                            Text(intensity.displayTitle).tag(intensity)
-                        }
-                    }
-                } header: {
-                    Text("What did you do?")
-                } footer: {
-                    Text("Effort helps Soma calibrate tomorrow's plan around today's real training load.")
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    whatDidYouDoCard
+                    whenCard
+                    notesCard
 
-                Section {
-                    DatePicker("Date", selection: $date, in: ...Date(), displayedComponents: .date)
-                    DatePicker("Start time", selection: $startTime, displayedComponents: .hourAndMinute)
-                    Stepper(value: $durationMinutes, in: 5...300, step: 5) {
-                        HStack {
-                            Text("Duration")
-                            Spacer()
-                            Text(Self.durationLabel(durationMinutes))
-                                .foregroundStyle(.secondary)
-                        }
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(SomaTokens.danger)
                     }
-                } header: {
-                    Text("When")
-                } footer: {
-                    Text("Used to pull your real heart rate for this exact window from Apple Health or a connected wearable, if one reported it.")
-                }
 
-                Section("Notes (optional)") {
-                    TextField("Anything worth remembering", text: $notes, axis: .vertical)
-                        .lineLimit(1...3)
+                    SomaButton(title: LocalizedStringKey(String(localized: "logWorkout.cta.logActivity", defaultValue: "Log activity", comment: "Log-activity form: primary CTA button")), size: .lg, variant: .primary, isEnabled: canSave) {
+                        Task { await save() }
+                    }
                 }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(SomaTokens.danger)
-                }
+                .padding(20)
             }
-            .navigationTitle("Log an activity")
+            .somaSheetBackground()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                // 11c: white Cancel pill + centered bold title -> serif
+                // italic title + glass Cancel pill, same recipe as 11b's
+                // header (GoalBodyProgressView).
+                ToolbarItem(placement: .principal) {
+                    Text(String(localized: "logWorkout.navigationTitle", defaultValue: "Log an activity", comment: "Log-activity form: navigation title"))
+                        .font(.system(size: 28, weight: .bold, design: .serif).italic())
+                        .foregroundStyle(SomaTokens.ink)
                 }
+                // Design puts Cancel on the trailing edge (title left→center,
+                // action right) -- same convention as 11b's GoalBodyProgressView
+                // "Done", which uses .confirmationAction, not .cancellationAction
+                // (the latter renders leading and put this on the wrong side).
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
-                        .disabled(!canSave)
+                    // 11c: Cancel is the quiet flat pill (white 0.55 + white
+                    // ring, no shadow) -- not the raised `.glassLens()`.
+                    Button(String(localized: "logWorkout.cancel", defaultValue: "Cancel", comment: "Log-activity form: cancel button in the toolbar")) { dismiss() }
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(SomaTokens.accent)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(0.55))
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+                        )
                 }
             }
+        }
+    }
+
+    // MARK: - What did you do?
+
+    private var whatDidYouDoCard: some View {
+        CardView {
+            Text(String(localized: "logWorkout.section.whatDidYouDo", defaultValue: "What did you do?", comment: "Log-activity form: header for the activity/focus/effort section"))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(SomaTokens.ink)
+
+            GlassTextField(placeholder: String(localized: "logWorkout.title.placeholder", defaultValue: "e.g. Soccer training, Hot yoga, Volleyball", comment: "Log-activity form: placeholder for the activity title text field"), text: $title)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(String(localized: "logWorkout.focus.label", defaultValue: "Focus", comment: "Log-activity form: label for the body-part-focus picker"))
+                    .font(SomaType.eyebrow)
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                    .foregroundStyle(SomaTokens.ink4)
+                FlowLayout {
+                    ForEach(Self.focusOptions, id: \.self) { part in
+                        SomaChip(title: LocalizedStringKey(part.displayName), isSelected: bodyPart == part) {
+                            bodyPart = part
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(String(localized: "logWorkout.effort.label", defaultValue: "Effort", comment: "Log-activity form: label for the effort/intensity picker"))
+                    .font(SomaType.eyebrow)
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                    .foregroundStyle(SomaTokens.ink4)
+                FlowLayout {
+                    ForEach(Self.intensityOptions, id: \.self) { intensity in
+                        SomaChip(title: LocalizedStringKey(intensity.displayTitle), isSelected: category == intensity) {
+                            category = intensity
+                        }
+                    }
+                }
+            }
+
+            Text(String(localized: "logWorkout.section.effortFooter", defaultValue: "Effort helps Soma calibrate tomorrow's plan around today's real training load.", comment: "Log-activity form: footer explaining why effort is captured"))
+                .font(.system(size: 12))
+                .foregroundStyle(SomaTokens.ink3)
+        }
+    }
+
+    // MARK: - When
+
+    private var whenCard: some View {
+        CardView {
+            Text(String(localized: "logWorkout.section.when", defaultValue: "When", comment: "Log-activity form: header for the date/time/duration section"))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(SomaTokens.ink)
+
+            // 11c: three separate gray system capsules -> one glass card
+            // with hairline-divided rows and accent-blue pill values (native
+            // DatePicker text ignores .tint in compact style, so the visible
+            // pill is custom, with the real picker overlaid near-invisibly
+            // for interaction).
+            VStack(spacing: 0) {
+                whenRow(label: String(localized: "logWorkout.date.label", defaultValue: "Date", comment: "Log-activity form: label for the date picker"), valueText: Self.dateFormatter.string(from: date)) {
+                    DatePicker("", selection: $date, in: ...Date(), displayedComponents: .date)
+                        .tint(SomaTokens.accent)
+                }
+                Divider().overlay(SomaTokens.ink.opacity(0.06))
+                whenRow(label: String(localized: "logWorkout.startTime.label", defaultValue: "Start time", comment: "Log-activity form: label for the start-time picker"), valueText: Self.timeFormatter.string(from: startTime)) {
+                    DatePicker("", selection: $startTime, displayedComponents: .hourAndMinute)
+                        .tint(SomaTokens.accent)
+                }
+                Divider().overlay(SomaTokens.ink.opacity(0.06))
+                durationRow
+            }
+
+            Text(String(localized: "logWorkout.section.whenFooter", defaultValue: "Used to pull your real heart rate for this exact window from Apple Health or a connected wearable, if one reported it.", comment: "Log-activity form: footer explaining why start time/duration is captured"))
+                .font(.system(size: 12))
+                .foregroundStyle(SomaTokens.ink3)
+        }
+    }
+
+    private func whenRow<Picker: View>(label: String, valueText: String, @ViewBuilder picker: () -> Picker) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink)
+            Spacer()
+            // 11c: value pills use the flat chip recipe (white 0.55 + two
+            // rings + one small shadow), not the raised `.glassLens()`.
+            Text(valueText)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(SomaTokens.accent)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(0.55))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+                        .overlay(
+                            Capsule().stroke(
+                                Color(red: 120 / 255, green: 150 / 255, blue: 220 / 255).opacity(0.18),
+                                lineWidth: 1
+                            )
+                            .padding(-0.5)
+                        )
+                        .shadow(color: Color(red: 94 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.12), radius: 2.5, x: 0, y: 2)
+                )
+        }
+        .padding(.vertical, 10)
+        .accessibilityHidden(true)
+        .compositingGroup()
+        .overlay(
+            // .destinationOver draws the real picker's own compact chip
+            // BEHIND the already-composited row above (unlike a low-opacity
+            // hack, which still leaves a faint ghost of its native chip
+            // visible) -- trailing-aligned so its chip lands directly under
+            // our pill, fully masking it.
+            picker()
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .blendMode(.destinationOver)
+                .accessibilityLabel(label)
+                .accessibilityValue(valueText)
+        )
+    }
+
+    // 11c: the gray native Stepper's -|+ rocker -> two glass lens circles,
+    // same 30pt recipe as RecommendationDetailView's sectionIcon badges.
+    private var durationRow: some View {
+        HStack {
+            Text(String(localized: "logWorkout.duration.label", defaultValue: "Duration", comment: "Log-activity form: label for the duration control"))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(SomaTokens.ink)
+            Spacer()
+            Text(Self.durationLabel(durationMinutes))
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(SomaTokens.ink)
+            durationStepButton(systemName: "minus", disabled: durationMinutes <= 5) {
+                durationMinutes = max(5, durationMinutes - 5)
+            }
+            durationStepButton(systemName: "plus", disabled: durationMinutes >= 300) {
+                durationMinutes = min(300, durationMinutes + 5)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private func durationStepButton(systemName: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(disabled ? SomaTokens.ink4 : SomaTokens.accent)
+                .frame(width: 30, height: 30)
+                .glassLens(cornerRadius: SomaTokens.rPill)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+
+    // MARK: - Notes
+
+    private var notesCard: some View {
+        CardView {
+            Text(String(localized: "logWorkout.section.notes", defaultValue: "Notes (optional)", comment: "Log-activity form: header for the optional notes section"))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(SomaTokens.ink)
+            GlassTextField(placeholder: String(localized: "logWorkout.notes.placeholder", defaultValue: "Anything worth remembering", comment: "Log-activity form: placeholder for the optional free-text notes field"), text: $notes, minLines: 1)
         }
     }
 
@@ -116,11 +286,12 @@ struct LogManualWorkoutView: View {
                 feedback: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,
                 startedAt: startedAt,
                 endedAt: endedAt,
-                source: "manual"
+                source: "manual",
+                reasonSnapshot: WorkoutReasonResolver.impactNote(source: "manual", dayLoadState: .pending)
             )
             dismiss()
         } catch {
-            errorMessage = "Couldn't log that activity. Try again."
+            errorMessage = String(localized: "logWorkout.error.saveFailed", defaultValue: "Couldn't log that activity. Try again.", comment: "Log-activity form: shown when saving the manually-logged activity fails")
         }
     }
 
@@ -139,9 +310,9 @@ struct LogManualWorkoutView: View {
     private static func durationLabel(_ minutes: Int) -> String {
         let hours = minutes / 60
         let mins = minutes % 60
-        if hours == 0 { return "\(mins) min" }
-        if mins == 0 { return "\(hours)h" }
-        return "\(hours)h \(mins)m"
+        if hours == 0 { return String(localized: "logWorkout.duration.minutesOnly", defaultValue: "\(mins) min", comment: "Log-activity form: duration stepper value, minutes only") }
+        if mins == 0 { return String(localized: "logWorkout.duration.hoursOnly", defaultValue: "\(hours)h", comment: "Log-activity form: duration stepper value, whole hours only") }
+        return String(localized: "logWorkout.duration.hoursAndMinutes", defaultValue: "\(hours)h \(mins)m", comment: "Log-activity form: duration stepper value, hours and minutes")
     }
 }
 
