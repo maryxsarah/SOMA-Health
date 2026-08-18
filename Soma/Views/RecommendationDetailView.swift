@@ -511,7 +511,11 @@ struct RecommendationDetailView: View {
                 .foregroundStyle(Color(red: 0x8A / 255, green: 0x75 / 255, blue: 0x50 / 255))
             Spacer(minLength: 8)
             Button {
-                Superwall.shared.register(placement: "view_premium")
+                let handler = SuperwallDiagnostics.handler(placement: "view_premium")
+                handler.onDismiss { _, result in
+                    WinBackOfferManager.maybePresentAfterDecline(result: result)
+                }
+                Superwall.shared.register(placement: "view_premium", handler: handler)
             } label: {
                 Text(String(localized: "recommendationDetail.generationLimit.upgrade", defaultValue: "Upgrade", comment: "Button in the amber generation-limit nudge card that opens the premium paywall"))
                     .font(.caption.bold())

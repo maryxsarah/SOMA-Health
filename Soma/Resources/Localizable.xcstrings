@@ -23344,65 +23344,6 @@
         }
       }
     },
-    "Redeeming a valid code unlocks free access to Soma Premium for a limited time." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Das Einlösen eines gültigen Codes schaltet für begrenzte Zeit kostenlosen Zugang zu Soma Premium frei."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Redeeming a valid code unlocks free access to Soma Premium for a limited time."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Canjear un código válido desbloquea acceso gratuito a Soma Premium por tiempo limitado."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Utiliser un code valide vous donne un accès gratuit à Soma Premium pour une durée limitée."
-          }
-        },
-        "hy" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Վավեր կոդի ակտիվացումը բացում է անվճար հասանելիություն Soma Premium-ին սահմանափակ ժամանակով։"
-          }
-        },
-        "it" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Il riscatto di un codice valido sblocca l'accesso gratuito a Soma Premium per un periodo limitato."
-          }
-        },
-        "ka" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "მოქმედი კოდის გააქტიურება გახსნის უფასო წვდომას Soma Premium-ზე შეზღუდული დროით."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Активация действующего кода открывает бесплатный доступ к Soma Premium на ограниченное время."
-          }
-        },
-        "sr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Активирање важећег кода отвара бесплатан приступ Soma Premium на ограничено време."
-          }
-        }
-      }
-    },
     "Referral Code" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -95208,55 +95149,55 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Abonniere Soma Premium, um weiterhin deinen vollständigen Tagesplan zu erhalten – Workouts, Schrittziele und mehr."
+            "value" : "Abonniere Soma Pro, um weiterhin deinen vollständigen Tagesplan zu erhalten – Workouts, Schrittziele und mehr."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Subscribe to Soma Premium to keep getting your full daily plan -- workouts, step targets, and more."
+            "value" : "Subscribe to Soma Pro to keep getting your full daily plan -- workouts, step targets, and more."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Suscríbete a Soma Premium para seguir recibiendo tu plan diario completo: entrenamientos, objetivos de pasos y más."
+            "value" : "Suscríbete a Soma Pro para seguir recibiendo tu plan diario completo: entrenamientos, objetivos de pasos y más."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Abonnez-vous à Soma Premium pour continuer à recevoir votre plan quotidien complet : entraînements, objectifs de pas et plus encore."
+            "value" : "Abonnez-vous à Soma Pro pour continuer à recevoir votre plan quotidien complet : entraînements, objectifs de pas et plus encore."
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Բաժանորդագրվիր Soma Premium-ին՝ շարունակելու համար ստանալ քո ամբողջական ամենօրյա պլանը -- մարզումներ, քայլերի նպատակներ և ավելին:"
+            "value" : "Բաժանորդագրվիր Soma Pro-ին՝ շարունակելու համար ստանալ քո ամբողջական ամենօրյա պլանը -- մարզումներ, քայլերի նպատակներ և ավելին:"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Abbonati a Soma Premium per continuare a ricevere il tuo piano giornaliero completo: allenamenti, obiettivi di passi e altro ancora."
+            "value" : "Abbonati a Soma Pro per continuare a ricevere il tuo piano giornaliero completo: allenamenti, obiettivi di passi e altro ancora."
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "გამოიწერე Soma Premium, რომ განაგრძო სრული ყოველდღიური გეგმის მიღება -- ვარჯიშები, ნაბიჯების მიზნები და სხვა."
+            "value" : "გამოიწერე Soma Pro, რომ განაგრძო სრული ყოველდღიური გეგმის მიღება -- ვარჯიშები, ნაბიჯების მიზნები და სხვა."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Оформи подписку Soma Premium, чтобы и дальше получать полный ежедневный план -- тренировки, целевые показатели по шагам и многое другое."
+            "value" : "Оформи подписку Soma Pro, чтобы и дальше получать полный ежедневный план -- тренировки, целевые показатели по шагам и многое другое."
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Претплати се на Soma Premium да наставиш да добијаш свој пуни дневни план — тренинге, циљеве корака и много тога."
+            "value" : "Претплати се на Soma Pro да наставиш да добијаш свој пуни дневни план — тренинге, циљеве корака и много тога."
           }
         }
       }
@@ -107639,61 +107580,61 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium"
+            "value" : "Soma Pro"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium"
+            "value" : "Soma Pro"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium"
+            "value" : "Soma Pro"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium"
+            "value" : "Soma Pro"
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium"
+            "value" : "Soma Pro"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium"
+            "value" : "Soma Pro"
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium"
+            "value" : "Soma Pro"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium"
+            "value" : "Soma Pro"
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium"
+            "value" : "Soma Pro"
           }
         }
       }
     },
     "profile.plan.renews" : {
-      "comment" : "Suffix on the Premium plan line showing the next renewal date",
+      "comment" : "Suffix on the Pro plan line showing the next renewal date",
       "extractionState" : "manual",
       "localizations" : {
         "de" : {
@@ -107957,7 +107898,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "· Passer à Premium"
+            "value" : "· Passer à Pro"
           }
         },
         "hy" : {
@@ -107969,7 +107910,7 @@
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "· Passa a Premium"
+            "value" : "· Passa a Pro"
           }
         },
         "ka" : {
@@ -110993,67 +110934,67 @@
       }
     },
     "profile.subscription.active" : {
-      "comment" : "Subscription row consequence text when Premium is active",
+      "comment" : "Subscription row consequence text when Pro is active",
       "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium ist aktiv."
+            "value" : "Soma Pro ist aktiv."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium is active."
+            "value" : "Soma Pro is active."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium está activo."
+            "value" : "Soma Pro está activo."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium est actif."
+            "value" : "Soma Pro est actif."
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Պրեմիում-ը ակտիվ է։"
+            "value" : "Soma Pro-ն ակտիվ է։"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium è attivo."
+            "value" : "Soma Pro è attivo."
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium აქტიურია."
+            "value" : "Soma Pro აქტიურია."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium активна."
+            "value" : "Soma Pro активна."
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium је активна."
+            "value" : "Soma Pro је активна."
           }
         }
       }
     },
     "profile.subscription.activeShort" : {
-      "comment" : "Subscription row value when Premium is active",
+      "comment" : "Subscription row value when Pro is active",
       "extractionState" : "manual",
       "localizations" : {
         "de" : {
@@ -115572,7 +115513,7 @@
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Passer à Premium"
+            "value" : "Passer à Pro"
           }
         },
         "hy" : {
@@ -115584,7 +115525,7 @@
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Passa a Premium"
+            "value" : "Passa a Pro"
           }
         },
         "ka" : {
@@ -120234,55 +120175,55 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Probier Soma — mein Code %@ schenkt dir %lld Tage Premium."
+            "value" : "Probier Soma — mein Code %@ schenkt dir %lld Tage Pro."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Try Soma — my code %@ gives you %lld days of Premium for free."
+            "value" : "Try Soma — my code %@ gives you %lld days of Pro for free."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prueba Soma: mi código %@ te da %lld días de Premium gratis."
+            "value" : "Prueba Soma: mi código %@ te da %lld días de Pro gratis."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Essaie Soma — mon code %@ t'offre %lld jours de Premium gratuits."
+            "value" : "Essaie Soma — mon code %@ t'offre %lld jours de Pro gratuits."
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Փորձիր Soma-ն. իմ %@ կոդը քեզ կտա %lld օր Premium անվճար:"
+            "value" : "Փորձիր Soma-ն. իմ %@ կոդը քեզ կտա %lld օր Pro անվճար:"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prova Soma: il mio codice %@ ti dà %lld giorni di Premium gratis."
+            "value" : "Prova Soma: il mio codice %@ ti dà %lld giorni di Pro gratis."
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "სცადე Soma — ჩემი კოდი %@ გაძლევს %lld დღე Premium-ს უფასოდ."
+            "value" : "სცადე Soma — ჩემი კოდი %@ გაძლევს %lld დღე Pro-ს უფასოდ."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Попробуй Soma — мой код %@ даст тебе %lld дней Премиума бесплатно."
+            "value" : "Попробуй Soma — мой код %@ даст тебе %lld дней Pro бесплатно."
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Пробај Soma — мој код %@ даје ти %lld дана Premium-а бесплатно."
+            "value" : "Пробај Soma — мој код %@ даје ти %lld дана Pro-а бесплатно."
           }
         }
       }
@@ -120403,6 +120344,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Препоручни код"
+          }
+        }
+      }
+    },
+    "referral_code.redeem.subtitle" : {
+      "comment" : "Referral code sheet: explanation of what redeeming a code does",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Einlösen eines gültigen Codes schaltet für begrenzte Zeit kostenlosen Zugang zu Soma Pro frei."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redeeming a valid code unlocks free access to Soma Pro for a limited time."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canjear un código válido desbloquea acceso gratuito a Soma Pro por tiempo limitado."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utiliser un code valide vous donne un accès gratuit à Soma Pro pour une durée limitée."
+          }
+        },
+        "hy" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Վավեր կոդի ակտիվացումը բացում է անվճար հասանելիություն Soma Pro-ին սահմանափակ ժամանակով։"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Il riscatto di un codice valido sblocca l'accesso gratuito a Soma Pro per un periodo limitato."
+          }
+        },
+        "ka" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "მოქმედი კოდის გააქტიურება გახსნის უფასო წვდომას Soma Pro-ზე შეზღუდული დროით."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Активация действующего кода открывает бесплатный доступ к Soma Pro на ограниченное время."
+          }
+        },
+        "sr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Активирање важећег кода отвара бесплатан приступ Soma Pro на ограничено време."
           }
         }
       }
@@ -127074,55 +127075,55 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium aktiv. Öffnet die Abo-Verwaltung."
+            "value" : "Soma Pro aktiv. Öffnet die Abo-Verwaltung."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium active. Opens subscription management."
+            "value" : "Soma Pro active. Opens subscription management."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium activo. Abre la gestión de la suscripción."
+            "value" : "Soma Pro activo. Abre la gestión de la suscripción."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium actif. Ouvre la gestion de l'abonnement."
+            "value" : "Soma Pro actif. Ouvre la gestion de l'abonnement."
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium-ն ակտիվ է: Բացում է բաժանորդագրության կառավարումը:"
+            "value" : "Soma Pro-ն ակտիվ է: Բացում է բաժանորդագրության կառավարումը:"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium attivo. Apre la gestione dell'abbonamento."
+            "value" : "Soma Pro attivo. Apre la gestione dell'abbonamento."
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium აქტიურია. ხსნის გამოწერის მართვას."
+            "value" : "Soma Pro აქტიურია. ხსნის გამოწერის მართვას."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium активен. Открывает управление подпиской."
+            "value" : "Soma Pro активен. Открывает управление подпиской."
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Soma Premium је активан. Отвара управљање претплатом."
+            "value" : "Soma Pro је активан. Отвара управљање претплатом."
           }
         }
       }

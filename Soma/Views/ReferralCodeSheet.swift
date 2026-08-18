@@ -26,7 +26,7 @@ struct ReferralCodeSheet: View {
                 Text(String(localized: "referral_code.title", defaultValue: "Have a referral code?", comment: "Referral code sheet: headline"))
                     .font(SomaType.sheetTitle)
                     .foregroundStyle(SomaTokens.ink)
-                Text(String(localized: "referral_code.subtitle", defaultValue: "Redeeming a valid code unlocks free access to Soma Premium for a limited time.", comment: "Referral code sheet: explanation of what redeeming a code does"))
+                Text(String(localized: "referral_code.redeem.subtitle", defaultValue: "Redeeming a valid code unlocks free access to Soma Pro for a limited time.", comment: "Referral code sheet: explanation of what redeeming a code does"))
                     .font(.system(size: 13.5))
                     .foregroundStyle(SomaTokens.ink3)
 
