@@ -74100,126 +74100,6 @@
         }
       }
     },
-    "home.dock.activity" : {
-      "comment" : "Home: floating dock icon that opens the health dashboard's activity section",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Aktivität"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Activity"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Actividad"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Activité"
-          }
-        },
-        "hy" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ակտիվություն"
-          }
-        },
-        "it" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Attività"
-          }
-        },
-        "ka" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "აქტივობა"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Активность"
-          }
-        },
-        "sr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Активност"
-          }
-        }
-      }
-    },
-    "home.dock.activity.label" : {
-      "comment" : "",
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Aktivität"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Activity"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Actividad"
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Activité"
-          }
-        },
-        "hy" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ակտիվություն"
-          }
-        },
-        "it" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Attività"
-          }
-        },
-        "ka" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "აქტივობა"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Активность"
-          }
-        },
-        "sr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Активност"
-          }
-        }
-      }
-    },
     "home.dock.dashboard" : {
       "comment" : "Home: floating dock icon that opens the health dashboard's overview section",
       "extractionState" : "manual",
@@ -74881,61 +74761,61 @@
       }
     },
     "home.dock.photos.label" : {
-      "comment" : "",
+      "comment" : "Home: dock/More-sheet visible label for the goal photo progress icon",
       "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fotos"
+            "value" : "Fortschritt"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Photos"
+            "value" : "Progress"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fotos"
+            "value" : "Progreso"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Photos"
+            "value" : "Progrès"
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Լուսանկարներ"
+            "value" : "Առաջընթաց"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Foto"
+            "value" : "Progressi"
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ფოტოები"
+            "value" : "პროგრესი"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Фото"
+            "value" : "Прогресс"
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Фотографије"
+            "value" : "Напредак"
           }
         }
       }
@@ -107519,55 +107399,55 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kostenloser Zugang · noch %lld Tage"
+            "value" : "Kostenloser Zugang · noch %@ Tage"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Free access · %lld days left"
+            "value" : "Free access · %@ days left"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Acceso gratuito · quedan %lld días"
+            "value" : "Acceso gratuito · quedan %@ días"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Accès gratuit · %lld jours restants"
+            "value" : "Accès gratuit · %@ jours restants"
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Անվճար հասանելիություն · մնացել է %lld օր"
+            "value" : "Անվճար հասանելիություն · մնացել է %@ օր"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Accesso gratuito · %lld giorni rimasti"
+            "value" : "Accesso gratuito · %@ giorni rimasti"
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "უფასო წვდომა · დარჩა %lld დღე"
+            "value" : "უფასო წვდომა · დარჩა %@ დღე"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Бесплатный доступ · осталось %lld дн."
+            "value" : "Бесплатный доступ · осталось %@ дн."
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Бесплатан приступ · још %lld дана"
+            "value" : "Бесплатан приступ · још %@ дана"
           }
         }
       }
@@ -107999,55 +107879,55 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kostenlose Testphase · noch %lld Tage"
+            "value" : "Kostenlose Testphase · noch %@ Tage"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Free trial · %lld days left"
+            "value" : "Free trial · %@ days left"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prueba gratuita · quedan %lld días"
+            "value" : "Prueba gratuita · quedan %@ días"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Essai gratuit · %lld jours restants"
+            "value" : "Essai gratuit · %@ jours restants"
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Փորձաշրջան · մնացել է %lld օր"
+            "value" : "Փորձաշրջան · մնացել է %@ օր"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Prova gratuita · %lld giorni rimasti"
+            "value" : "Prova gratuita · %@ giorni rimasti"
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "საცდელი პერიოდი · დარჩა %lld დღე"
+            "value" : "საცდელი პერიოდი · დარჩა %@ დღე"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Пробный период · осталось %lld дн."
+            "value" : "Пробный период · осталось %@ дн."
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Пробни период · још %lld дана"
+            "value" : "Пробни период · још %@ дана"
           }
         }
       }
@@ -109008,6 +108888,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Тихи сати"
+          }
+        }
+      }
+    },
+    "profile.redeemOfferCode.rowTitle" : {
+      "comment" : "Row title presenting Apple's offer-code redemption sheet",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App Store-Code einlösen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redeem App Store code"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canjear código de App Store"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utiliser un code App Store"
+          }
+        },
+        "hy" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App Store կոդի ակտիվացում"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usa codice App Store"
+          }
+        },
+        "ka" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App Store კოდის გამოყენება"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Использовать код App Store"
+          }
+        },
+        "sr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Искористи App Store код"
           }
         }
       }
@@ -127014,55 +126954,55 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld TAGE"
+            "value" : "%@ TAGE"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld DAYS"
+            "value" : "%@ DAYS"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld DÍAS"
+            "value" : "%@ DÍAS"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld JOURS"
+            "value" : "%@ JOURS"
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld ՕՐ"
+            "value" : "%@ ՕՐ"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld GIORNI"
+            "value" : "%@ GIORNI"
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld დღე"
+            "value" : "%@ დღე"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld ДН"
+            "value" : "%@ ДН"
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld ДАНА"
+            "value" : "%@ ДАНА"
           }
         }
       }
@@ -127314,55 +127254,55 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "TEST · %lld TAGE"
+            "value" : "TEST · %@ TAGE"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "TRIAL · %lld DAYS"
+            "value" : "TRIAL · %@ DAYS"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "PRUEBA · %lld DÍAS"
+            "value" : "PRUEBA · %@ DÍAS"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ESSAI · %lld J"
+            "value" : "ESSAI · %@ J"
           }
         },
         "hy" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ՓՈՐՁ · %lld ՕՐ"
+            "value" : "ՓՈՐՁ · %@ ՕՐ"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "PROVA · %lld GG"
+            "value" : "PROVA · %@ GG"
           }
         },
         "ka" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "საცდელი · %lld დღე"
+            "value" : "საცდელი · %@ დღე"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ПРОБНЫЙ · %lld ДН"
+            "value" : "ПРОБНЫЙ · %@ ДН"
           }
         },
         "sr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ПРОБНИ · %lld Д"
+            "value" : "ПРОБНИ · %@ Д"
           }
         }
       }

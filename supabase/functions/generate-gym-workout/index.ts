@@ -22,6 +22,7 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { classifyGenerationError } from "../_shared/anthropicErrors.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { checkGenerationLimit, GENERATION_LIMIT_MESSAGE, logGeneration, type SubscriptionTier } from "../_shared/generationLimits.ts";
+import { DEVICE_DETECTED_SOURCE } from "../_shared/workoutLogSources.ts";
 import { extractOutputText } from "../_shared/openai.ts";
 import { GymWorkoutTemplate, selectTemplate } from "./templates.ts";
 import { normalizeEquipment } from "../_shared/equipment.ts";
@@ -183,7 +184,7 @@ Deno.serve(async (req: Request) => {
       .select("title")
       .eq("user_id", userId)
       .eq("date", date)
-      .neq("source", "device_detected")
+      .neq("source", DEVICE_DETECTED_SOURCE)
       .limit(1);
     if (logReadError) {
       throw new Error(`could not check today's workout log: ${logReadError.message}`);

@@ -181,12 +181,12 @@ struct ProfileView: View {
         }
         if subscriptionManager.isInTrial {
             if let days = planDaysLeft {
-                return String(localized: "profile.plan.trialDays", defaultValue: "Free trial · \(days) days left", comment: "Plan line during the free trial, with days remaining")
+                return String(localized: "profile.plan.trialDays", defaultValue: "Free trial · \(days.formatted()) days left", comment: "Plan line during the free trial, with days remaining")
             }
             return String(localized: "profile.plan.trial", defaultValue: "Free trial", comment: "Plan line during the free trial when days remaining are unknown")
         }
         if let days = planDaysLeft {
-            return String(localized: "profile.plan.bonusDays", defaultValue: "Free access · \(days) days left", comment: "Plan line while a referral/promo free-access bonus is active, with days remaining")
+            return String(localized: "profile.plan.bonusDays", defaultValue: "Free access · \(days.formatted()) days left", comment: "Plan line while a referral/promo free-access bonus is active, with days remaining")
         }
         return String(localized: "profile.plan.free", defaultValue: "Free plan", comment: "Plan line under the profile email on the free plan")
     }
@@ -1706,6 +1706,8 @@ private struct AccountSettingsView: View {
                     }
                     groupDivider
                     groupRow(title: LocalizedStringKey(String(localized: "profile.referralCode.rowTitle", defaultValue: "Referral code", comment: "Row title opening the referral-code sheet"))) { store.showReferralCodeSheet = true }
+                    groupDivider
+                    groupRow(title: LocalizedStringKey(String(localized: "profile.redeemOfferCode.rowTitle", defaultValue: "Redeem App Store code", comment: "Row title presenting Apple's offer-code redemption sheet"))) { OfferCodeRedemption.present() }
                     groupDivider
                     groupRow(title: LocalizedStringKey(String(localized: "profile.feedback.rowTitle", defaultValue: "Feedback", comment: "Row title opening the feedback presenter"))) { FeedbackPresenter.present() }
                     groupDivider

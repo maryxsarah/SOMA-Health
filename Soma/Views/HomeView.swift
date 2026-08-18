@@ -69,11 +69,22 @@ struct HomeView: View {
     // current photo pair analyzed), handled the same "hidden CTA instead
     // of a broken row" way the goal-progress row handles no photos yet.
     @State private var nutritionTarget: NutritionTargets?
-    @State private var nutritionProgress: NutritionDayProgress?
+    /// Today's raw meal_log entries -- the single source loadNutritionState
+    /// writes; nutritionProgress and nutritionConsumedNoTarget below are
+    /// both derived from this + nutritionTarget rather than separately
+    /// hand-synced @State, so there's no branch that can forget to update
+    /// one of them.
+    @State private var todaysMealEntries: [MealLogEntry] = []
+    private var nutritionProgress: NutritionDayProgress? {
+        nutritionTarget.map { NutritionDayProgress.compute(entries: todaysMealEntries, target: $0) }
+    }
     /// Today's consumed kcal when meals are logged but no target has been
     /// computed yet -- the tile shows the real total instead of "No
     /// target yet" pretending nothing happened.
-    @State private var nutritionConsumedNoTarget: Int?
+    private var nutritionConsumedNoTarget: Int? {
+        guard nutritionTarget == nil, !todaysMealEntries.isEmpty else { return nil }
+        return NutritionDayProgress.consumedCalories(todaysMealEntries)
+    }
     @State private var showNutrition = false
     @State private var showSeededDetail = false
     @State private var pendingGymPlan: (AIWorkoutPlan, String, String)?
@@ -1131,11 +1142,14 @@ struct HomeView: View {
     /// of what today's health-data-driven category says -- persisted
     /// server-side (see setRecommendationOverride), so it survives an app
     /// restart and generate-workout-plan/generate-gym-workout honor it too.
-    /// Hidden once today's workout is already logged, since there's
-    /// nothing left to override at that point.
+    /// Hidden once today's workout is DELIBERATELY logged, since there's
+    /// nothing left to override at that point -- a device-detected
+    /// auto-log doesn't count (matches generate-workout-plan/
+    /// generate-gym-workout's own device_detected exclusion, so this
+    /// control stays available exactly as long as generation itself does).
     @ViewBuilder
     private func restDayRequestControl(_ recommendation: DailyRecommendation) -> some View {
-        if todaysWorkoutLog == nil {
+        if deliberateWorkoutLogToday == nil {
             if let requested = recommendation.userRequestedCategory {
                 Button {
                     Task { await setRestDayRequest(nil) }
@@ -1286,18 +1300,18 @@ struct HomeView: View {
         }
     }
 
-    /// Mirrors the server's tiered PER-SOURCE quota (generationLimits.ts):
-    /// 3/day on annual, 1/day otherwise, counted for gym_photo alone --
-    /// an explicit product decision there.
+    /// Mirrors the server's shared-bucket quota (generationLimits.ts):
+    /// 3/day free & monthly, 10/day annual -- free matches monthly since
+    /// the free tier is what internal test accounts run on (2026-08-18).
     private var dailyGenerationLimit: Int {
-        SubscriptionManager.shared.tier == "annual" ? 3 : 1
+        SubscriptionManager.shared.tier == "annual" ? 10 : 3
     }
 
     private var scanState: ScanState {
         // A committed or completed workout removes the row entirely.
         // A device-detected auto-log is background noise for this gate --
         // the user still deserves their scan (matches the server's own
-        // .neq("source", "device_detected") lock exclusion).
+        // .neq("source", DEVICE_DETECTED_SOURCE) lock exclusion).
         if deliberateWorkoutLogToday != nil || todaysAIPlan?.addedToPlan == true { return .hidden }
         // Lock only when today's quota is actually spent -- one scan must not
         // lock out an annual subscriber who still has generations left.
@@ -1569,7 +1583,7 @@ struct HomeView: View {
     /// AI plan) -- device_detected auto-logs don't count as "workout done"
     /// for generation/scan gating, mirroring the server-side lock.
     private var deliberateWorkoutLogToday: WorkoutLogEntry? {
-        todaysWorkoutLog.flatMap { $0.source == "device_detected" ? nil : $0 }
+        todaysWorkoutLog.flatMap { $0.source == WorkoutLogEntry.deviceDetectedSource ? nil : $0 }
     }
 
     private var streakWidgetTile: some View {
@@ -2395,7 +2409,12 @@ struct HomeView: View {
 
     /// Slots 3-5 -- fixed defaults rather than the mockup's drag-to-reorder
     /// (persisted custom ordering is a bigger feature than this visual
-    /// pass covers; logged as a follow-up, see docs/bug-log.md).
+    /// pass covers; logged as a follow-up, see docs/bug-log.md). Used to
+    /// carry a third "Activity" slot (heart+pulse icon) that just opened
+    /// the same HealthDashboardView as the Dashboard slot at a different
+    /// starting tab -- a real duplicate entry point, not a distinct
+    /// feature, so it's removed rather than re-iconed; Goals moved back
+    /// into this slot in its place.
     private var configurableDockActions: [DashboardDockAction] {
         [
             DashboardDockAction(
@@ -2404,17 +2423,11 @@ struct HomeView: View {
                 action: performScanGymAction
             ),
             DashboardDockAction(
-                id: "activity", assetImage: "soma.dock.activity", label: LocalizedStringKey(String(localized: "home.dock.activity.label", defaultValue: "Activity", comment: "Home: dock/More-sheet visible label for the activity icon")),
-                accessibilityLabel: String(localized: "home.dock.activity", defaultValue: "Activity", comment: "Home: floating dock icon that opens the health dashboard's activity section"),
-                action: {
-                    AnalyticsManager.shared.featureUsed(name: "health_dashboard")
-                    healthDashboardInitialSection = .activity
-                    showHealthDashboard = true
-                }
+                id: "goals", assetImage: "soma.dock.goal", label: LocalizedStringKey(String(localized: "home.dock.goals.label", defaultValue: "Goals", comment: "Home: dock/More-sheet visible label for the sport goal icon")),
+                accessibilityLabel: String(localized: "home.dock.goals", defaultValue: "Sport goal", comment: "Home: floating dock icon that opens the sport goal flow"),
+                accessibilityIdentifier: "dock-goals-button",
+                action: openSportGoal
             ),
-            // Real feedback: "Nutrition should be more accessible in menu,
-            // and goal should move to additional" -- nutrition takes the
-            // dock slot, Goals moves to the More sheet.
             DashboardDockAction(
                 id: "nutrition", assetImage: "soma.dock.nutrition", label: LocalizedStringKey(String(localized: "home.dock.nutrition.label", defaultValue: "Nutrition", comment: "Home: dock/More-sheet visible label for the nutrition icon")),
                 accessibilityLabel: String(localized: "home.dock.nutrition", defaultValue: "Nutrition", comment: "Home: More-sheet icon that opens today's nutrition"),
@@ -2428,23 +2441,11 @@ struct HomeView: View {
     }
 
     /// Everything else -- reachable from the "More" sheet (4h) even though
-    /// it isn't in a dock slot: sport goals, photo progress, editing
-    /// widgets, profile. Goals swapped places with Nutrition (real
-    /// feedback: nutrition needs the more accessible slot; a goal, once
-    /// set, is mostly consumed through Home's goal row anyway).
+    /// it isn't in a dock slot: photo progress, editing widgets, profile.
     private var overflowDockActions: [DashboardDockAction] {
         [
             DashboardDockAction(
-                id: "goals", assetImage: "soma.dock.goal", label: LocalizedStringKey(String(localized: "home.dock.goals.label", defaultValue: "Goals", comment: "Home: dock/More-sheet visible label for the sport goal icon")),
-                accessibilityLabel: String(localized: "home.dock.goals", defaultValue: "Sport goal", comment: "Home: floating dock icon that opens the sport goal flow"),
-                // Stable hook for XCUITest -- the identifier survives the
-                // move into the More sheet (OptionalAccessibilityIdentifier
-                // in MoreActionsSheet applies it to the sheet row too).
-                accessibilityIdentifier: "dock-goals-button",
-                action: openSportGoal
-            ),
-            DashboardDockAction(
-                id: "photos", systemImage: "photo.on.rectangle.angled", label: LocalizedStringKey(String(localized: "home.dock.photos.label", defaultValue: "Photos", comment: "Home: dock/More-sheet visible label for the goal photo progress icon")),
+                id: "photos", systemImage: "photo.on.rectangle.angled", label: LocalizedStringKey(String(localized: "home.dock.photos.label", defaultValue: "Progress", comment: "Home: dock/More-sheet visible label for the goal photo progress icon")),
                 accessibilityLabel: String(localized: "home.dock.photos", defaultValue: "Goal photo progress", comment: "Home: More-sheet icon that opens goal photo progress"),
                 action: {
                     AnalyticsManager.shared.featureUsed(name: "goal_progress_home_card")
@@ -2602,7 +2603,7 @@ struct HomeView: View {
     private static func todaysWorkoutCardEyebrow(for source: String) -> String {
         switch source {
         case "manual": String(localized: "home.workoutCard.eyebrow.manual", defaultValue: "Today's activity", comment: "Home: eyebrow label over today's workout card when the log was manually entered")
-        case "device_detected": String(localized: "home.workoutCard.eyebrow.deviceDetected", defaultValue: "Detected automatically", comment: "Home: eyebrow label over today's workout card when the log was auto-detected from a connected device")
+        case WorkoutLogEntry.deviceDetectedSource: String(localized: "home.workoutCard.eyebrow.deviceDetected", defaultValue: "Detected automatically", comment: "Home: eyebrow label over today's workout card when the log was auto-detected from a connected device")
         default: String(localized: "home.workoutCard.eyebrow.aiPlan", defaultValue: "Today's workout", comment: "Home: eyebrow label over today's workout card when the log came from the AI-generated plan")
         }
     }
@@ -2779,20 +2780,14 @@ struct HomeView: View {
     /// CTA instead of hiding entirely, same posture as goalProgressRow's
     /// own "add your goal photo" state.
     private func loadNutritionState() async {
-        let entries = (try? await SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
-        guard let target = try? await SupabaseClient.shared.fetchNutritionTargets() else {
-            nutritionTarget = nil
-            nutritionProgress = nil
-            // Logged food must never be invisible just because no calorie
-            // target exists yet (real feedback: log a meal first, widget
-            // still shows the empty set-up state) -- surface the consumed
-            // total on its own.
-            nutritionConsumedNoTarget = entries.isEmpty ? nil : entries.reduce(0) { $0 + $1.calories }
-            return
-        }
-        nutritionTarget = target
-        nutritionConsumedNoTarget = nil
-        nutritionProgress = NutritionDayProgress.compute(entries: entries, target: target)
+        // Independent reads -- concurrent, not sequential (this runs on
+        // every Home appear/refresh).
+        async let entriesFetch = (try? SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
+        async let targetFetch = try? SupabaseClient.shared.fetchNutritionTargets()
+        todaysMealEntries = await entriesFetch
+        nutritionTarget = await targetFetch ?? nil
+        // nutritionProgress / nutritionConsumedNoTarget are both computed
+        // from the two writes above -- see their declarations.
     }
 
     /// `throws` (not `try?`) on purpose -- called right after a write in
@@ -2969,11 +2964,11 @@ struct HomeView: View {
                 feedback: feedback,
                 startedAt: entry.startTime,
                 endedAt: endedAt,
-                source: "device_detected",
+                source: WorkoutLogEntry.deviceDetectedSource,
                 // Pre-log state: the "closed today's quota" variant only
                 // becomes true once this very log lands, so freeze the
                 // state-independent detected line instead.
-                reasonSnapshot: WorkoutReasonResolver.impactNote(source: "device_detected", dayLoadState: .pending)
+                reasonSnapshot: WorkoutReasonResolver.impactNote(source: WorkoutLogEntry.deviceDetectedSource, dayLoadState: .pending)
             )
             await loadTodaysWorkoutLog()
             await loadCompletedDates()

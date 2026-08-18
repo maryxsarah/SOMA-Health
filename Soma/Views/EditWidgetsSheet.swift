@@ -68,6 +68,7 @@ struct EditWidgetsSheet: View {
                                 Toggle(isOn: row.binding) { EmptyView() }
                                     .labelsHidden()
                                     .tint(SomaTokens.accent)
+                                    .accessibilityIdentifier("editWidgets.toggle.\(row.id)")
                             }
                             .padding(13)
                             .glassCardFlat(cornerRadius: SomaTokens.rRow)
