@@ -49,6 +49,19 @@ jobs:
           printf 'SUPABASE_HOST = %s\nSUPABASE_ANON_KEY = %s\nWHOOP_CLIENT_ID = %s\nOURA_CLIENT_ID = %s\nSUPERWALL_API_KEY = %s\nPOSTHOG_API_KEY = %s\nPOSTHOG_HOST = %s\n' \
             "$SUPABASE_HOST" "$SUPABASE_ANON_KEY" "$WHOOP_CLIENT_ID" "$OURA_CLIENT_ID" "$SUPERWALL_API_KEY" "$POSTHOG_API_KEY" "$POSTHOG_HOST" \
             | tee Config/Config-Debug.xcconfig > Config/Config-Release.xcconfig
+          # A blank value here compiles fine and uploads fine -- Superwall.configure
+          # and PostHogSDK.setup both fail silently on an empty/placeholder key
+          # (2026-08-18 incident: builds 15-27 shipped with no Superwall key at
+          # all, paywalls never presented, nobody noticed until a tester did).
+          # Catch it here instead of discovering it days later in TestFlight.
+          if [ -z "$SUPERWALL_API_KEY" ]; then
+            echo "::error::SUPERWALL_API_KEY secret is empty -- Superwall.configure would silently fail and no paywall would ever present. Set it in repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          if [ -z "$POSTHOG_API_KEY" ]; then
+            echo "::error::POSTHOG_API_KEY secret is empty -- PostHog would never initialize and this build would report zero analytics. Set it in repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
           # Decode the .p8 signing key (tolerate any whitespace/line-wrapping).
           mkdir -p "$HOME/.appstoreconnect/private_keys"
           KEYFILE="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
