@@ -81,7 +81,7 @@ targets:
         # Bump this before every new archive you upload to App Store
         # Connect -- Apple rejects re-uploading the same build number
         # under the same version, even for internal/bug-fix changes.
-        CFBundleVersion: "27"
+        CFBundleVersion: "28"
         # Declares Soma only uses exempt encryption (standard HTTPS via
         # URLSession -- no bundled/custom crypto) so every future archive
         # skips the "Missing Compliance" App Store Connect dialog
