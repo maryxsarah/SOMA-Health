@@ -13,9 +13,15 @@ struct NutritionDayProgress {
     let targetCarbsG: Int
     let targetFatG: Int
 
+    /// Shared with the no-target-yet display (HomeView's nutrition
+    /// widget) so both read the exact same calorie-summing rule.
+    static func consumedCalories(_ entries: [MealLogEntry]) -> Int {
+        entries.reduce(0) { $0 + $1.calories }
+    }
+
     static func compute(entries: [MealLogEntry], target: NutritionTargets) -> NutritionDayProgress {
         NutritionDayProgress(
-            consumedCalories: entries.reduce(0) { $0 + $1.calories },
+            consumedCalories: consumedCalories(entries),
             consumedProteinG: entries.reduce(0) { $0 + $1.proteinG },
             // carbs/fat are optional per entry (a quick manual log might
             // only include calories + protein) -- missing values count as

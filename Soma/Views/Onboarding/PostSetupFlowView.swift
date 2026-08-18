@@ -39,6 +39,10 @@ struct PostSetupFlowView: View {
     /// with no way forward. `.skipped` (no audience match, holdout, etc.)
     /// already calls `feature` on its own and needs no handling here.
     @State private var paywallError: String?
+    /// Guards presentOnboardingPaywall() against a double-registration
+    /// race during the entitlement/bonus-sync await window (a double-tap
+    /// on "Try again", or this screen's own .task re-firing).
+    @State private var isPresentingPaywall = false
 
     var body: some View {
         Group {
@@ -137,10 +141,13 @@ struct PostSetupFlowView: View {
     /// paywall's feature closure runs (a purchase, a restore, or -- if the
     /// dashboard paywall is ever set to Non Gated -- any dismissal).
     private func presentOnboardingPaywall() {
-        if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
-            appState.markOnboardingComplete()
-            return
-        }
+        // Guards two things at once: (1) a double-tap on the error
+        // screen's "Try again" during the entitlement-sync await below
+        // used to start a second concurrent registration -- now a no-op;
+        // (2) this view's own .task re-firing needs the same guard for
+        // the same reason.
+        guard !isPresentingPaywall else { return }
+        isPresentingPaywall = true
         Task { await presentOnboardingPaywallAfterEntitlementSync() }
     }
 
@@ -149,8 +156,20 @@ struct PostSetupFlowView: View {
     /// against a stale persisted status (e.g. a previous account's active
     /// entitlement on this device) silently skips the audience and eats
     /// the paywall. Await a fresh entitlement read first, then register.
+    /// Also re-checks the referral bonus itself (not just entitlement):
+    /// the flow's own top-level .task already refreshes it once, but
+    /// nothing enforces that finishing before this step is reached (the
+    /// UITEST_POSTSETUP=paywall shortcut lands here immediately, and nothing
+    /// stops a future entry point from doing the same) -- awaiting it here
+    /// too makes the bonus check correct regardless of arrival order.
     @MainActor
     private func presentOnboardingPaywallAfterEntitlementSync() async {
+        defer { isPresentingPaywall = false }
+        await appState.refreshReferralBonus()
+        if let bonusUntil = appState.referralBonusUntil, bonusUntil > Date() {
+            appState.markOnboardingComplete()
+            return
+        }
         await SubscriptionManager.shared.refreshEntitlement()
         paywallError = nil
         // Diagnostics handler (onSkip logging/analytics) + this screen's

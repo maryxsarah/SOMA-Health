@@ -49,12 +49,16 @@ struct SubscriptionStatusChip: View {
             String(localized: "subscriptionChip.pro", defaultValue: "PRO", comment: "Status-row chip label for a paid subscription")
         case .trial(let daysLeft):
             if let daysLeft {
-                String(localized: "subscriptionChip.trialDays", defaultValue: "TRIAL · \(daysLeft) DAYS", comment: "Status-row chip label during a free trial, with days remaining")
+                // Grouped, not a raw Int interpolation -- a very-long
+                // fixture/edge-case bonus (or any large day count) reads
+                // as "TRIAL \u00b7 26,434 DAYS" instead of a run-together
+                // digit string.
+                String(localized: "subscriptionChip.trialDays", defaultValue: "TRIAL · \(daysLeft.formatted()) DAYS", comment: "Status-row chip label during a free trial, with days remaining")
             } else {
                 String(localized: "subscriptionChip.trial", defaultValue: "TRIAL", comment: "Status-row chip label during a free trial when the days remaining are unknown")
             }
         case .promoBonus(let daysLeft):
-            String(localized: "subscriptionChip.bonusDays", defaultValue: "\(daysLeft) DAYS", comment: "Status-row chip label counting down a referral/promo free-access bonus")
+            String(localized: "subscriptionChip.bonusDays", defaultValue: "\(daysLeft.formatted()) DAYS", comment: "Status-row chip label counting down a referral/promo free-access bonus")
         }
     }
 

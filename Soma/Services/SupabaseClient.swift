@@ -314,8 +314,17 @@ final class SupabaseClient {
             // dead session. Hopped onto the main actor explicitly --
             // `onSessionExpired` (AppState.signOut) is @MainActor.
             if allowRetry {
-                try? await Task.sleep(for: .seconds(1))
-                if keychain.load() != nil {
+                // Not `try?` -- a cancelled Task.sleep must unwind here,
+                // not fall through into a second network request and a
+                // possible wrongful sign-out on behalf of a caller that no
+                // longer exists.
+                try await Task.sleep(for: .seconds(1))
+                // Compare the token itself, not just "is someone signed
+                // in": keychain.load() != nil alone can't tell this
+                // account's dead session apart from a DIFFERENT account
+                // the user signed into during the 1s wait, which would
+                // otherwise retry (and possibly sign out) the wrong one.
+                if keychain.load()?.refreshToken == current.refreshToken {
                     try await performRefreshSession(allowRetry: false)
                     return
                 }
@@ -1623,16 +1632,15 @@ final class SupabaseClient {
         return Set(rows.map(\.date))
     }
 
-    /// Count of gym-photo scans generated for `date` -- mirrors the
-    /// server's per-source quota (generationLimits.ts): each feature has
-    /// its OWN independent daily cap (1 workout suggestion + 1 gym-photo
-    /// workout + 1 affirmation regeneration; annual tier 3 for the workout
-    /// features). This drives Home's SCAN row lock only, so it counts
-    /// exactly the gym_photo source -- counting any other source here
-    /// re-creates the old shared-bucket bug where unrelated AI activity
-    /// locked the scan row for the day.
+    /// Count of workout-shaped generations (suggestion + gym_photo) for
+    /// `date` -- mirrors the server's shared-bucket quota
+    /// (generationLimits.ts, product decision 2026-08-18: back to ONE
+    /// bucket across both sources, 1/3/10 free/monthly/annual). Drives
+    /// Home's SCAN row lock, so a plain workout suggestion also counts
+    /// against the scan quota and vice versa -- that's the point of the
+    /// shared bucket, not a bug.
     func fetchTodaysGenerationCount(date: String) async throws -> Int {
-        let path = "rest/v1/ai_generation_log?date=eq.\(date)&source=eq.gym_photo&select=id"
+        let path = "rest/v1/ai_generation_log?date=eq.\(date)&source=in.(suggestion,gym_photo)&select=id"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try assertSuccess(response, data: data)

@@ -27,6 +27,17 @@ final class SuperwallEventForwarder: NSObject, SuperwallDelegate {
         }
     }
 
+    /// Wired for a future "Redeem a code" tap-behavior on Superwall
+    /// dashboard paywalls (product decision 2026-08-18) -- the dashboard
+    /// action itself is manual owner setup (see docs/pricing-research.md
+    /// checklist item 6) and doesn't exist yet, so this sits dormant
+    /// until then. Matches the same name Profile's row uses conceptually
+    /// (OfferCodeRedemption.present()).
+    func handleCustomPaywallAction(withName name: String) {
+        guard name == "redeem_offer_code" else { return }
+        OfferCodeRedemption.present()
+    }
+
     // subscriptionStatusDidChange is deliberately NOT implemented here:
     // SubscriptionManager.refreshEntitlement() already detects the exact
     // same active->inactive transition (from Transaction.currentEntitlements,

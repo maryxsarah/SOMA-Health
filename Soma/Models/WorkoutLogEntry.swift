@@ -34,6 +34,14 @@ struct WorkoutLogEntry: Codable, Identifiable {
     /// LogManualWorkoutView). Decides which detail screen HomeView routes
     /// to when the user taps today's logged workout.
     let source: String
+
+    /// A wearable's own auto-detected activity signal (a walk the watch
+    /// noticed on its own) -- distinct from every other source, which
+    /// represents a deliberate user choice. Single Swift-side definition
+    /// of the value the server independently mirrors as
+    /// DEVICE_DETECTED_SOURCE (supabase/functions/_shared/workoutLogSources.ts).
+    static let deviceDetectedSource = "device_detected"
+
     /// Calorie hero stat on CompletedWorkoutView -- nil until the lazy
     /// backfill (CompletedWorkoutView.load()) resolves it, either from a
     /// real HealthKit/wearable reading over this log's started_at/ended_at

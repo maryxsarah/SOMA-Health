@@ -27,9 +27,20 @@ final class OnboardingPaywallMatrixUITests: XCTestCase {
         app.launchEnvironment["UITEST_SUBSCRIPTION"] = subscription
         app.launch()
         runningApp = app
-        // Give Superwall time to fetch config + either present or skip
-        // through to Home.
-        sleep(10)
+        // Poll for either end state instead of a fixed sleep -- Superwall
+        // either presents (its webview's "Restore" button, present on
+        // every template) or skips straight through to Home (the
+        // greeting). A slow runner just waits longer instead of the
+        // screenshot silently capturing a mid-load blank frame. A single
+        // OR predicate expectation, not XCTWaiter.wait(for: [a, b]) --
+        // that variant requires ALL expectations, not either one.
+        let paywallRestoreButton = app.buttons["Restore"]
+        let homeGreeting = app.staticTexts["Good evening"]
+        let eitherEndState = NSPredicate { _, _ in
+            paywallRestoreButton.exists || homeGreeting.exists
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: eitherEndState, object: nil)
+        _ = XCTWaiter.wait(for: [expectation], timeout: 20)
         return app
     }
 

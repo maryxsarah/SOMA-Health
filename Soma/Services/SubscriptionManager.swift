@@ -25,8 +25,9 @@ final class SubscriptionManager: ObservableObject {
     /// The tier last synced to Supabase ("free"/"monthly"/"annual") -- lets
     /// UI quota gates mirror the server's tier-scaled generation limits.
     @Published private(set) var tier = "free"
-    /// Subscribed via an introductory (free-trial) offer -- drives the
-    /// in-app "Upgrade now" highlight while the trial runs.
+    /// Subscribed via a free-trial offer (introductory OR a redeemed
+    /// offer code) -- drives the in-app "Upgrade now" highlight while
+    /// the trial runs.
     @Published private(set) var isInTrial = false
     /// Current entitlement's expiration: the trial's end while isInTrial,
     /// otherwise the next renewal date -- feeds the status-row chip's
@@ -81,12 +82,23 @@ final class SubscriptionManager: ObservableObject {
             else { continue }
             isSubscribed = transaction.revocationDate == nil
             tier = isSubscribed ? (transaction.productID == Self.annualProductID ? "annual" : "monthly") : "free"
-            let offerType: Transaction.OfferType? = if #available(iOS 17.2, *) {
-                transaction.offer?.type
+            // paymentMode is the correct trial signal: an offer-code
+            // redemption reports offer type .code, never .introductory,
+            // so the old type check rendered code trials as full paid
+            // (crown, PRO chip, "renews ..."). The fallback treats .code
+            // as a trial too -- every Soma code offer is Free mode.
+            let isTrialOffer: Bool
+            if #available(iOS 17.2, *), let paymentMode = transaction.offer?.paymentMode {
+                isTrialOffer = paymentMode == .freeTrial
             } else {
-                transaction.offerType
+                let offerType: Transaction.OfferType? = if #available(iOS 17.2, *) {
+                    transaction.offer?.type
+                } else {
+                    transaction.offerType
+                }
+                isTrialOffer = offerType == .introductory || offerType == .code
             }
-            isInTrial = isSubscribed && offerType == .introductory
+            isInTrial = isSubscribed && isTrialOffer
             expirationDate = transaction.expirationDate
             updateSubscriptionTierRemote(tier)
             mirrorSubscriptionStatusToSuperwall()
