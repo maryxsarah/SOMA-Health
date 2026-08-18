@@ -88,6 +88,15 @@ const BAND_PHRASE: Record<Band, string> = {
   low: "showing signs of poor recovery",
 };
 
+/// Wearable sleep totals arrive as raw seconds/3600 (see index.ts's
+/// pickOuraDay) and carry long binary-float tails (e.g. 7.591666666667) --
+/// round to two decimal places for anything spoken to the user (7.59h, not
+/// 7.591666666667h). Never used for the underlying threshold comparisons
+/// (SHORT_SLEEP_HOURS etc. in index.ts), only for display text.
+function formatSleepHours(hours: number): string {
+  return (Math.round(hours * 100) / 100).toString();
+}
+
 /// One clause citing whichever recovery score actually exists for the
 /// deciding source -- never fabricates a number the source didn't report.
 function scoreClause(input: ReasoningMessageInput): string {
@@ -105,7 +114,7 @@ function scoreClause(input: ReasoningMessageInput): string {
 /// (degrade gracefully with no wearable connected / a partial read).
 function supportingNumbers(input: ReasoningMessageInput): string | null {
   const bits: string[] = [];
-  if (input.sleepHours !== null) bits.push(`${input.sleepHours}h sleep`);
+  if (input.sleepHours !== null) bits.push(`${formatSleepHours(input.sleepHours)}h sleep`);
   if (input.hrvMs !== null) bits.push(`HRV ${Math.round(input.hrvMs)}ms`);
   if (input.restingHr !== null) bits.push(`resting HR ${Math.round(input.restingHr)}bpm`);
   if (input.strainScore !== null) {
@@ -144,7 +153,7 @@ const LIGHT_CAP_EXPLANATIONS: { key: keyof ReasoningMessageCaps; text: (i: Reaso
   { key: "volume", text: () => "your recent training volume is already high for this stretch" },
   {
     key: "sleep",
-    text: (i) => `last night's ${i.sleepHours !== null ? `${i.sleepHours}h` : "short"} sleep is capping today's intensity`,
+    text: (i) => `last night's ${i.sleepHours !== null ? `${formatSleepHours(i.sleepHours)}h` : "short"} sleep is capping today's intensity`,
   },
   { key: "hrv", text: () => "today's HRV is down from your usual baseline" },
   { key: "stress", text: () => "today's stress load is elevated" },

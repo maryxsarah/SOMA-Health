@@ -148,6 +148,28 @@ Deno.test("multiple simultaneous light-tier caps: only ONE explanation is named,
   assert(!msg.toLowerCase().includes("hrv is down"), `should not also name HRV: ${msg}`);
 });
 
+Deno.test("sleep hours are rounded to 2dp, never the raw seconds/3600 float (Oura total_sleep_duration/3600)", () => {
+  const msg = buildReasoningMessage(baseInput({
+    source: "oura",
+    readinessScore: 79,
+    sleepHours: 27330 / 3600, // 7.591666666666667 -- the exact repro from the bug report
+  }));
+  assert(msg.includes("7.59h sleep"), msg);
+  assert(!msg.includes("7.591666"), msg);
+});
+
+Deno.test("sleep hours in the light-tier cap explanation are also rounded to 2dp", () => {
+  const msg = buildReasoningMessage(baseInput({
+    category: "light",
+    source: "oura",
+    readinessScore: 70,
+    sleepHours: 27330 / 3600,
+    caps: { ...NO_CAPS, sleep: true },
+  }));
+  assert(msg.includes("7.59h"), msg);
+  assert(!msg.includes("7.591666"), msg);
+});
+
 Deno.test("moderate-tier injury cap is cited distinctly from the light-tier injury cap", () => {
   const msg = buildReasoningMessage(baseInput({
     category: "moderate",
