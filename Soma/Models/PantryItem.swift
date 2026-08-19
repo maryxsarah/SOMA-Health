@@ -27,9 +27,7 @@ extension Array where Element == PantryItem {
     /// I make?" flow from the saved pantry instead of a blank field.
     var asIngredientsText: String {
         map { item in
-            let quantityPart = item.quantity.map { qty in
-                qty.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(qty)) : String(qty)
-            }
+            let quantityPart = item.quantity.map(SportGoalFormat.value)
             let amount = [quantityPart, item.unit].compactMap { $0 }.joined(separator: " ")
             return amount.isEmpty ? item.name : "\(amount) \(item.name)"
         }.joined(separator: ", ")

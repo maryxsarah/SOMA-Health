@@ -123,20 +123,27 @@ async function handleDailyMode(supabase: SupabaseClient, userId: string, body: a
 
   const pantrySignature = computePantrySignature(pantryItems);
 
-  // One cache row per (user, date, pantry signature): a hit means today's
-  // pantry hasn't changed since the last generation for this date, so
-  // repeat NutritionView opens are free. A miss covers both "new day" and
-  // "pantry edited since the last generation."
+  // One cache row per (user, date, pantry signature) -- same shape and same
+  // query pattern as gym_workout_plan's own cache check (filter by the
+  // CURRENT signature directly, not "newest row for today, then compare in
+  // code"). BUG report: the old "newest row" read meant a pantry that
+  // changed and then changed BACK to an earlier same-day signature within
+  // the same day looked like a cache miss (the newest row was some other,
+  // intervening signature) even though a matching row already existed --
+  // wasting an LLM call to regenerate identical content, and (before the
+  // upsert below) throwing on the unique(user_id, date, pantry_signature)
+  // constraint when it tried to insert a second row for that signature.
+  // .maybeSingle() is safe here specifically because that constraint
+  // guarantees at most one row can ever match this exact filter.
   const { data: cached, error: cacheReadError } = await supabase
     .from("daily_meal_plan")
-    .select("category, recommendation, pantry_signature")
+    .select("category, recommendation")
     .eq("user_id", userId)
     .eq("date", date)
-    .order("created_at", { ascending: false })
-    .limit(1)
+    .eq("pantry_signature", pantrySignature)
     .maybeSingle();
   if (cacheReadError) throw new Error(`could not read daily_meal_plan: ${cacheReadError.message}`);
-  if (cached && cached.pantry_signature === pantrySignature) {
+  if (cached) {
     return jsonResponse({ date, category: cached.category, recommendation: cached.recommendation });
   }
 
@@ -158,13 +165,19 @@ async function handleDailyMode(supabase: SupabaseClient, userId: string, body: a
   });
 
   const response = toResponse(recommendation);
-  const { error: insertError } = await supabase.from("daily_meal_plan").insert({
+  // upsert, not insert: reaching here means the read above found no row for
+  // THIS exact (user, date, signature) -- but a concurrent request for the
+  // same signature (two rapid opens) or a re-check racing this one could
+  // still collide on the unique constraint. onConflict makes that collision
+  // a harmless overwrite-with-the-same-content instead of a thrown 500,
+  // same posture as gym_workout_plan's own upsert.
+  const { error: insertError } = await supabase.from("daily_meal_plan").upsert({
     user_id: userId,
     date,
     pantry_signature: pantrySignature,
     category: context.category,
     recommendation: response,
-  });
+  }, { onConflict: "user_id,date,pantry_signature" });
   if (insertError) throw new Error(`could not write daily_meal_plan: ${insertError.message}`);
 
   await logGeneration(supabase, userId, date, "meal_recommendation_daily");

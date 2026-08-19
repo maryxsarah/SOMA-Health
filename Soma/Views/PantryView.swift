@@ -147,8 +147,7 @@ struct PantryView: View {
 
     private func quantityCaption(_ item: PantryItem) -> String? {
         guard let quantity = item.quantity else { return item.unit }
-        let quantityText = quantity.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(quantity)) : String(quantity)
-        return [quantityText, item.unit].compactMap { $0 }.joined(separator: " ")
+        return [SportGoalFormat.value(quantity), item.unit].compactMap { $0 }.joined(separator: " ")
     }
 
     // MARK: - Actions
@@ -225,7 +224,7 @@ private struct PantryItemEditView: View {
         self.item = item
         self.onSave = onSave
         _name = State(initialValue: item.name)
-        _quantityText = State(initialValue: item.quantity.map { $0.truncatingRemainder(dividingBy: 1) == 0 ? String(Int($0)) : String($0) } ?? "")
+        _quantityText = State(initialValue: item.quantity.map(SportGoalFormat.value) ?? "")
         _unit = State(initialValue: item.unit ?? "")
     }
 

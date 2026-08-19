@@ -15,10 +15,12 @@ struct MealRecommendationView: View {
     /// left today" and this view never risks disagreeing with it.
     let remaining: NutritionDayProgress?
     /// Set when opened from NutritionView's "Today's meal plan" autopilot
-    /// card -- skips straight to resultSection with no network call,
-    /// since the recommendation is already the server's cached daily
-    /// plan. "Try different ingredients" from there still falls through
-    /// to the normal editable on-demand flow below.
+    /// card -- skips straight to resultSection with no network call, since
+    /// the recommendation is already the server's cached daily plan
+    /// (loadEquipmentState is deferred until "Try different ingredients"
+    /// actually reaches inputSection, not fetched eagerly here). "Try
+    /// different ingredients" from there still falls through to the normal
+    /// editable on-demand flow below.
     let initialRecommendation: MealRecommendation?
     /// Prefills the ingredients field -- used to seed it from the saved
     /// pantry (still fully editable) rather than opening blank, e.g. from
@@ -87,8 +89,17 @@ struct MealRecommendationView: View {
         .task {
             if let initialRecommendation {
                 recommendation = initialRecommendation
+            } else {
+                // Only the on-demand entry (inputSection, which reads
+                // householdEquipmentIsEmpty) needs this now -- the autopilot
+                // entry goes straight to resultSection, where nothing reads
+                // it, so fetching here was a wasted network call every time
+                // this doc comment's "no network call" claim was actually
+                // untrue. Deferred to the "Try different ingredients" tap
+                // below, the one place the autopilot path can still reach
+                // inputSection.
+                await loadEquipmentState()
             }
-            await loadEquipmentState()
         }
         .sheet(isPresented: $showKitchenSetup, onDismiss: {
             Task { await loadEquipmentState() }
@@ -359,6 +370,16 @@ struct MealRecommendationView: View {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                             recommendation = nil
                             ingredientsText = ""
+                        }
+                        // The autopilot entry (initialRecommendation != nil)
+                        // skipped loadEquipmentState() in .task since
+                        // inputSection was unreachable from there -- now
+                        // that it's actually about to render, fetch it. The
+                        // on-demand entry already has it from .task, so this
+                        // is a no-op cost for that path (guarded, not a
+                        // second unconditional fetch).
+                        if initialRecommendation != nil {
+                            Task { await loadEquipmentState() }
                         }
                     }
                     let logButtonTitle = LocalizedStringKey(isLogging

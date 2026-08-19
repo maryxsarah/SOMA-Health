@@ -200,6 +200,15 @@ struct NutritionView: View {
     /// visibly the same ones just shown above, not a disconnected feature.
     private func mealIdeaCard(_ progress: NutritionDayProgress) -> some View {
         Button {
+            // Explicit, not inherited: without this, a stale .autopilot
+            // value from an earlier session interaction (opening the
+            // autopilot card, dismissing) could still be set when this card
+            // becomes reachable again (e.g. right after PantryView's
+            // onDismiss clears the pantry, in the render window before
+            // loadTodaysMealPlan's own async work catches up) -- opening
+            // the sheet via the wrong case shows the old cached plan
+            // instead of a blank on-demand form.
+            mealRecommendationEntry = .onDemand
             showMealRecommendation = true
         } label: {
             CardView {
