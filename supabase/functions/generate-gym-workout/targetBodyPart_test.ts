@@ -62,6 +62,29 @@ Deno.test("a mild injury does not redirect the resolved target", () => {
   assertEquals(result, "lower_body");
 });
 
+Deno.test("REGRESSION: the injury redirect never overrides the rotation signal with the MOST recently-trained body part", () => {
+  // BUG report: resolveTargetBodyPart used to rank ALL candidates first
+  // (ignoring injury), then redirect only the single winner via a fixed
+  // substitution-table lookup. For a severe shoulder injury (which
+  // redirects full_body/upper_body -> lower_body) with empty goals, the
+  // old code ranked full_body first (lowest rotation count) and then
+  // redirected it to "lower_body" -- even though lower_body had the
+  // HIGHEST recent count (5) of any candidate, exactly what rotation
+  // exists to avoid. Excluding unsafe candidates BEFORE ranking (the fix)
+  // must never do this: with full_body/upper_body excluded, the safe
+  // candidates are cardio (count 0) and core (count 0), both beating
+  // lower_body's count of 5 -- the result must be one of those, never
+  // lower_body.
+  const result = resolveTargetBodyPart(
+    "moderate",
+    [],
+    ["shoulder"],
+    { shoulder: "severe" },
+    { lower_body: 5, core: 0 },
+  );
+  assertEquals(result, "cardio");
+});
+
 Deno.test("an unrecognized category falls back to moderate's candidate list rather than throwing", () => {
   assertEquals(resolveTargetBodyPart("not_a_category", [], [], {}, {}), "full_body");
 });

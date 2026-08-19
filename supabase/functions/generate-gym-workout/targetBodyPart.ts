@@ -43,7 +43,6 @@ const CATEGORY_BODY_PART_CANDIDATES: Record<string, CandidateFocus[]> = {
     { bodyPart: "full_body", goals: ["leaner_toned", "more_sculpted", "cardio_endurance"] },
     { bodyPart: "cardio", goals: ["cardio_endurance", "leaner_toned"] },
     { bodyPart: "cardio", goals: ["cardio_endurance"] },
-    { bodyPart: "full_body", goals: ["build_strength", "gain_muscle"] },
   ],
   moderate: [
     { bodyPart: "full_body", goals: ["build_strength", "gain_muscle", "general_fitness"] },
@@ -51,7 +50,6 @@ const CATEGORY_BODY_PART_CANDIDATES: Record<string, CandidateFocus[]> = {
     { bodyPart: "lower_body", goals: ["build_strength", "gain_muscle", "general_fitness"] },
     { bodyPart: "cardio", goals: ["cardio_endurance"] },
     { bodyPart: "cardio", goals: ["cardio_endurance", "general_fitness"] },
-    { bodyPart: "cardio", goals: ["cardio_endurance"] },
     { bodyPart: "full_body", goals: ["build_strength", "more_sculpted", "general_fitness"] },
     { bodyPart: "core", goals: ["improve_flexibility", "general_fitness"] },
   ],
@@ -59,8 +57,6 @@ const CATEGORY_BODY_PART_CANDIDATES: Record<string, CandidateFocus[]> = {
     { bodyPart: "core", goals: ["improve_flexibility", "active_recovery"] },
     { bodyPart: "cardio", goals: ["active_recovery"] },
     { bodyPart: "cardio", goals: ["active_recovery", "general_fitness"] },
-    { bodyPart: "core", goals: ["improve_flexibility", "active_recovery"] },
-    { bodyPart: "cardio", goals: ["active_recovery"] },
   ],
   rest: [
     { bodyPart: "cardio", goals: ["active_recovery", "better_sleep"] },
@@ -70,14 +66,24 @@ const CATEGORY_BODY_PART_CANDIDATES: Record<string, CandidateFocus[]> = {
   ],
 };
 
-/// Same ranking RecommendationDetailView.filteredWorkoutSuggestions uses:
-/// a goals overlap match floats to the top; among ties, whichever body part
-/// has had FEWER moderate/push_hard training sessions in the trailing 7
-/// days floats above one trained more -- deprioritize, never exclude, per
-/// BodyPartFocus's doc comment (DailyRecommendation.swift). Injury-aware
-/// last: resolveBodyPartForInjuries can still redirect the winning pick to
-/// a genuinely safe body part, same as generate-workout-plan does for the
-/// client's own selection.
+/// Same ranking RecommendationDetailView.filteredWorkoutSuggestions uses,
+/// in the same ORDER: exclude any candidate whose body part conflicts with
+/// a moderate/severe injury FIRST (falling back to the unfiltered list only
+/// if that would leave nothing), THEN rank the survivors -- a goals overlap
+/// match floats to the top; among ties, whichever body part has had FEWER
+/// moderate/push_hard training sessions in the trailing 7 days floats above
+/// one trained more, per BodyPartFocus's doc comment (DailyRecommendation.swift).
+///
+/// BUG report: this used to rank ALL candidates first (ignoring injury) and
+/// redirect only the single winner afterward via resolveBodyPartForInjuries'
+/// fixed substitution-table lookup. That silently discarded the rotation
+/// signal whenever the redirect target didn't match what re-ranking the
+/// safe candidates would have chosen -- e.g. a shoulder injury redirecting
+/// straight to "lower_body" regardless of lower_body's own recent count,
+/// even when it was the MOST recently-trained body part and a different
+/// safe candidate (cardio) had gone untouched. Excluding before ranking
+/// (this version) can't make that mistake, because the rotation-aware sort
+/// only ever runs over candidates already known to be safe.
 export function resolveTargetBodyPart(
   category: string,
   goals: string[],
@@ -86,8 +92,13 @@ export function resolveTargetBodyPart(
   recentBodyPartCounts: Record<string, number>,
 ): BodyPartFocus {
   const candidates = CATEGORY_BODY_PART_CANDIDATES[category] ?? CATEGORY_BODY_PART_CANDIDATES.moderate;
+  const safe = candidates.filter(
+    (c) => !resolveBodyPartForInjuries(c.bodyPart, injuryTags, severityMap).substituted,
+  );
+  const pool = safe.length > 0 ? safe : candidates;
+
   const goalSet = new Set(goals);
-  const ranked = [...candidates].sort((a, b) => {
+  const ranked = [...pool].sort((a, b) => {
     const aGoalMatch = a.goals.some((g) => goalSet.has(g));
     const bGoalMatch = b.goals.some((g) => goalSet.has(g));
     if (aGoalMatch !== bGoalMatch) return aGoalMatch ? -1 : 1;
@@ -95,6 +106,5 @@ export function resolveTargetBodyPart(
     const bCount = recentBodyPartCounts[b.bodyPart] ?? 0;
     return aCount - bCount;
   });
-  const top = ranked[0]?.bodyPart ?? "full_body";
-  return resolveBodyPartForInjuries(top, injuryTags, severityMap).bodyPart;
+  return ranked[0]?.bodyPart ?? "full_body";
 }
