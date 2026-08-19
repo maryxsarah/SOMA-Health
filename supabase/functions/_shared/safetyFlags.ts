@@ -21,6 +21,12 @@ export interface SafetyCheckResult {
   /// layered on top of excludeHighImpact, never replacing it. Severe
   /// injuries exclude more broadly than mild ones.
   excludedKeywords: string[];
+  /// The raw injury_tags/injury_severity this check already read from
+  /// `users` -- exposed so a caller that also needs them (e.g.
+  /// generate-gym-workout's own body-part-injury redirect) doesn't have to
+  /// issue a second, redundant query for the same row/columns.
+  injuryTags: string[];
+  severityMap: Record<string, InjurySeverityLevel>;
 }
 
 /**
@@ -122,12 +128,12 @@ export async function checkSafetyFlags(
           "abnormal_resting_hr",
           `today ${todayRestingHr}bpm vs ${MIN_BASELINE_DAYS}+ day median ${baseline.toFixed(1)}bpm`,
         );
-        return { flagged: true, message: SAFETY_MESSAGE, excludeHighImpact, excludedKeywords };
+        return { flagged: true, message: SAFETY_MESSAGE, excludeHighImpact, excludedKeywords, injuryTags, severityMap };
       }
     }
   }
 
-  return { flagged: false, excludeHighImpact, excludedKeywords };
+  return { flagged: false, excludeHighImpact, excludedKeywords, injuryTags, severityMap };
 }
 
 async function logFlag(

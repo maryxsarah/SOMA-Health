@@ -22,12 +22,13 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { classifyGenerationError } from "../_shared/anthropicErrors.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { checkGenerationLimit, GENERATION_LIMIT_MESSAGE, logGeneration, type SubscriptionTier } from "../_shared/generationLimits.ts";
-import { DEVICE_DETECTED_SOURCE } from "../_shared/workoutLogSources.ts";
 import { extractOutputText } from "../_shared/openai.ts";
 import { GymWorkoutTemplate, selectTemplate } from "./templates.ts";
+import { resolveTargetBodyPart } from "./targetBodyPart.ts";
 import { normalizeEquipment } from "../_shared/equipment.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
 import { languageName, normalizeLanguageCode } from "../_shared/language.ts";
+import { countRecentTrainingDaysByBodyPart } from "../_shared/trainingDayCounters.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MODEL = "gpt-5.6-luna";
@@ -85,30 +86,53 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ date, safety_flag: true, message: safety.message });
     }
 
-    const { data: recommendation } = await supabase
-      .from("daily_recommendation")
-      .select("category")
-      .eq("user_id", userId)
-      .eq("date", date)
-      .maybeSingle();
+    // Four independent reads -- each depends only on userId/date, already
+    // known, and none depends on another's result -- issued together
+    // rather than paying four round-trip latencies in series. injury_tags/
+    // injury_severity are NOT re-fetched here: checkSafetyFlags already
+    // read them for this same user a moment ago (see its own
+    // SafetyCheckResult.injuryTags/severityMap), so a second, separate
+    // `users` query for the same columns would just be a redundant round
+    // trip to the same row.
+    const [
+      { data: recommendation },
+      { data: userRow },
+      { data: snapshots },
+      recentBodyPartCounts,
+    ] = await Promise.all([
+      supabase
+        .from("daily_recommendation")
+        .select("category")
+        .eq("user_id", userId)
+        .eq("date", date)
+        .maybeSingle(),
+      supabase
+        .from("users")
+        .select("goals, subscription_tier")
+        .eq("id", userId)
+        .maybeSingle(),
+      supabase
+        .from("daily_snapshot")
+        .select("source, recovery_score, readiness_score, hrv_ms, sleep_hours, resting_hr, strain_score, stress_score")
+        .eq("user_id", userId)
+        .eq("date", date),
+      countRecentTrainingDaysByBodyPart(supabase, userId, date),
+    ]);
     if (!recommendation) {
       return jsonResponse({ error: "no recommendation for this date yet" }, 422);
     }
     const category = recommendation.category as string;
-
-    const { data: userRow } = await supabase
-      .from("users")
-      .select("goals, subscription_tier")
-      .eq("id", userId)
-      .maybeSingle();
     const goals = (userRow?.goals as string[] | null) ?? [];
     const subscriptionTier = ((userRow?.subscription_tier as SubscriptionTier | null) ?? "free");
 
-    const { data: snapshots } = await supabase
-      .from("daily_snapshot")
-      .select("source, recovery_score, readiness_score, hrv_ms, sleep_hours, resting_hr, strain_score, stress_score")
-      .eq("user_id", userId)
-      .eq("date", date);
+    // Which body part today's session should actually target -- the same
+    // goals+injury-aware signal RecommendationDetailView's own default-
+    // suggestion picker already applies for the normal (non-photo) flow,
+    // plus the existing 7-day per-body-part rotation signal, reused rather
+    // than reimplemented. See targetBodyPart.ts for why gym-photo needs its
+    // own resolution step: unlike the normal flow, there's no client
+    // selection to read here.
+    const targetBodyPart = resolveTargetBodyPart(category, goals, safety.injuryTags, safety.severityMap, recentBodyPartCounts);
 
     // Sorted + joined server-side so the client cannot influence cache
     // identity by reordering the list it sends.
@@ -125,12 +149,23 @@ Deno.serve(async (req: Request) => {
     // squat/lunge session that the new severity exists to withhold.
     // The requested language belongs here too, same reasoning as the
     // injury state above -- otherwise a language switch mid-day replays the morning's wording verbatim.
+    // The resolved target body part belongs here for the same reason: it's
+    // a new input to selectTemplate, derived from state (injury/rotation)
+    // that can change between calls the same way the injury flags above
+    // can, so a stale target must miss the cache and re-select rather than
+    // replay a plan built around this morning's rotation snapshot.
+    // goals belongs here too -- it feeds both selectTemplate's goal
+    // tie-break and Luna's wording prompt (goalsText), so a profile goals
+    // edit between two same-day calls with identical equipment must also
+    // miss the cache, the same way an injury/language change already does.
     const equipmentSignature = Array.from(equipmentSet).sort().join("|") +
       (safety.excludeHighImpact ? "|no-impact" : "") +
       (safety.excludedKeywords.length > 0
         ? "|kw:" + [...safety.excludedKeywords].sort().join(",")
         : "") +
-      "|lang:" + languageCode;
+      "|lang:" + languageCode +
+      "|target:" + targetBodyPart +
+      "|goals:" + [...goals].sort().join(",");
 
     // Same setup, same day -> same answer, so serve it rather than paying
     // for the wording pass again. A different setup is a different
@@ -176,15 +211,16 @@ Deno.serve(async (req: Request) => {
     // the error unread, `data` came back null and the lock silently
     // disengaged on exactly the days it was written for. The read error is
     // also surfaced now: a guard that fails open on error isn't a guard.
-    // Auto-detected device workouts (a walk the watch logged on its own)
-    // must not lock generation -- the user hasn't "done their workout",
-    // their wearable just noticed movement. Only deliberate logs count.
+    // device_detected rows now count too: the old silent auto-log path
+    // (which wrote one with zero user input) is gone -- HomeView's
+    // confirmDetectedWorkout is the only remaining writer of this source,
+    // and it only ever runs after an explicit "Yes, that was my workout"
+    // tap, so a device_detected row is exactly as deliberate as any other.
     const { data: existingLogs, error: logReadError } = await supabase
       .from("workout_log")
       .select("title")
       .eq("user_id", userId)
       .eq("date", date)
-      .neq("source", DEVICE_DETECTED_SOURCE)
       .limit(1);
     if (logReadError) {
       throw new Error(`could not check today's workout log: ${logReadError.message}`);
@@ -204,7 +240,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ date, generation_limit_reached: true, message: GENERATION_LIMIT_MESSAGE });
     }
 
-    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact, safety.excludedKeywords);
+    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact, safety.excludedKeywords, targetBodyPart);
 
     const wording = await callLunaForWording(
       template,

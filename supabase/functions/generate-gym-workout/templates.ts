@@ -12,6 +12,13 @@
 // = gentle, ~1-2 min; moderate = moderate effort, ~1-2 min; push_hard =
 // short-but-hard, RPE 8-10). DRAFTED, NOT EXPERT-REVIEWED -- same caveat as
 // the equipment-coverage additions below.
+//
+// Body-part coverage added 2026-08-19: until then the catalog had zero
+// "lower_body" and zero "core" templates, so selectTemplate's resolved-
+// target-body-part ranking (see its own doc comment) had nothing to match
+// on a leg day or ab day and silently fell back to whichever full-body
+// template used the most equipment -- see the dedicated comment block at
+// the bottom of GYM_WORKOUT_TEMPLATES for the new entries.
 
 import { normalizeEquipment } from "../_shared/equipment.ts";
 
@@ -902,11 +909,426 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
     ],
     cool_down: COOL_DOWN,
   },
+
+  // ==== Body-part-targeted coverage added 2026-08-19 (fixes gym-photo
+  // body-part-blind selection) ====
+  // BUG report: until this addition, the entire catalog above had ZERO
+  // templates tagged bodyPart "lower_body" and ZERO tagged "core" -- so
+  // even after selectTemplate started ranking by resolved target body part
+  // (see selectTemplate's doc comment / targetBodyPart.ts), a leg day or
+  // ab day had no matching template to prefer and silently fell back to
+  // whichever full-body template used the most equipment, which is exactly
+  // the bug the fix exists to remove.
+  //
+  // Coverage below follows an explicit (category x equipment tier) matrix,
+  // not just "one template per gap": lower_body gets a bodyweight-only
+  // template for both moderate and push_hard (mandatory per the
+  // requiredEquipment:[] + highImpact:false invariant documented on
+  // GYM_WORKOUT_TEMPLATES above) plus at least one equipped variant per
+  // category; core gets the same bodyweight-plus-equipped pairing across
+  // ALL THREE of light/moderate/push_hard.
+  //
+  // "core" here is deliberately genuine ab/core-STRENGTH work (planks,
+  // side planks, anti-rotation holds, glute bridges) -- NOT an alias into
+  // DailyRecommendation.swift's existing `.core`-tagged workoutSuggestions
+  // (yoga session, restorative yoga, foam rolling), which are yoga/
+  // mobility content wearing the same BodyPartFocus label. That's a real
+  // naming collision worth flagging back rather than silently papering
+  // over: the same "core" target can be reached today via a goals/rotation
+  // signal that was really asking for flexibility/mobility work, and this
+  // gym-photo template will still hand back a hard ab-strength session.
+  // Not resolved here -- would need a product decision on whether
+  // BodyPartFocus.core should split into two concepts, or the Swift
+  // catalog's yoga entries should be retagged off "core" entirely.
+  //
+  // Every equipped variant below uses "cable machine" (EQUIPMENT_VOCABULARY)
+  // for its one genuinely core-specific movement, "Cable anti-rotation
+  // hold" (Pallof_Press) -- already audited and in use by
+  // moderate_cable_circuit -- deliberately chosen over any crunch/sit-up/
+  // twist variant: those are loaded-spinal-flexion or loaded-twisting
+  // patterns, exactly what CONTRAINDICATIONS.back (both moderate and
+  // severe) exists to keep out of a "core" template, and neither
+  // "crunch"/"sit-up" nor a literal "twist" substring is in that back
+  // entry's excludedKeywords today -- so a flexion/twist exercise here
+  // would NOT have been caught by the existing keyword filter at
+  // selection time. Pallof press is anti-rotation (resists a rotational
+  // force without the spine actually moving), which is why it's hand-
+  // checked safe here rather than excluded/flagged. Every exercise below
+  // reuses an already-hand-audited name/library_id from elsewhere in this
+  // file (or "Reverse lunge"/"Bulgarian split squat"/"Wall sit", already on
+  // CONFIRMED_NO_LIBRARY_EQUIVALENT) rather than introducing a new
+  // unaudited one.
+  //
+  // DRAFTED, NOT EXPERT-REVIEWED -- these are physical prescriptions, same
+  // caveat as the 2026-07-28 equipment coverage above; a certified S&C/PT
+  // professional should review before this content ships to users.
+
+  // ---- light ----
+  {
+    id: "light_core",
+    title: "Gym Photo: Core Activation (Light)",
+    bodyPart: "core",
+    category: "light",
+    highImpact: false,
+    requiredEquipment: [],
+    goals: ["general_fitness", "more_sculpted"],
+    focus: "Light core activation",
+    warm_up: WARM_UP_LIGHT,
+    blocks: [
+      {
+        name: "Block 1",
+        rounds: 2,
+        rest_between_rounds: "60 sec",
+        exercises: [
+          { name: "Plank hold", library_id: "Plank", sets: 1, reps: "20-30 sec", weight_guidance: "bodyweight", intensity: "RPE 4/10", duration_minutes: 2, target_area: "Core" },
+          { name: "Side plank", library_id: "Side_Bridge", sets: 1, reps: "20 sec each side", weight_guidance: "bodyweight", intensity: "RPE 4/10", duration_minutes: 2, target_area: "Obliques, core" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Glute bridge", library_id: "Butt_Lift_Bridge", sets: 1, reps: "12", weight_guidance: "bodyweight", intensity: "RPE 4/10", duration_minutes: 2, target_area: "Glutes, hamstrings, core" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+  {
+    id: "light_cable_core",
+    title: "Gym Photo: Cable Core Activation (Light)",
+    bodyPart: "core",
+    category: "light",
+    highImpact: false,
+    requiredEquipment: ["cable machine"],
+    goals: ["general_fitness", "more_sculpted"],
+    focus: "Light cable-based core activation",
+    warm_up: WARM_UP_LIGHT,
+    blocks: [
+      {
+        name: "Block 1",
+        rounds: 2,
+        rest_between_rounds: "60 sec",
+        exercises: [
+          { name: "Cable anti-rotation hold", library_id: "Pallof_Press", sets: 1, reps: "20 sec each side", weight_guidance: "light cable stack", intensity: "RPE 4/10", duration_minutes: 2, target_area: "Core, obliques" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Plank hold", library_id: "Plank", sets: 1, reps: "20-30 sec", weight_guidance: "bodyweight", intensity: "RPE 4/10", duration_minutes: 2, target_area: "Core" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+
+  // ---- moderate ----
+  {
+    id: "moderate_barbell_lower_body",
+    title: "Gym Photo: Barbell Lower-Body (Moderate)",
+    bodyPart: "lower_body",
+    category: "moderate",
+    highImpact: false,
+    requiredEquipment: ["barbell", "squat rack"],
+    goals: ["build_strength", "gain_muscle", "general_fitness"],
+    focus: "Moderate barbell lower-body strength",
+    warm_up: WARM_UP_MODERATE,
+    blocks: [
+      {
+        name: "Block 1",
+        rounds: 1,
+        rest_between_rounds: "90 sec",
+        exercises: [
+          { name: "Barbell back squat", library_id: "Barbell_Squat", sets: 4, reps: "8", weight_guidance: "moderate -- last rep should feel like RPE 7", intensity: "RPE 7/10", duration_minutes: 12, target_area: "Quads, glutes, core" },
+        ],
+      },
+      {
+        name: "Block 2",
+        rounds: 1,
+        rest_between_rounds: "90 sec",
+        exercises: [
+          { name: "Barbell deadlift", library_id: "Barbell_Deadlift", sets: 3, reps: "8", weight_guidance: "moderate -- last rep should feel like RPE 7", intensity: "RPE 7/10", duration_minutes: 10, target_area: "Hamstrings, glutes, back" },
+        ],
+      },
+      {
+        name: "Block 3 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Walking lunge with reach", library_id: "Bodyweight_Walking_Lunge", sets: 1, reps: "10 each leg", weight_guidance: "bodyweight", intensity: "RPE 6/10", duration_minutes: 3, target_area: "Quads, glutes, hip flexors" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+  {
+    id: "moderate_dumbbell_lower_body",
+    title: "Gym Photo: Dumbbell Lower-Body (Moderate)",
+    bodyPart: "lower_body",
+    category: "moderate",
+    highImpact: false,
+    requiredEquipment: ["dumbbells"],
+    goals: ["build_strength", "gain_muscle", "more_sculpted"],
+    focus: "Moderate dumbbell lower-body strength",
+    warm_up: WARM_UP_MODERATE,
+    blocks: [
+      {
+        name: "Block 1",
+        rounds: 1,
+        rest_between_rounds: "75 sec",
+        exercises: [
+          { name: "Dumbbell Romanian deadlift", library_id: "Stiff-Legged_Dumbbell_Deadlift", sets: 3, reps: "10", weight_guidance: "moderate, 2x12-20kg", intensity: "RPE 7/10", duration_minutes: 9, target_area: "Hamstrings, glutes" },
+          { name: "Dumbbell goblet squat", library_id: "Goblet_Squat", sets: 3, reps: "12", weight_guidance: "moderate, 1x16-24kg", intensity: "RPE 7/10", duration_minutes: 9, target_area: "Quads, glutes, core" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Dumbbell split squat", library_id: "Split_Squat_with_Dumbbells", sets: 1, reps: "10 each leg", weight_guidance: "moderate, 2x8-14kg", intensity: "RPE 7/10", duration_minutes: 4, target_area: "Quads, glutes" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+  {
+    id: "moderate_bodyweight_lower_body",
+    title: "Gym Photo: Bodyweight Lower-Body (Moderate)",
+    bodyPart: "lower_body",
+    category: "moderate",
+    highImpact: false,
+    requiredEquipment: [],
+    goals: ["general_fitness", "leaner_toned", "build_strength"],
+    focus: "Moderate low-impact lower-body strength",
+    warm_up: WARM_UP_MODERATE,
+    blocks: [
+      {
+        name: "Block 1",
+        rounds: 3,
+        rest_between_rounds: "60 sec",
+        exercises: [
+          { name: "Tempo bodyweight squat", library_id: "Bodyweight_Squat", sets: 1, reps: "12 (3 sec down, 1 sec up)", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Quads, glutes" },
+          { name: "Reverse lunge", sets: 1, reps: "10 each leg", weight_guidance: "bodyweight -- step back, no jumping", intensity: "RPE 7/10", duration_minutes: 3, target_area: "Quads, glutes" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Glute bridge", library_id: "Butt_Lift_Bridge", sets: 1, reps: "20", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Glutes, hamstrings" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+  {
+    id: "moderate_core",
+    title: "Gym Photo: Core Strength (Moderate)",
+    bodyPart: "core",
+    category: "moderate",
+    highImpact: false,
+    requiredEquipment: [],
+    goals: ["general_fitness", "improve_flexibility", "more_sculpted"],
+    focus: "Moderate core strength and stability",
+    warm_up: WARM_UP_MODERATE,
+    blocks: [
+      {
+        name: "Block 1",
+        rounds: 3,
+        rest_between_rounds: "45 sec",
+        exercises: [
+          { name: "Plank hold", library_id: "Plank", sets: 1, reps: "30-45 sec", weight_guidance: "bodyweight", intensity: "RPE 6/10", duration_minutes: 2, target_area: "Core" },
+          { name: "Side plank", library_id: "Side_Bridge", sets: 1, reps: "30 sec each side", weight_guidance: "bodyweight", intensity: "RPE 6/10", duration_minutes: 2, target_area: "Obliques, core" },
+          { name: "Glute bridge", library_id: "Butt_Lift_Bridge", sets: 1, reps: "15", weight_guidance: "bodyweight", intensity: "RPE 6/10", duration_minutes: 2, target_area: "Glutes, hamstrings, core" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Mountain climber", library_id: "Mountain_Climbers", sets: 1, reps: "30 total", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Core, hip flexors" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+  {
+    id: "moderate_cable_core",
+    title: "Gym Photo: Cable Core Stability (Moderate)",
+    bodyPart: "core",
+    category: "moderate",
+    highImpact: false,
+    requiredEquipment: ["cable machine"],
+    goals: ["general_fitness", "more_sculpted", "build_strength"],
+    focus: "Moderate cable-based core stability",
+    warm_up: WARM_UP_MODERATE,
+    blocks: [
+      {
+        name: "Block 1",
+        rounds: 3,
+        rest_between_rounds: "45 sec",
+        exercises: [
+          { name: "Cable anti-rotation hold", library_id: "Pallof_Press", sets: 1, reps: "30 sec each side", weight_guidance: "moderate cable stack", intensity: "RPE 6/10", duration_minutes: 3, target_area: "Core, obliques" },
+          { name: "Plank hold", library_id: "Plank", sets: 1, reps: "30-45 sec", weight_guidance: "bodyweight", intensity: "RPE 6/10", duration_minutes: 2, target_area: "Core" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Side plank", library_id: "Side_Bridge", sets: 1, reps: "30 sec each side", weight_guidance: "bodyweight", intensity: "RPE 7/10", duration_minutes: 2, target_area: "Obliques, core" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+
+  // ---- push_hard ----
+  {
+    id: "push_hard_barbell_lower_body",
+    title: "Gym Photo: Barbell Lower-Body (Hard)",
+    bodyPart: "lower_body",
+    category: "push_hard",
+    highImpact: false,
+    requiredEquipment: ["barbell", "squat rack"],
+    goals: ["build_strength", "gain_muscle"],
+    focus: "High-effort barbell lower-body strength",
+    warm_up: WARM_UP_MODERATE,
+    blocks: [
+      {
+        name: "Block 1",
+        rounds: 1,
+        rest_between_rounds: "2 min",
+        exercises: [
+          { name: "Barbell back squat", library_id: "Barbell_Squat", sets: 4, reps: "5", weight_guidance: "heavy -- last rep should feel like RPE 8", intensity: "RPE 8/10", duration_minutes: 15, target_area: "Quads, glutes, core" },
+        ],
+      },
+      {
+        name: "Block 2",
+        rounds: 1,
+        rest_between_rounds: "90 sec",
+        exercises: [
+          { name: "Barbell deadlift", library_id: "Barbell_Deadlift", sets: 3, reps: "6", weight_guidance: "moderate-heavy", intensity: "RPE 8/10", duration_minutes: 10, target_area: "Hamstrings, glutes, back" },
+        ],
+      },
+      {
+        name: "Block 3 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Walking lunge with reach", library_id: "Bodyweight_Walking_Lunge", sets: 1, reps: "12 each leg", weight_guidance: "bodyweight", intensity: "RPE 8/10", duration_minutes: 2, target_area: "Quads, glutes, hip flexors" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+  {
+    id: "push_hard_bodyweight_lower_body",
+    title: "Gym Photo: Low-Impact Lower-Body (Hard)",
+    bodyPart: "lower_body",
+    category: "push_hard",
+    highImpact: false,
+    requiredEquipment: [],
+    goals: ["build_strength", "general_fitness", "leaner_toned"],
+    focus: "High-effort low-impact lower-body strength",
+    warm_up: WARM_UP_MODERATE,
+    blocks: [
+      {
+        name: "Block 1",
+        rounds: 4,
+        rest_between_rounds: "45 sec",
+        exercises: [
+          { name: "Bulgarian split squat", sets: 1, reps: "10 each leg", weight_guidance: "bodyweight -- rear foot on a chair or step", intensity: "RPE 8/10", duration_minutes: 4, target_area: "Quads, glutes" },
+          { name: "Tempo bodyweight squat", library_id: "Bodyweight_Squat", sets: 1, reps: "15 (3 sec down, 1 sec up)", weight_guidance: "bodyweight", intensity: "RPE 8/10", duration_minutes: 3, target_area: "Quads, glutes" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Wall sit", sets: 1, reps: "60-75 sec", weight_guidance: "bodyweight", intensity: "RPE 9/10", duration_minutes: 2, target_area: "Quads" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+  {
+    id: "push_hard_core",
+    title: "Gym Photo: Core Conditioning (Hard)",
+    bodyPart: "core",
+    category: "push_hard",
+    highImpact: false,
+    requiredEquipment: [],
+    goals: ["general_fitness", "build_strength", "leaner_toned"],
+    focus: "High-effort core conditioning without impact",
+    warm_up: WARM_UP_MODERATE,
+    blocks: [
+      {
+        name: "Superset A",
+        rounds: 4,
+        rest_between_rounds: "30 sec",
+        exercises: [
+          { name: "Plank hold", library_id: "Plank", sets: 1, reps: "45-60 sec", weight_guidance: "bodyweight", intensity: "RPE 8/10", duration_minutes: 2, target_area: "Core" },
+          { name: "Mountain climber", library_id: "Mountain_Climbers", sets: 1, reps: "30 total", weight_guidance: "bodyweight", intensity: "RPE 8/10", duration_minutes: 2, target_area: "Core, hip flexors" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Side plank", library_id: "Side_Bridge", sets: 1, reps: "45 sec each side", weight_guidance: "bodyweight", intensity: "RPE 8/10", duration_minutes: 2, target_area: "Obliques, core" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
+  {
+    id: "push_hard_cable_core",
+    title: "Gym Photo: Cable Core Conditioning (Hard)",
+    bodyPart: "core",
+    category: "push_hard",
+    highImpact: false,
+    requiredEquipment: ["cable machine"],
+    goals: ["build_strength", "general_fitness", "leaner_toned"],
+    focus: "High-effort cable-based core conditioning",
+    warm_up: WARM_UP_MODERATE,
+    blocks: [
+      {
+        name: "Superset A",
+        rounds: 4,
+        rest_between_rounds: "30 sec",
+        exercises: [
+          { name: "Cable anti-rotation hold", library_id: "Pallof_Press", sets: 1, reps: "45 sec each side", weight_guidance: "moderate-heavy cable stack", intensity: "RPE 8/10", duration_minutes: 4, target_area: "Core, obliques" },
+          { name: "Plank hold", library_id: "Plank", sets: 1, reps: "45-60 sec", weight_guidance: "bodyweight", intensity: "RPE 8/10", duration_minutes: 2, target_area: "Core" },
+        ],
+      },
+      {
+        name: "Block 2 - Finisher",
+        rounds: 1,
+        rest_between_rounds: "N/A",
+        exercises: [
+          { name: "Side plank", library_id: "Side_Bridge", sets: 1, reps: "45 sec each side", weight_guidance: "bodyweight", intensity: "RPE 8/10", duration_minutes: 2, target_area: "Obliques, core" },
+        ],
+      },
+    ],
+    cool_down: COOL_DOWN,
+  },
 ];
 
 /// Deterministic selection: filter by category, keep templates whose
-/// equipment the user actually has, then prefer the one that makes the most
-/// use of that equipment, breaking ties on a goals match. Never LLM-driven.
+/// equipment the user actually has, then rank by (1) whether the template's
+/// bodyPart matches today's resolved target, (2) how much of that equipment
+/// it uses, (3) a goals match. Never LLM-driven.
 ///
 /// Ordering matters more than it looks. Bodyweight templates declare
 /// `requiredEquipment: []`, which satisfies `.every()` vacuously, so they
@@ -915,8 +1337,19 @@ export const GYM_WORKOUT_TEMPLATES: GymWorkoutTemplate[] = [
 /// first match in declaration order, so a user standing in a fully equipped
 /// gym was handed the bodyweight session whenever its goals happened to
 /// match. The equipment-specific templates were nearly unreachable, which
-/// made the whole photo step decorative. Sorting by specificity first fixes
+/// made the whole photo step decorative. Sorting by specificity first fixed
 /// that: if you photographed a squat rack, you get the session that uses it.
+///
+/// BUG report (2026-08-19): that equipment-first ordering then went too
+/// far the other way -- a fully-equipped gym photo always outranked
+/// whatever body part today's category actually called for (e.g. a leg day
+/// got overridden to a full-body/barbell session just because the photo
+/// showed a squat rack). `targetBodyPart` (resolved server-side by
+/// targetBodyPart.ts, mirroring the goals+injury-aware default the normal
+/// picker flow already applies) is now sort key #1, ahead of equipment
+/// specificity -- a body-part match always outranks a bigger equipment
+/// match; equipment specificity and goals remain tie-breakers within (and
+/// outside) a body-part match, same comparator as before.
 /// True if any exercise name or target_area in the template mentions one of
 /// the given keywords -- a second, more granular pass on top of the coarse
 /// highImpact filter below, from the deterministic contraindication map
@@ -937,6 +1370,10 @@ export function selectTemplate(
   goals: string[],
   excludeHighImpact = false,
   excludedKeywords: string[] = [],
+  // Optional and trailing so existing callers (and every pre-existing test
+  // below) that don't pass one keep today's equipment-first behavior
+  // unchanged. index.ts always resolves and passes one in production.
+  targetBodyPart?: string,
 ): GymWorkoutTemplate {
   const normalizedEquipment = normalizeEquipment(Array.from(confirmedEquipment));
   const inCategory = GYM_WORKOUT_TEMPLATES.filter((t) =>
@@ -980,11 +1417,20 @@ export function selectTemplate(
 
   const matchesGoal = (t: GymWorkoutTemplate) => t.goals.some((g) => goals.includes(g));
   const ranked = [...pool].sort((a, b) => {
-    // 1. Use as much of the user's actual equipment as possible.
+    // 1. A body-part match always outranks a bigger equipment match --
+    // otherwise a well-equipped photo silently overrides today's actual
+    // training target (see BUG report above selectTemplate's doc comment).
+    if (targetBodyPart) {
+      const aTarget = Number(a.bodyPart === targetBodyPart);
+      const bTarget = Number(b.bodyPart === targetBodyPart);
+      if (aTarget !== bTarget) return bTarget - aTarget;
+    }
+    // 2. Among body-part ties, use as much of the user's actual equipment
+    // as possible.
     if (b.requiredEquipment.length !== a.requiredEquipment.length) {
       return b.requiredEquipment.length - a.requiredEquipment.length;
     }
-    // 2. Among equally specific options, honour the user's goals.
+    // 3. Among equally specific options, honour the user's goals.
     return Number(matchesGoal(b)) - Number(matchesGoal(a));
   });
   return ranked[0];

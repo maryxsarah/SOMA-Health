@@ -15,6 +15,21 @@ struct NutritionView: View {
     @State private var showGoalBodyProgress = false
     @State private var showMealRecommendation = false
     @State private var selectedEntry: MealLogEntry?
+
+    // Pantry + daily autopilot meal plan.
+    @State private var pantryItems: [PantryItem] = []
+    @State private var todaysMealPlan: TodaysMealPlan?
+    @State private var showPantry = false
+    /// Distinct from `isLoading` -- the daily-plan fetch-or-generate call
+    /// can take a few seconds on an actual cache miss, and gating the
+    /// whole screen on it would block macro bars/logging for no reason.
+    @State private var isLoadingMealPlan = false
+    /// Which sheet MealRecommendationView opens as -- tapping the
+    /// autopilot card seeds it with the cached recipe (no network call),
+    /// tapping "Want something different?" seeds it with the pantry as
+    /// editable text instead.
+    private enum MealRecommendationEntry { case autopilot, onDemand }
+    @State private var mealRecommendationEntry: MealRecommendationEntry = .onDemand
     /// Guards against firing a second rate-meal call for the same entry
     /// while one is already in flight (loadEntries() re-runs the
     /// unrated-entry sweep every time it's called).
@@ -37,7 +52,7 @@ struct NutritionView: View {
                         if let target {
                             let progress = NutritionDayProgress.compute(entries: entries, target: target)
                             progressSection(progress)
-                            mealIdeaCard(progress)
+                            pantrySection(progress)
                         } else {
                             emptyStateSection
                         }
@@ -88,7 +103,25 @@ struct NutritionView: View {
             // Picks up a meal logged via "Log this meal" in there.
             Task { await loadEntries() }
         }) {
-            MealRecommendationView(remaining: target.map { NutritionDayProgress.compute(entries: entries, target: $0) })
+            let remaining = target.map { NutritionDayProgress.compute(entries: entries, target: $0) }
+            switch mealRecommendationEntry {
+            case .autopilot:
+                MealRecommendationView(remaining: remaining, initialRecommendation: todaysMealPlan?.recommendation)
+            case .onDemand:
+                MealRecommendationView(remaining: remaining, initialIngredientsText: pantryItems.asIngredientsText)
+            }
+        }
+        .sheet(isPresented: $showPantry, onDismiss: {
+            // Pantry changed (or didn't) -- reload it and let the server
+            // decide whether today's plan needs to regenerate (its
+            // pantry_signature check is authoritative; see
+            // fetchOrGenerateTodaysMealPlan).
+            Task {
+                pantryItems = (try? await SupabaseClient.shared.fetchPantryItems()) ?? []
+                await loadTodaysMealPlan()
+            }
+        }) {
+            PantryView()
         }
         .sheet(item: $selectedEntry, onDismiss: {
             // Picks up a score/rationale MealDetailView may have just
@@ -167,6 +200,15 @@ struct NutritionView: View {
     /// visibly the same ones just shown above, not a disconnected feature.
     private func mealIdeaCard(_ progress: NutritionDayProgress) -> some View {
         Button {
+            // Explicit, not inherited: without this, a stale .autopilot
+            // value from an earlier session interaction (opening the
+            // autopilot card, dismissing) could still be set when this card
+            // becomes reachable again (e.g. right after PantryView's
+            // onDismiss clears the pantry, in the render window before
+            // loadTodaysMealPlan's own async work catches up) -- opening
+            // the sheet via the wrong case shows the old cached plan
+            // instead of a blank on-demand form.
+            mealRecommendationEntry = .onDemand
             showMealRecommendation = true
         } label: {
             CardView {
@@ -192,6 +234,30 @@ struct NutritionView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Pantry + daily autopilot meal plan
+
+    /// Thin wrapper around PantryMealPlanSection (Soma/Components) --
+    /// pulled out to its own file to keep this one's line count
+    /// manageable, see that file's header comment.
+    private func pantrySection(_ progress: NutritionDayProgress) -> some View {
+        PantryMealPlanSection(
+            pantryItems: pantryItems,
+            todaysMealPlan: todaysMealPlan,
+            isLoadingMealPlan: isLoadingMealPlan,
+            onManagePantry: { showPantry = true },
+            onOpenAutopilot: {
+                mealRecommendationEntry = .autopilot
+                showMealRecommendation = true
+            },
+            onWantDifferent: {
+                mealRecommendationEntry = .onDemand
+                showMealRecommendation = true
+            }
+        ) {
+            mealIdeaCard(progress)
+        }
     }
 
     private static let proteinColor = Color(red: 0.90, green: 0.35, blue: 0.40)
@@ -325,12 +391,40 @@ struct NutritionView: View {
         // unconditionally, so an already-logged meal must actually be
         // fetched even for a user who never got a target computed.
         await loadEntries()
+        pantryItems = (try? await SupabaseClient.shared.fetchPantryItems()) ?? []
         isLoading = false
+        // Fires after isLoading flips false -- the daily-plan fetch-or-
+        // generate call can take a few seconds on an actual cache miss,
+        // and gating the rest of the screen on it would block macro
+        // bars/logging for no reason (see isLoadingMealPlan).
+        await loadTodaysMealPlan()
     }
 
     private func loadEntries() async {
         entries = (try? await SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
         autoRateUnratedEntries()
+    }
+
+    /// Fetch-or-generate today's autopilot meal plan -- cheap on a cache
+    /// hit (server compares pantry_signature and returns the already-
+    /// cached row with no Claude call), so it's safe to call this on
+    /// every NutritionView open rather than only once. A truly empty
+    /// pantry is checked client-side first purely to skip a network call
+    /// that would just come back `.empty` anyway; the server handles an
+    /// empty pantry gracefully either way.
+    private func loadTodaysMealPlan() async {
+        guard !pantryItems.isEmpty else {
+            todaysMealPlan = nil
+            return
+        }
+        isLoadingMealPlan = true
+        defer { isLoadingMealPlan = false }
+        if let result = try? await SupabaseClient.shared.fetchOrGenerateTodaysMealPlan(date: Self.todayDateString()) {
+            switch result {
+            case .plan(let plan): todaysMealPlan = plan
+            case .empty: todaysMealPlan = nil
+            }
+        }
     }
 
     /// Fire-and-forget: rates any entry that doesn't have a score yet

@@ -50,7 +50,7 @@ export async function logGeneration(
   supabase: SupabaseClient,
   userId: string,
   date: string,
-  source: "suggestion" | "gym_photo" | "addon_suggestion" | "meal_text_estimate" | "meal_rating" | "goal_assignment_parse" | "meal_recommendation" | "exercise_translation" | "affirmation",
+  source: "suggestion" | "gym_photo" | "addon_suggestion" | "meal_text_estimate" | "meal_rating" | "goal_assignment_parse" | "meal_recommendation" | "exercise_translation" | "affirmation" | "meal_recommendation_daily",
 ): Promise<void> {
   const { error } = await supabase.from("ai_generation_log").insert({ user_id: userId, date, source });
   if (error) console.error(`could not write ai_generation_log (${source}) for ${userId}: ${error.message}`);

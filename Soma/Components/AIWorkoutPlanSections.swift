@@ -39,6 +39,17 @@ struct AIWorkoutPlanView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // templateBodyPart is only ever non-nil for a gym-photo plan
+            // (nil for the normal suggestion flow, whose picker already
+            // shows the body part before generation) -- so this only
+            // appears here, making explicit that today's target body part,
+            // not just the photographed equipment, drove the plan.
+            if let templateBodyPart = plan.templateBodyPart, let bodyPart = BodyPartFocus(rawValue: templateBodyPart) {
+                Text(String(localized: "aiWorkoutPlan.targetBodyPart", defaultValue: "Today: \(bodyPart.displayName)", comment: "Shown above a gym-photo-generated plan's focus line to make clear which body part it targeted, e.g. 'Today: Lower Body'. Placeholder is the already-localized body part display name."))
+                    .font(.caption.bold())
+                    .foregroundStyle(SomaTokens.accent)
+                    .padding(.top, 4)
+            }
             Text(plan.focus)
                 .font(.subheadline.bold())
                 .padding(.top, 4)

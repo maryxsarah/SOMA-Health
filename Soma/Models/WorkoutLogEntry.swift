@@ -35,11 +35,16 @@ struct WorkoutLogEntry: Codable, Identifiable {
     /// to when the user taps today's logged workout.
     let source: String
 
-    /// A wearable's own auto-detected activity signal (a walk the watch
-    /// noticed on its own) -- distinct from every other source, which
-    /// represents a deliberate user choice. Single Swift-side definition
-    /// of the value the server independently mirrors as
-    /// DEVICE_DETECTED_SOURCE (supabase/functions/_shared/workoutLogSources.ts).
+    /// A wearable's own auto-detected activity signal (a run Whoop/Oura/
+    /// HealthKit noticed on its own). Historically written silently with
+    /// zero user input and treated as not-deliberate everywhere -- that
+    /// silent write path is gone: HomeView.confirmDetectedWorkout is the
+    /// only remaining writer, and it only ever runs after an explicit
+    /// "Yes, that was my workout" tap (DetectedWorkoutConfirmationView), so
+    /// a row with this source is exactly as deliberate as any other today.
+    /// Single Swift-side definition of the value the server independently
+    /// mirrors as DEVICE_DETECTED_SOURCE
+    /// (supabase/functions/_shared/workoutLogSources.ts).
     static let deviceDetectedSource = "device_detected"
 
     /// Calorie hero stat on CompletedWorkoutView -- nil until the lazy

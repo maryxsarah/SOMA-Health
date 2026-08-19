@@ -30,7 +30,6 @@ import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
 import { classifyGenerationError } from "../_shared/anthropicErrors.ts";
 import { checkSafetyFlags } from "../_shared/safetyFlags.ts";
 import { checkGenerationLimit, GENERATION_LIMIT_MESSAGE, logGeneration, type SubscriptionTier } from "../_shared/generationLimits.ts";
-import { DEVICE_DETECTED_SOURCE } from "../_shared/workoutLogSources.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
 import { describeContraindications, type InjurySeverityLevel } from "../_shared/contraindications.ts";
 import { describePregnancyGuidance } from "../_shared/pregnancyGuidance.ts";
@@ -284,14 +283,16 @@ Deno.serve(async (req: Request) => {
     // unique(user_id, date) on workout_log), and maybeSingle errors on 2+
     // rows -- with the error unread, `data` came back null and the lock
     // silently disengaged on exactly the days it was written for.
-    // device_detected excluded: an auto-logged wearable session must not
-    // count as "today's workout is done" for locking purposes.
+    // device_detected included: the old silent auto-log path (which wrote
+    // one with zero user input) is gone -- HomeView's confirmDetectedWorkout
+    // is the only remaining writer of this source, and it only ever runs
+    // after an explicit "Yes, that was my workout" tap, so a device_detected
+    // row is exactly as deliberate as any other and must lock generation too.
     const { data: existingLogs, error: logReadError } = await supabase
       .from("workout_log")
       .select("title")
       .eq("user_id", userId)
-      .eq("date", date)
-      .neq("source", DEVICE_DETECTED_SOURCE);
+      .eq("date", date);
     if (logReadError) {
       throw new Error(`could not check today's workout log: ${logReadError.message}`);
     }

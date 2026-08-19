@@ -1059,6 +1059,68 @@ final class SupabaseClient {
         return try JSONDecoder().decode(MealRecommendation.self, from: data)
     }
 
+    // MARK: - pantry_items
+
+    /// The user's persistent "what I have at home" list, most recently
+    /// touched first -- direct REST via RLS, same client-writable shape as
+    /// meal_log (contrast with ai_workout_plan/gym_workout_plan, which are
+    /// service-role-only).
+    func fetchPantryItems() async throws -> [PantryItem] {
+        let path = "rest/v1/pantry_items?select=id,name,quantity,unit,updated_at&order=updated_at.desc"
+        let request = try await authorizedRequest(path: path, method: "GET")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        return try JSONDecoder().decode([PantryItem].self, from: data)
+    }
+
+    /// Adds one pantry entry -- name is required, quantity/unit are both
+    /// optional (a bare "salt" is a completely normal entry).
+    @discardableResult
+    func addPantryItem(name: String, quantity: Double?, unit: String?) async throws -> PantryItem {
+        guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
+        var body: [String: Any] = [
+            "user_id": userId,
+            "name": name,
+            "updated_at": ISO8601DateFormatter().string(from: Date()),
+        ]
+        if let quantity { body["quantity"] = quantity }
+        if let unit, !unit.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["unit"] = unit }
+
+        var request = try await authorizedRequest(path: "rest/v1/pantry_items", method: "POST")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        let rows = try JSONDecoder().decode([PantryItem].self, from: data)
+        guard let created = rows.first else {
+            throw SupabaseError.requestFailed(status: 0, message: "pantry_items insert returned no row")
+        }
+        return created
+    }
+
+    /// Edits an existing entry in place -- quantity/unit pass `nil` to
+    /// clear (e.g. "just salt, no amount"), same explicit-NSNull-on-clear
+    /// convention as updateMealLog.
+    func updatePantryItem(id: String, name: String, quantity: Double?, unit: String?) async throws {
+        let body: [String: Any] = [
+            "name": name,
+            "quantity": quantity ?? NSNull(),
+            "unit": unit ?? NSNull(),
+            "updated_at": ISO8601DateFormatter().string(from: Date()),
+        ]
+        var request = try await authorizedRequest(path: "rest/v1/pantry_items?id=eq.\(id)", method: "PATCH")
+        request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    func deletePantryItem(id: String) async throws {
+        let request = try await authorizedRequest(path: "rest/v1/pantry_items?id=eq.\(id)", method: "DELETE")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
     /// Scores an already-logged meal (rate-meal, Claude Haiku) against
     /// the user's real nutrition targets/goal direction and writes the
     /// result back onto the row server-side -- this call both rates AND
@@ -1779,9 +1841,9 @@ final class SupabaseClient {
             // an unknown column in this insert would 400 and silently break
             // ALL HealthKit sync via this function's try?-wrapped caller.
             // Wire this through once that migration deploys -- until then,
-            // the walk-exclusion fix only covers this device's own local
-            // HealthKit query (HomeView.autoLogDeviceDetectedWorkoutIfNeeded),
-            // which is what the reported bug actually hit.
+            // a synced-from-another-device entry decodes with activityType
+            // == nil (isWalk == false), so DetectedWorkoutConfirmationView's
+            // copy can't call out "walk" specifically for those rows.
             return row
         }
 
@@ -1814,8 +1876,7 @@ final class SupabaseClient {
         // matching comment in syncHealthKitWorkouts above; the column
         // isn't live yet. Entries read back here decode with
         // activityType == nil, i.e. isWalk == false: an honest "we don't
-        // know" rather than a false positive that would wrongly block a
-        // real workout from being auto-logged for another device's entries.
+        // know" rather than a guess.
         //
         // Window is the LOCAL day converted to UTC instants -- a bare
         // "\(date)T00:00:00" read as UTC pulled yesterday evening's
@@ -1995,6 +2056,31 @@ final class SupabaseClient {
         try assertSuccess(response, data: data)
         let rows = try JSONDecoder().decode([TodaysAIPlan].self, from: data)
         return rows.first
+    }
+
+    /// Today's daily-autopilot meal recommendation, fetched or generated
+    /// in one round trip -- POSTs `{mode: "daily", date}` to generate-
+    /// meal-recommendation, which does the real cache-signature check
+    /// server-side (see pantrySignature.ts) and either returns the
+    /// already-cached row for today's pantry as-is, or generates fresh on
+    /// a miss (new day, or the pantry changed since the last generation).
+    /// Cheap on a hit (no Claude call server-side), so safe to call on
+    /// every NutritionView open -- same "server is authoritative, checked
+    /// on every call" posture generate-workout-plan already uses for its
+    /// own cache. `.empty` means the pantry has no items yet; the caller
+    /// should show the "add what you have" prompt, not an error.
+    func fetchOrGenerateTodaysMealPlan(date: String) async throws -> DailyMealPlanResult {
+        var request = try await authorizedRequest(path: "functions/v1/generate-meal-recommendation", method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["mode": "daily", "date": date, "language": await currentAILanguageCode()])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        let envelope = try JSONDecoder().decode(DailyMealPlanEnvelope.self, from: data)
+        if envelope.empty == true { return .empty }
+        guard let recommendation = envelope.recommendation, let planDate = envelope.date else {
+            throw SupabaseError.requestFailed(status: 0, message: "daily meal plan response missing recommendation")
+        }
+        return .plan(TodaysMealPlan(date: planDate, category: envelope.category, recommendation: recommendation))
     }
 
     /// "Add to today's plan" -- server-side because ai_workout_plan has no

@@ -846,6 +846,11 @@ final class FixtureURLProtocol: URLProtocol {
     private static var savedSleep: [String: Any]?
     private static var insertedMeasurements: [[String: Any]] = []
     private static var loggedSleep: [String: Any]?
+    // Fixed once per process, not recomputed per fetch -- a real device
+    // session's start_time never moves between two fetches of the same
+    // day's timeline, and DetectedWorkoutConfirmationView's dedup
+    // (WorkoutTimelineEntry.stableKey) depends on that being true.
+    private static let detectedWorkoutFixtureStartTime = FixtureData.iso(daysAgo: 0)
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -1022,6 +1027,29 @@ final class FixtureURLProtocol: URLProtocol {
                 return (["parsed": NSNull(), "confidence": 0.2, "lowConfidence": true], 200)
             }
             return (["parsed": FixtureData.parsedAssignment, "confidence": 0.92, "lowConfidence": false], 200)
+
+        // Device-detected-workout confirmation card (DetectedWorkoutConfirmationView):
+        // set UITEST_DETECTED_WORKOUT=1 to seed one qualifying provider
+        // session for "today" so the manual verification pass doesn't
+        // depend on real HealthKit data being seeded into the simulator.
+        // A provider (Whoop) entry rather than an apple_health one --
+        // WorkoutTimelineEntry.activityType (and so isWalk) is only ever
+        // set for on-device HealthKit entries, never provider ones, so this
+        // exercises the card/confirm/decline flow but not the walk-specific
+        // copy path; WorkoutTimelineEntryTests covers that half directly.
+        case path.hasSuffix("/functions/v1/fetch-workout-timeline"):
+            guard ProcessInfo.processInfo.environment["UITEST_DETECTED_WORKOUT"] == "1" else {
+                return (["entries": []] as [String: Any], 200)
+            }
+            return (["entries": [[
+                "source": "whoop",
+                "title": "Running",
+                "start_time": Self.detectedWorkoutFixtureStartTime,
+                "duration_minutes": 45,
+                "calories": 410,
+                "average_heart_rate": NSNull(),
+                "max_heart_rate": NSNull(),
+            ]]] as [String: Any], 200)
 
         // Home data. Both real query shapes carry a date filter (eq or
         // gte/lte), so day-filtering serves today AND history correctly.
