@@ -57,6 +57,14 @@ enum RecommendationCategory: String, Codable {
     /// templates. Each carries equipment/impact/body-part tags so the
     /// detail view can prioritize/filter by the user's profile and show
     /// what today's session actually targets.
+    ///
+    /// The (bodyPart, goals) shape of this catalog is hand-mirrored, in
+    /// reduced form, by generate-gym-workout/targetBodyPart.ts's
+    /// CATEGORY_BODY_PART_CANDIDATES (server-side, Deno -- can't share this
+    /// Swift catalog directly). If you change which body parts/goals a
+    /// category's suggestions carry, update that file's table too, or the
+    /// gym-photo flow's default body-part resolution will silently drift
+    /// from what this picker shows.
     var workoutSuggestions: [WorkoutSuggestion] {
         switch self {
         case .pushHard:
