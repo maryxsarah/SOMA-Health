@@ -16,12 +16,12 @@ enum LegalContent {
     /// returning user needs to re-acknowledge -- see SupabaseClient's
     /// sign-in methods, which write both this and a timestamp on every
     /// successful gated sign-in.
-    static let currentVersion = "2026-07-31-2"
+    static let currentVersion = "2026-08-19-1"
 
     static let privacyPolicyTitle = "Privacy Policy"
 
     static let privacyPolicyBody = """
-    Last updated: 31st of July 2026 (revised)
+    Last updated: 19th of August 2026 (revised)
 
     Soma ("the app", "we", "our") helps you decide how hard to train each \
     day by reading data from Apple Health, Whoop, and/or Oura. This policy \
@@ -113,8 +113,8 @@ enum LegalContent {
     the address below.
 
     Children's Privacy
-    Soma is not directed at children under 13, and we do not knowingly \
-    collect data from children under 13.
+    Soma is not directed at children under 14, and we do not knowingly \
+    collect data from children under 14.
 
     Your Rights
     Depending on where you live, you may have rights to access, correct, \
@@ -131,7 +131,7 @@ enum LegalContent {
     static let termsOfServiceTitle = "Terms of Service"
 
     static let termsOfServiceBody = """
-    Last updated: 31st of July 2026 (revised)
+    Last updated: 19th of August 2026 (revised)
 
     By using Soma ("the app"), you agree to these Terms of Service.
 
@@ -159,7 +159,7 @@ enum LegalContent {
     Continuing to train while injured is entirely at your own risk.
 
     Eligibility
-    You must be at least 13 years old (or the age of digital consent in \
+    You must be at least 14 years old (or the age of digital consent in \
     your country) to use Soma.
 
     Your Responsibilities

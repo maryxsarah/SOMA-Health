@@ -98219,55 +98219,55 @@
       "localizations" : {
         "de" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needsReview",
             "value" : "Du musst den Nutzungsbedingungen und der Datenschutzrichtlinie zustimmen, um fortzufahren."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You must accept the Terms of Service and Privacy Policy to continue."
+            "value" : "You must accept the Terms of Service and Privacy Policy, and confirm you're 14 or older, to continue."
           }
         },
         "es" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needsReview",
             "value" : "Debes aceptar los Términos de servicio y la Política de privacidad para continuar."
           }
         },
         "fr" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needsReview",
             "value" : "Tu dois accepter les Conditions d'utilisation et la Politique de confidentialité pour continuer."
           }
         },
         "hy" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needsReview",
             "value" : "Շարունակելու համար պետք է ընդունեք Ծառայության պայմանները և Գաղտնիության քաղաքականությունը։"
           }
         },
         "it" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needsReview",
             "value" : "Devi accettare i Termini di servizio e l'Informativa sulla privacy per continuare."
           }
         },
         "ka" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needsReview",
             "value" : "გასაგრძელებლად უნდა დაეთანხმოთ მომსახურების პირობებსა და კონფიდენციალურობის პოლიტიკას."
           }
         },
         "ru" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needsReview",
             "value" : "Чтобы продолжить, вы должны принять Условия использования и Политику конфиденциальности."
           }
         },
         "sr" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needsReview",
             "value" : "Мораш прихватити Услове коришћења и Политику приватности да би наставио."
           }
         }
