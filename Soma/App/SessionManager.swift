@@ -11,6 +11,14 @@ final class SessionManager: NSObject, ObservableObject, ASAuthorizationControlle
     @Published var isSigningIn = false
     @Published var errorMessage: String?
 
+    /// Flips true once SomaApp's onOpenURL has established a session from
+    /// a tapped password-reset email link -- drives the root
+    /// .fullScreenCover(isPresented:) that presents SetNewPasswordView
+    /// regardless of which appState.screen the user happens to be on.
+    /// Lives here rather than on AppState since it's transient auth-flow
+    /// UI state, the same category errorMessage/isSigningIn already are.
+    @Published var pendingPasswordRecovery = false
+
     /// Set when the failure looks like "no Apple ID on this device", which is
     /// the one case the user can actually resolve themselves. Drives an
     /// "Open Settings" affordance.

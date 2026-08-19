@@ -10,6 +10,7 @@ exact paste-in location and which `{{ .Variable }}` values it depends on.
 | File | Dashboard location | Depends on |
 |---|---|---|
 | `confirm-signup.html` | Authentication → Email Templates → Confirm signup | `Config.emailConfirmationRedirectURL` (client), `redirect_to` on `signUpWithEmail` (client) — see `deep-linking/README.md` |
+| `reset-password.html` | Authentication → Email Templates → Reset Password | `Config.passwordResetRedirectURL` (client), `redirect_to` on `requestPasswordReset` (client) — see `deep-linking/README.md` |
 
 If a template's copy changes here, re-paste it into the Dashboard —
 editing this file alone does not update what Supabase actually sends.

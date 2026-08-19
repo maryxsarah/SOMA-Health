@@ -61,6 +61,16 @@ enum Config {
     /// domain would never actually verify. Confirmed 2026-08-10.
     static let emailConfirmationRedirectURL = "https://www.soma4health.com/auth/confirm"
 
+    /// Where the branded password-reset email's button lands -- same
+    /// universal-link mechanism and same three prerequisites as
+    /// `emailConfirmationRedirectURL` above (Associated Domains
+    /// entitlement, an apple-app-site-association entry for this exact
+    /// path, and this URL on Supabase Dashboard's Redirect URLs
+    /// allow-list). See SomaApp's onOpenURL for the handler and
+    /// supabase/email-templates/reset-password.html for the template that
+    /// links here via {{ .ConfirmationURL }}.
+    static let passwordResetRedirectURL = "https://www.soma4health.com/auth/reset-password"
+
     static let backgroundTaskIdentifier = "com.soma.app.refresh"
 
     /// Goal/current body photo upload, history, and comparison slider.

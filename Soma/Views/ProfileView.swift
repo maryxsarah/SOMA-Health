@@ -1654,6 +1654,13 @@ private struct AccountSettingsView: View {
     @State private var affirmationRemindersOn = NotificationManager.shared.affirmationRemindersEnabled
     /// App Review 5.1.1(v): in-app account deletion, pushed as its own page.
     @State private var showDeleteAccount = false
+    /// Identity providers on the current auth user -- gates the "Change
+    /// password" row below to email/password accounts only (Apple/Google
+    /// -only accounts have no password to change), same call and same
+    /// reasoning DeleteAccountView already applies to its own Apple-reauth
+    /// step.
+    @State private var authProviders: [String] = []
+    @State private var showChangePassword = false
 
     var body: some View {
         ScrollView {
@@ -1773,6 +1780,17 @@ private struct AccountSettingsView: View {
                     ) { showAffirmationReminders = true }
                 }
 
+                if authProviders.contains("email") {
+                    groupCard(
+                        eyebrow: LocalizedStringKey(String(localized: "profile.security.eyebrow", defaultValue: "SECURITY", comment: "All-caps section eyebrow label on the Security settings group")),
+                        footnote: String(localized: "profile.security.groupFootnote", defaultValue: "Applies to email/password sign-in only.", comment: "Footnote under the Security settings group")
+                    ) {
+                        groupRow(title: LocalizedStringKey(String(localized: "profile.changePassword.title", defaultValue: "Change password", comment: "Row title opening the change-password page"))) {
+                            showChangePassword = true
+                        }
+                    }
+                }
+
                 if let errorMessage = store.errorMessage {
                     Text(errorMessage).font(.caption).foregroundStyle(SomaTokens.danger)
                 }
@@ -1816,9 +1834,13 @@ private struct AccountSettingsView: View {
         .navigationDestination(isPresented: $showDeleteAccount) {
             DeleteAccountView()
         }
+        .navigationDestination(isPresented: $showChangePassword) {
+            ChangePasswordView()
+        }
         // The 16c page writes straight to NotificationManager -- re-read
         // its On/Off when this page (re)appears so the row value tracks it.
         .onAppear { affirmationRemindersOn = NotificationManager.shared.affirmationRemindersEnabled }
+        .task { authProviders = (try? await SupabaseClient.shared.fetchAuthProviders()) ?? [] }
     }
 
 }

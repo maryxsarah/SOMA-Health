@@ -4,7 +4,7 @@
     "details": [
       {
         "appID": "G52G32NA32.com.skollnitzer.soma",
-        "paths": ["/auth/confirm"]
+        "paths": ["/auth/confirm", "/auth/reset-password"]
       }
     ]
   }

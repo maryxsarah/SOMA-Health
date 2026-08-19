@@ -12,6 +12,7 @@ struct SignUpConsentStepView: View {
     let onContinue: (Bool) -> Void
 
     @State private var acceptedTerms = false
+    @State private var ageConfirmed = false
     @State private var marketingOptIn = false
     @State private var showError = false
     @State private var showingPrivacyPolicy = false
@@ -45,12 +46,17 @@ struct SignUpConsentStepView: View {
                 .padding(.leading, 34)
 
                 consentRow(
+                    isOn: $ageConfirmed,
+                    text: String(localized: "onboarding.signUpConsent.ageText", defaultValue: "I confirm I am 14 years of age or older.", comment: "Consent checkbox label attesting the user meets Soma's minimum age")
+                )
+
+                consentRow(
                     isOn: $marketingOptIn,
                     text: String(localized: "onboarding.signUpConsent.marketingOptInText", defaultValue: "Send me tips, new features, and personalized offers from Soma Health.", comment: "Consent checkbox label for opting into marketing communications")
                 )
 
                 if showError {
-                    Text(String(localized: "onboarding.signUpConsent.errorMessage", defaultValue: "You must accept the Terms of Service and Privacy Policy to continue.", comment: "Error shown when the user tries to continue without accepting Terms/Privacy Policy"))
+                    Text(String(localized: "onboarding.signUpConsent.errorMessage", defaultValue: "You must accept the Terms of Service and Privacy Policy, and confirm you're 14 or older, to continue.", comment: "Error shown when the user tries to continue without accepting Terms/Privacy Policy or confirming the minimum age"))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -62,7 +68,7 @@ struct SignUpConsentStepView: View {
             Spacer()
 
             PillButton(title: LocalizedStringKey(String(localized: "onboarding.signUpConsent.continueButton", defaultValue: "Continue", comment: "Continue button on the sign-up consent step"))) {
-                if acceptedTerms {
+                if acceptedTerms && ageConfirmed {
                     onContinue(marketingOptIn)
                 } else {
                     showError = true
