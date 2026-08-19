@@ -43,6 +43,14 @@ struct SomaApp: App {
             // on its default tracks the device's language exactly as if
             // this modifier weren't here at all.
             .environment(\.locale, languageManager.effectiveLocale)
+            // Presented over whatever screen the user is on, not just
+            // pre-sign-in like the confirm-signup link above -- a
+            // password-reset link can just as easily be tapped by an
+            // already-signed-in user (e.g. resetting from a second
+            // device). See handlePasswordRecovery below.
+            .fullScreenCover(isPresented: $sessionManager.pendingPasswordRecovery) {
+                SetNewPasswordView()
+            }
             // Shake-to-report, live on every screen past sign-in (the
             // insert needs a session; before onboarding completes there is
             // no user row to attach the report to). Presented via UIKit
@@ -68,6 +76,8 @@ struct SomaApp: App {
                 // redirects to www, which breaks Apple's AASA fetch).
                 if url.host == "www.soma4health.com", url.path == "/auth/confirm" {
                     handleEmailConfirmation(url)
+                } else if url.host == "www.soma4health.com", url.path == "/auth/reset-password" {
+                    handlePasswordRecovery(url)
                 } else {
                     Superwall.handleDeepLink(url)
                 }
@@ -111,6 +121,36 @@ struct SomaApp: App {
                 await appState.markSignedIn()
             } catch {
                 sessionManager.errorMessage = "That confirmation link didn't work. Try signing up again."
+            }
+        }
+    }
+
+    /// Universal-link landing for the password-reset email
+    /// (supabase/email-templates/reset-password.html's button, via
+    /// {{ .ConfirmationURL }} -> Supabase's hosted verify endpoint -> this
+    /// URL). Establishes a recovery session then flips
+    /// sessionManager.pendingPasswordRecovery, which the root
+    /// .fullScreenCover above turns into SetNewPasswordView -- unlike
+    /// handleEmailConfirmation, this never touches appState.screen, since
+    /// the user may already be mid-session somewhere else in the app.
+    ///
+    /// A tapped-twice or expired link fails here the same way the
+    /// confirmation link does (error_description in the query instead of
+    /// tokens in the fragment).
+    private func handlePasswordRecovery(_ url: URL) {
+        guard let fragment = url.fragment else {
+            let description = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "error_description" }?.value
+            sessionManager.errorMessage = description?.removingPercentEncoding
+                ?? "That reset link has expired. Request a new one from the log in screen."
+            return
+        }
+        Task {
+            do {
+                try await SupabaseClient.shared.completePasswordRecovery(fragment: fragment)
+                sessionManager.pendingPasswordRecovery = true
+            } catch {
+                sessionManager.errorMessage = "That reset link didn't work. Request a new one from the log in screen."
             }
         }
     }

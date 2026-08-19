@@ -214,6 +214,85 @@ final class SupabaseClient {
         return userID
     }
 
+    // MARK: - Password reset ("forgot password")
+
+    /// Triggers Supabase's "Reset Password" email (see
+    /// supabase/email-templates/reset-password.html) via the same
+    /// redirect_to mechanism signUpWithEmail uses for confirmation.
+    /// Supabase's /recover endpoint always returns 200 regardless of
+    /// whether the email is registered -- deliberate, to avoid leaking
+    /// account existence -- so the caller should always show the same
+    /// "check your email" message rather than branching on the response.
+    func requestPasswordReset(email: String) async throws {
+        var components = URLComponents(url: Config.supabaseURL.appendingPathComponent("auth/v1/recover"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "redirect_to", value: Config.passwordResetRedirectURL)]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["email": email])
+
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    /// Establishes a session from the reset-password email's universal-link
+    /// redirect -- same fragment shape (`#access_token=...&type=recovery`)
+    /// as completeEmailConfirmation's signup redirect, just a different
+    /// `type`. No upsertUser call here: unlike a brand-new signup session,
+    /// this is always an existing account. Callers pair this with
+    /// updatePassword(newPassword:) below to actually set the new password
+    /// once this recovery session is established.
+    @discardableResult
+    func completePasswordRecovery(fragment: String) async throws -> String {
+        let params = Self.parseFragmentParams(fragment)
+        guard let accessToken = params["access_token"], let refreshToken = params["refresh_token"] else {
+            throw SupabaseError.requestFailed(status: 0, message: "Reset link is missing its tokens")
+        }
+        guard let claims = Self.decodeJWTClaims(accessToken), let userID = claims["sub"] as? String else {
+            throw SupabaseError.requestFailed(status: 0, message: "Couldn't read the reset token")
+        }
+        let expiresIn = params["expires_in"].flatMap(Double.init) ?? 3600
+
+        keychain.save(StoredSession(
+            userID: userID,
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: Date().addingTimeInterval(expiresIn)
+        ))
+        return userID
+    }
+
+    /// Sets a new password on the currently signed-in session -- used by
+    /// both the "forgot password" recovery flow (right after
+    /// completePasswordRecovery establishes a session) and Profile's
+    /// "Change password" (after ChangePasswordView re-authenticates with
+    /// the current password via signInWithEmail). Supabase's /auth/v1/user
+    /// endpoint only needs a valid access token, no old-password field --
+    /// re-auth, where it happens, is this app's own extra step, not
+    /// Supabase's requirement.
+    func updatePassword(newPassword: String) async throws {
+        var request = try await authorizedRequest(path: "auth/v1/user", method: "PUT")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["password": newPassword])
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+    }
+
+    /// The signed-in user's own auth email (as opposed to the separate,
+    /// user-editable `contactEmail` on their profile row) -- Change
+    /// Password needs this to re-authenticate via signInWithEmail before
+    /// applying a new password.
+    func fetchCurrentAuthEmail() async throws -> String? {
+        let token = try await validAccessToken()
+        var request = URLRequest(url: URL(string: "\(Config.supabaseURL)/auth/v1/user")!)
+        request.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await urlSession.data(for: request)
+        try assertSuccess(response, data: data)
+        struct AuthUser: Decodable { let email: String? }
+        return try? JSONDecoder().decode(AuthUser.self, from: data).email
+    }
+
     /// `key1=value1&key2=value2`, percent-decoded -- the shape of a URL
     /// fragment/query string. `URLComponents.fragment` gives the raw
     /// string; Foundation has no built-in parser for query-string-shaped

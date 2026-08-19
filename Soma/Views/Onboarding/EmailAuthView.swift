@@ -50,6 +50,7 @@ struct EmailAuthView: View {
     #endif
     @State private var checkYourEmailMessage: String?
     @State private var isPasswordVisible = false
+    @State private var showForgotPassword = false
 
     var body: some View {
         NavigationStack {
@@ -98,6 +99,19 @@ struct EmailAuthView: View {
                 }
                 .padding(.horizontal, 24)
 
+                if mode == .logIn {
+                    Button {
+                        showForgotPassword = true
+                    } label: {
+                        Text(String(localized: "email_auth.forgotPassword", defaultValue: "Forgot password?", comment: "Button on the Log In form opening the forgot-password sheet"))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(SomaTokens.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 24)
+                }
+
                 if let checkYourEmailMessage {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "envelope.badge.fill")
@@ -140,6 +154,9 @@ struct EmailAuthView: View {
                 }
             }
             .dismissKeyboardOnTap()
+            .sheet(isPresented: $showForgotPassword) {
+                ForgotPasswordView(email: email.trimmingCharacters(in: .whitespaces))
+            }
             #if DEBUG
             .onAppear {
                 if Self.diagSignup != nil { Task { await submit() } }
