@@ -1841,9 +1841,9 @@ final class SupabaseClient {
             // an unknown column in this insert would 400 and silently break
             // ALL HealthKit sync via this function's try?-wrapped caller.
             // Wire this through once that migration deploys -- until then,
-            // the walk-exclusion fix only covers this device's own local
-            // HealthKit query (HomeView.autoLogDeviceDetectedWorkoutIfNeeded),
-            // which is what the reported bug actually hit.
+            // a synced-from-another-device entry decodes with activityType
+            // == nil (isWalk == false), so DetectedWorkoutConfirmationView's
+            // copy can't call out "walk" specifically for those rows.
             return row
         }
 
@@ -1876,8 +1876,7 @@ final class SupabaseClient {
         // matching comment in syncHealthKitWorkouts above; the column
         // isn't live yet. Entries read back here decode with
         // activityType == nil, i.e. isWalk == false: an honest "we don't
-        // know" rather than a false positive that would wrongly block a
-        // real workout from being auto-logged for another device's entries.
+        // know" rather than a guess.
         //
         // Window is the LOCAL day converted to UTC instants -- a bare
         // "\(date)T00:00:00" read as UTC pulled yesterday evening's

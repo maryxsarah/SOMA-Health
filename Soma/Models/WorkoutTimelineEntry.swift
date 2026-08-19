@@ -47,6 +47,15 @@ struct WorkoutTimelineEntry: Identifiable {
     /// session apart from a walk to the shops -- the activity type can.
     var isWalk: Bool { activityType == "walking" }
 
+    /// Identity that survives a re-fetch, unlike `id` (a fresh `UUID()`
+    /// every time timelineEntries is reloaded) -- lets HomeView remember
+    /// "already asked about this one today" across pull-to-refresh without
+    /// re-prompting, and still recognize a genuinely new entry (e.g. a run
+    /// that appears after an earlier walk was declined). Same composite key
+    /// HomeView's loadTimeline already uses ad hoc to de-dupe
+    /// server-synced vs. local HealthKit entries.
+    var stableKey: String { "\(source)|\(startTime.timeIntervalSince1970)" }
+
     var sourceDisplayName: String {
         switch source {
         case "whoop": return String(localized: "provider.whoop", defaultValue: "Whoop", comment: "Connected-device provider display name; brand name, not translated")
@@ -56,11 +65,11 @@ struct WorkoutTimelineEntry: Identifiable {
         }
     }
 
-    /// Used by HomeView's auto-log-from-device-detection pass (see
-    /// autoLogDeviceDetectedWorkoutIfNeeded) to give an auto-created
-    /// workout_log row SOME category rather than none -- a rough proxy
-    /// only, since calorie burn rate correlates with intensity but isn't
-    /// a substitute for the AI plan's own category signal. Missing
+    /// Used when a confirmed device-detected entry is logged (see
+    /// HomeView's DetectedWorkoutConfirmationView flow) to give the
+    /// resulting workout_log row SOME category rather than none -- a rough
+    /// proxy only, since calorie burn rate correlates with intensity but
+    /// isn't a substitute for the AI plan's own category signal. Missing
     /// calories (Oura's workout collection never reports them) falls
     /// back to the safe middle default rather than guessing low or high.
     var inferredCategory: String {
@@ -71,20 +80,23 @@ struct WorkoutTimelineEntry: Identifiable {
         return "light"
     }
 
-    /// Pure selection logic behind HomeView's autoLogDeviceDetectedWorkoutIfNeeded:
-    /// which (if any) of today's device-detected timeline entries should
-    /// auto-satisfy the day and suppress a generated workout. A trivial
-    /// multi-minute entry (HealthKit logs even a short walk as its own
-    /// "workout") shouldn't count, and neither should a walk of ANY length
-    /// -- real feedback confirmed a walk must never substitute for a real
-    /// workout, however long it runs. Among the remaining candidates,
-    /// prefers the longest session over merely the chronologically-first.
-    static func qualifyingAutoLogCandidate(
+    /// Pure selection logic behind HomeView's
+    /// evaluateDetectedWorkoutForConfirmation: which (if any) of today's
+    /// device-detected timeline entries is worth ASKING the user about.
+    /// Nothing here writes anything -- see DetectedWorkoutConfirmationView --
+    /// so a walk is a legitimate candidate to ask about (real feedback was
+    /// that a walk shouldn't SILENTLY satisfy the day, not that it can never
+    /// be someone's workout; the user's own "No" is what protects them now).
+    /// A trivial multi-minute entry (HealthKit logs even a short walk as its
+    /// own "workout") still isn't worth interrupting the user for. Among the
+    /// remaining candidates, prefers the longest session over merely the
+    /// chronologically-first.
+    static func confirmationCandidate(
         from entries: [WorkoutTimelineEntry],
         minimumMinutes: Int = 10
     ) -> WorkoutTimelineEntry? {
         entries
-            .filter { $0.durationMinutes >= minimumMinutes && !$0.isWalk }
+            .filter { $0.durationMinutes >= minimumMinutes }
             .max(by: { $0.durationMinutes < $1.durationMinutes })
     }
 }

@@ -17,6 +17,13 @@ struct HomeView: View {
     @State private var recentRecommendations: [DailyRecommendation] = []
     @State private var selectedDay: String?
     @State private var todaysWorkoutLog: WorkoutLogEntry?
+    /// The single device-detected timeline entry currently awaiting a
+    /// yes/no answer -- nil whenever there's nothing to ask about, or the
+    /// day's candidate has already been asked about (see
+    /// hasAskedAboutDetectedWorkout). Set by
+    /// evaluateDetectedWorkoutForConfirmation, cleared by either
+    /// DetectedWorkoutConfirmationView action.
+    @State private var detectedWorkoutPendingConfirmation: WorkoutTimelineEntry?
     @State private var completedDates: Set<String> = []
     @State private var goalTrainingDates: Set<String> = []
     // Manual activity logging (real feedback: users want to log a sport
@@ -249,6 +256,14 @@ struct HomeView: View {
                     }
                 }
 
+                if let detectedWorkoutPendingConfirmation {
+                    DetectedWorkoutConfirmationView(
+                        entry: detectedWorkoutPendingConfirmation,
+                        onConfirm: { Task { await confirmDetectedWorkout(detectedWorkoutPendingConfirmation) } },
+                        onDecline: { declineDetectedWorkout(detectedWorkoutPendingConfirmation) }
+                    )
+                }
+
                 if deliberateWorkoutLogToday == nil, let todaysAIPlan, todaysAIPlan.addedToPlan {
                     aiGeneratedWorkoutCard(todaysAIPlan)
                 }
@@ -304,7 +319,7 @@ struct HomeView: View {
             await completedDatesFetch
             await goalTrainingDatesFetch
             await loadTimeline()
-            await autoLogDeviceDetectedWorkoutIfNeeded()
+            await evaluateDetectedWorkoutForConfirmation()
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
             await loadGoalBodyPhotoState()
@@ -324,7 +339,7 @@ struct HomeView: View {
             await completedDatesFetch
             await goalTrainingDatesFetch
             await loadTimeline()
-            await autoLogDeviceDetectedWorkoutIfNeeded()
+            await evaluateDetectedWorkoutForConfirmation()
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
             await loadNutritionState()
@@ -2916,10 +2931,8 @@ struct HomeView: View {
         // record itself -- a session logged on another phone or watch. Local
         // wins on collision, since it is the source of truth for this device
         // and may be newer than the last successful sync.
-        let localKeys = Set(hkEntries.map { "\($0.source)|\($0.startTime.timeIntervalSince1970)" })
-        let syncedOnly = await syncedEntries.filter {
-            !localKeys.contains("\($0.source)|\($0.startTime.timeIntervalSince1970)")
-        }
+        let localKeys = Set(hkEntries.map(\.stableKey))
+        let syncedOnly = await syncedEntries.filter { !localKeys.contains($0.stableKey) }
 
         let merged = await (hkEntries + syncedOnly + providerEntries)
         timelineEntries = merged.sorted { $0.startTime < $1.startTime }
@@ -2930,30 +2943,44 @@ struct HomeView: View {
     /// done unless the user ALSO tapped through and logged it explicitly
     /// -- real feedback: "did a 2h workout, burned 1229 kcal, Soma didn't
     /// confirm it," even though the timeline card was already showing it.
-    /// Runs after loadTodaysWorkoutLog/loadTimeline; auto-creates a
-    /// workout_log row from today's longest qualifying device-detected
-    /// session once nothing is logged yet, tagged source:
-    /// "device_detected" so it's clearly distinct from something the user
-    /// explicitly logged (openTodaysWorkoutDetail routes it to the
-    /// generic CompletedWorkoutView, same as a manual entry).
-    private func autoLogDeviceDetectedWorkoutIfNeeded() async {
-        guard todaysWorkoutLog == nil else { return }
-        // Real feedback: "I went for a 2k steps walk, but SOMA is not
-        // giving me a workout ... only a real workout should mark the day
-        // done, not just a walk." See qualifyingAutoLogCandidate: a
-        // trivial multi-minute entry (HealthKit logs even a short walk as
-        // its own "workout") shouldn't silently satisfy the whole day,
-        // and neither should a walk of any length -- only a deliberate
-        // workout session should suppress today's generated plan.
-        guard let entry = WorkoutTimelineEntry.qualifyingAutoLogCandidate(from: timelineEntries)
-        else { return }
+    ///
+    /// This used to auto-create the workout_log row itself, with no
+    /// confirmation -- real feedback: "I went for a 2k steps walk, but SOMA
+    /// is not giving me a workout," because that silent write suppressed
+    /// the AI plan the same as a deliberate session would. Now it only ever
+    /// decides WHETHER to ask: runs after loadTodaysWorkoutLog/loadTimeline,
+    /// and populates detectedWorkoutPendingConfirmation with today's best
+    /// candidate (see WorkoutTimelineEntry.confirmationCandidate) unless the
+    /// user already answered for that exact entry today (hasAskedAboutDetectedWorkout)
+    /// or a workout is already logged. Actually writing the row happens in
+    /// confirmDetectedWorkout, only once the user taps "Yes."
+    private func evaluateDetectedWorkoutForConfirmation() async {
+        guard todaysWorkoutLog == nil,
+              let entry = WorkoutTimelineEntry.confirmationCandidate(from: timelineEntries),
+              !hasAskedAboutDetectedWorkout(entry.stableKey)
+        else {
+            detectedWorkoutPendingConfirmation = nil
+            return
+        }
+        detectedWorkoutPendingConfirmation = entry
+    }
 
+    /// "Yes, that was my workout" -- the only place that still writes a
+    /// device-detected workout_log row, and only ever in direct response to
+    /// an explicit tap. Reuses WorkoutLogEntry.deviceDetectedSource rather
+    /// than a separate "confirmed" source value: the check constraint on
+    /// workout_log.source doesn't accept anything else without a migration,
+    /// and nothing downstream (WorkoutReasonResolver, CompletedWorkoutView's
+    /// routing) needs to tell a confirmed row apart from a legacy one --
+    /// both really were detected on-device, the only thing that changed is
+    /// that a human confirmed it before this ever got called.
+    private func confirmDetectedWorkout(_ entry: WorkoutTimelineEntry) async {
         let endedAt = Calendar.current.date(byAdding: .minute, value: entry.durationMinutes, to: entry.startTime) ?? entry.startTime
         // Two full sentences rather than a fragment-translating a trailing
         // optional clause -- same posture as the timeline entry text above.
         let feedback = entry.calories.map { calories in
-            String(localized: "home.autoLog.feedbackWithCalories", defaultValue: "Detected automatically from \(entry.sourceDisplayName) -- \(calories.formatted()) kcal burned.", comment: "Home: auto-generated workout-log note when a device-detected session is logged automatically, including calories burned")
-        } ?? String(localized: "home.autoLog.feedbackNoCalories", defaultValue: "Detected automatically from \(entry.sourceDisplayName).", comment: "Home: auto-generated workout-log note when a device-detected session is logged automatically, no calories reported")
+            String(localized: "home.autoLog.feedbackWithCalories", defaultValue: "Detected automatically from \(entry.sourceDisplayName) -- \(calories.formatted()) kcal burned.", comment: "Home: workout-log note when a device-detected session is confirmed as the user's workout, including calories burned")
+        } ?? String(localized: "home.autoLog.feedbackNoCalories", defaultValue: "Detected automatically from \(entry.sourceDisplayName).", comment: "Home: workout-log note when a device-detected session is confirmed as the user's workout, no calories reported")
 
         do {
             try await SupabaseClient.shared.logWorkout(
@@ -2970,14 +2997,55 @@ struct HomeView: View {
                 // state-independent detected line instead.
                 reasonSnapshot: WorkoutReasonResolver.impactNote(source: WorkoutLogEntry.deviceDetectedSource, dayLoadState: .pending)
             )
+            markAskedAboutDetectedWorkout(entry.stableKey)
+            detectedWorkoutPendingConfirmation = nil
             await loadTodaysWorkoutLog()
             await loadCompletedDates()
             await loadWeeklyProgressAndStreak()
         } catch {
-            // Best-effort -- next app open or pull-to-refresh retries.
-            // Not surfaced as an error banner: the user did nothing wrong
-            // here, there's just nothing yet for them to act on.
+            // Best-effort -- leaves the card up so the user can just tap
+            // "Yes" again; not surfaced as an error banner since a retry is
+            // the entire recovery path.
         }
+    }
+
+    /// "No, show me a workout plan" (or the card just being dismissed) --
+    /// writes nothing. Marking this entry as asked-about is what keeps the
+    /// card from reappearing on the next pull-to-refresh this session,
+    /// while still leaving room for a genuinely new entry later today (a
+    /// different stableKey, e.g. a run appearing after this walk was
+    /// declined) to prompt again.
+    private func declineDetectedWorkout(_ entry: WorkoutTimelineEntry) {
+        markAskedAboutDetectedWorkout(entry.stableKey)
+        detectedWorkoutPendingConfirmation = nil
+    }
+
+    // MARK: - "Already asked about today" (device-detected confirmation)
+    //
+    // Same date-scoped-flag shape as NotificationManager's
+    // hasSentToday()/markSentToday(), except keyed per detected entry
+    // (WorkoutTimelineEntry.stableKey) rather than just per day, since more
+    // than one distinct activity can appear in a single day.
+
+    private static let askedAboutDetectedWorkoutDefaultsKey = "detectedWorkout.askedKeysByDate"
+
+    private func hasAskedAboutDetectedWorkout(_ stableKey: String) -> Bool {
+        askedDetectedWorkoutKeysToday().contains(stableKey)
+    }
+
+    private func markAskedAboutDetectedWorkout(_ stableKey: String) {
+        var byDate = UserDefaults.standard.dictionary(forKey: Self.askedAboutDetectedWorkoutDefaultsKey) as? [String: [String]] ?? [:]
+        var todaysKeys = byDate[Self.todayDateString()] ?? []
+        if !todaysKeys.contains(stableKey) {
+            todaysKeys.append(stableKey)
+        }
+        byDate[Self.todayDateString()] = todaysKeys
+        UserDefaults.standard.set(byDate, forKey: Self.askedAboutDetectedWorkoutDefaultsKey)
+    }
+
+    private func askedDetectedWorkoutKeysToday() -> Set<String> {
+        let byDate = UserDefaults.standard.dictionary(forKey: Self.askedAboutDetectedWorkoutDefaultsKey) as? [String: [String]] ?? [:]
+        return Set(byDate[Self.todayDateString()] ?? [])
     }
 
     /// Manual fallback ("Check now" / pull-to-refresh / the readiness
