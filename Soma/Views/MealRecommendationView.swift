@@ -14,14 +14,31 @@ struct MealRecommendationView: View {
     /// re-fetched here, so there's exactly one source of truth for "what's
     /// left today" and this view never risks disagreeing with it.
     let remaining: NutritionDayProgress?
+    /// Set when opened from NutritionView's "Today's meal plan" autopilot
+    /// card -- skips straight to resultSection with no network call,
+    /// since the recommendation is already the server's cached daily
+    /// plan. "Try different ingredients" from there still falls through
+    /// to the normal editable on-demand flow below.
+    let initialRecommendation: MealRecommendation?
+    /// Prefills the ingredients field -- used to seed it from the saved
+    /// pantry (still fully editable) rather than opening blank, e.g. from
+    /// NutritionView's "Want something different?" entry.
+    let initialIngredientsText: String
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var speechRecognizer = SpeechRecognizer()
 
-    @State private var ingredientsText = ""
+    @State private var ingredientsText: String
     @State private var isGenerating = false
     @State private var errorMessage: String?
     @State private var recommendation: MealRecommendation?
+
+    init(remaining: NutritionDayProgress?, initialRecommendation: MealRecommendation? = nil, initialIngredientsText: String = "") {
+        self.remaining = remaining
+        self.initialRecommendation = initialRecommendation
+        self.initialIngredientsText = initialIngredientsText
+        _ingredientsText = State(initialValue: initialIngredientsText)
+    }
 
     @State private var householdEquipmentIsEmpty = false
     @State private var showKitchenSetup = false
@@ -67,7 +84,12 @@ struct MealRecommendationView: View {
                 }
             }
         }
-        .task { await loadEquipmentState() }
+        .task {
+            if let initialRecommendation {
+                recommendation = initialRecommendation
+            }
+            await loadEquipmentState()
+        }
         .sheet(isPresented: $showKitchenSetup, onDismiss: {
             Task { await loadEquipmentState() }
         }) {
