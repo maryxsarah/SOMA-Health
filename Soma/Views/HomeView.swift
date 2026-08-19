@@ -2052,20 +2052,37 @@ struct HomeView: View {
         return homeWidgetTileFrame {
         VStack(alignment: .leading, spacing: 3) {
             if let snapshot, let hours = snapshot.sleepHours {
-                sleepEyebrow { sleepSourceBadge(snapshot.source) }
-                Text(String(format: "%.1f \(HealthMetricFamily.sleep.unit)", hours))
-                    .font(Theme.display)
-                    .fontWidth(.condensed)
-                    .padding(.top, 3)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                if let bar = SleepPhaseSegments(snapshot: snapshot) {
-                    bar.padding(.top, 3)
-                    Text(bar.captionText)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(SomaTokens.ink5)
-                        .padding(.top, 2)
-                        .lineLimit(2)
+                // Tappable here only: opens the Health Dashboard straight to
+                // Sleep, since this is the one state with real per-night
+                // wearable data worth exploring further. The manually-logged
+                // -bucket state below already owns a tap gesture on its own
+                // caption ("tap to change" -> edit the log), and the no-data
+                // -yet state's chips are its tap target -- giving either of
+                // those a second, dashboard-opening meaning would shadow the
+                // existing one, and the Dashboard has no real trend to chart
+                // from a manual bucket log anyway.
+                Group {
+                    sleepEyebrow { sleepSourceBadge(snapshot.source) }
+                    Text(String(format: "%.1f \(HealthMetricFamily.sleep.unit)", hours))
+                        .font(Theme.display)
+                        .fontWidth(.condensed)
+                        .padding(.top, 3)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    if let bar = SleepPhaseSegments(snapshot: snapshot) {
+                        bar.padding(.top, 3)
+                        Text(bar.captionText)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(SomaTokens.ink5)
+                            .padding(.top, 2)
+                            .lineLimit(2)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    AnalyticsManager.shared.featureUsed(name: "health_dashboard")
+                    healthDashboardInitialSection = .sleep
+                    showHealthDashboard = true
                 }
             } else if !isEditingSleep, let todaysSleepLog, let bucket = SleepDurationBucket(rawValue: todaysSleepLog.bucket) {
                 sleepEyebrow {

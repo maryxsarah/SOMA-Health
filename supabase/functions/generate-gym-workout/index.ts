@@ -362,7 +362,11 @@ function describeSnapshots(snapshots: SnapshotRow[]): string {
     const bits: string[] = [];
     if (s.recovery_score !== null) bits.push(`Whoop recovery ${s.recovery_score}%`);
     if (s.readiness_score !== null) bits.push(`Oura readiness ${s.readiness_score}`);
-    if (s.sleep_hours !== null) bits.push(`slept ${s.sleep_hours}h`);
+    // Rounded to 1dp, same reasoning/precedent as generate-workout-plan's
+    // describeHealthData -- wearable sleep totals carry long binary-float
+    // tails (raw seconds/3600) that Luna would otherwise echo verbatim
+    // into generated exercise coaching text.
+    if (s.sleep_hours !== null) bits.push(`slept ${Math.round(s.sleep_hours * 10) / 10}h`);
     if (s.stress_score !== null) bits.push(`${s.stress_score}min in high stress today`);
     if (bits.length > 0) parts.push(`${s.source}: ${bits.join(", ")}`);
   }
