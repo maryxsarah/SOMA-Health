@@ -18,9 +18,9 @@ struct HomeView: View {
     @State private var selectedDay: String?
     @State private var todaysWorkoutLog: WorkoutLogEntry?
     /// The single device-detected timeline entry currently awaiting a
-    /// yes/no answer -- nil whenever there's nothing to ask about, or the
-    /// day's candidate has already been asked about (see
-    /// hasAskedAboutDetectedWorkout). Set by
+    /// yes/no answer -- nil whenever there's nothing left to ask about (see
+    /// WorkoutTimelineEntry.confirmationCandidate's `excluding` param,
+    /// backed by askedDetectedWorkoutKeysToday). Set by
     /// evaluateDetectedWorkoutForConfirmation, cleared by either
     /// DetectedWorkoutConfirmationView action.
     @State private var detectedWorkoutPendingConfirmation: WorkoutTimelineEntry?
@@ -1157,11 +1157,10 @@ struct HomeView: View {
     /// of what today's health-data-driven category says -- persisted
     /// server-side (see setRecommendationOverride), so it survives an app
     /// restart and generate-workout-plan/generate-gym-workout honor it too.
-    /// Hidden once today's workout is DELIBERATELY logged, since there's
-    /// nothing left to override at that point -- a device-detected
-    /// auto-log doesn't count (matches generate-workout-plan/
-    /// generate-gym-workout's own device_detected exclusion, so this
-    /// control stays available exactly as long as generation itself does).
+    /// Hidden once today's workout is logged, since there's nothing left to
+    /// override at that point -- matches generate-workout-plan/
+    /// generate-gym-workout's own lock checks, so this control stays
+    /// available exactly as long as generation itself does.
     @ViewBuilder
     private func restDayRequestControl(_ recommendation: DailyRecommendation) -> some View {
         if deliberateWorkoutLogToday == nil {
@@ -1323,10 +1322,9 @@ struct HomeView: View {
     }
 
     private var scanState: ScanState {
-        // A committed or completed workout removes the row entirely.
-        // A device-detected auto-log is background noise for this gate --
-        // the user still deserves their scan (matches the server's own
-        // .neq("source", DEVICE_DETECTED_SOURCE) lock exclusion).
+        // A committed or completed workout removes the row entirely --
+        // including a confirmed device-detected one, matching the server's
+        // own lock checks (generate-workout-plan/generate-gym-workout).
         if deliberateWorkoutLogToday != nil || todaysAIPlan?.addedToPlan == true { return .hidden }
         // Lock only when today's quota is actually spent -- one scan must not
         // lock out an annual subscriber who still has generations left.
@@ -1594,11 +1592,16 @@ struct HomeView: View {
     /// ProfileStore's pure streak-counting function instead of duplicating it.
     private var currentStreak: Int { ProfileStore.streak(from: completedDates) }
 
-    /// Today's log ONLY if the user actually chose to train (manual or an
-    /// AI plan) -- device_detected auto-logs don't count as "workout done"
-    /// for generation/scan gating, mirroring the server-side lock.
+    /// Today's log, if any -- gates generation/scan availability and the
+    /// rest-day-request control, mirroring the server-side lock checks in
+    /// generate-workout-plan/generate-gym-workout. Used to exclude
+    /// device_detected rows here (the silent, no-confirmation auto-log
+    /// path that source meant), but that path is gone: every device_detected
+    /// row is now written only after an explicit "Yes, that was my workout"
+    /// tap (confirmDetectedWorkout), so it's exactly as deliberate as any
+    /// other source and must count the same way.
     private var deliberateWorkoutLogToday: WorkoutLogEntry? {
-        todaysWorkoutLog.flatMap { $0.source == WorkoutLogEntry.deviceDetectedSource ? nil : $0 }
+        todaysWorkoutLog
     }
 
     private var streakWidgetTile: some View {
@@ -2950,14 +2953,19 @@ struct HomeView: View {
     /// the AI plan the same as a deliberate session would. Now it only ever
     /// decides WHETHER to ask: runs after loadTodaysWorkoutLog/loadTimeline,
     /// and populates detectedWorkoutPendingConfirmation with today's best
-    /// candidate (see WorkoutTimelineEntry.confirmationCandidate) unless the
-    /// user already answered for that exact entry today (hasAskedAboutDetectedWorkout)
-    /// or a workout is already logged. Actually writing the row happens in
+    /// NOT-YET-ASKED-ABOUT candidate (see WorkoutTimelineEntry.
+    /// confirmationCandidate, which excludes already-asked entries itself
+    /// rather than this guard picking the single best entry across the
+    /// whole day and only then checking whether it happens to be asked --
+    /// that ordering let one declined entry permanently block a later,
+    /// genuinely new one). Actually writing the row happens in
     /// confirmDetectedWorkout, only once the user taps "Yes."
     private func evaluateDetectedWorkoutForConfirmation() async {
         guard todaysWorkoutLog == nil,
-              let entry = WorkoutTimelineEntry.confirmationCandidate(from: timelineEntries),
-              !hasAskedAboutDetectedWorkout(entry.stableKey)
+              let entry = WorkoutTimelineEntry.confirmationCandidate(
+                  from: timelineEntries,
+                  excluding: askedDetectedWorkoutKeysToday()
+              )
         else {
             detectedWorkoutPendingConfirmation = nil
             return
@@ -3028,10 +3036,6 @@ struct HomeView: View {
     // than one distinct activity can appear in a single day.
 
     private static let askedAboutDetectedWorkoutDefaultsKey = "detectedWorkout.askedKeysByDate"
-
-    private func hasAskedAboutDetectedWorkout(_ stableKey: String) -> Bool {
-        askedDetectedWorkoutKeysToday().contains(stableKey)
-    }
 
     private func markAskedAboutDetectedWorkout(_ stableKey: String) {
         var byDate = UserDefaults.standard.dictionary(forKey: Self.askedAboutDetectedWorkoutDefaultsKey) as? [String: [String]] ?? [:]

@@ -78,6 +78,33 @@ final class WorkoutTimelineEntryTests: XCTestCase {
         XCTAssertEqual(picked?.title, "Long Ride")
     }
 
+    // MARK: - `excluding` (already-asked entries fall back to the next
+    // candidate, rather than the whole function giving up)
+
+    func testRegressionAlreadyAskedLongestEntryFallsBackToTheNextQualifyingEntry() {
+        // BUG report: a 90-min walk was declined (asked about) earlier
+        // today. A genuine 30-min run appears later. Picking the single
+        // longest entry FIRST and only then checking whether it was asked
+        // about meant the walk (still longest) blocked the run from ever
+        // being offered -- confirmationCandidate must exclude already-asked
+        // entries before ranking, not after.
+        let walk = entry(durationMinutes: 90, activityType: "walking", title: "Walking")
+        let run = entry(durationMinutes: 30, activityType: "running", title: "Running")
+        let picked = WorkoutTimelineEntry.confirmationCandidate(from: [walk, run], excluding: [walk.stableKey])
+        XCTAssertEqual(picked?.title, "Running")
+    }
+
+    func testAllQualifyingEntriesAlreadyAskedYieldsNoCandidate() {
+        let walk = entry(durationMinutes: 90, activityType: "walking", title: "Walking")
+        let picked = WorkoutTimelineEntry.confirmationCandidate(from: [walk], excluding: [walk.stableKey])
+        XCTAssertNil(picked)
+    }
+
+    func testExcludingDefaultsToEmptySoExistingCallersAreUnaffected() {
+        let entries = [entry(durationMinutes: 45, activityType: "walking", title: "Walking")]
+        XCTAssertEqual(WorkoutTimelineEntry.confirmationCandidate(from: entries)?.title, "Walking")
+    }
+
     // MARK: - stableKey (survives a re-fetch, unlike `id`)
 
     func testStableKeyIsIdenticalAcrossTwoFetchesOfTheSameUnderlyingSession() {

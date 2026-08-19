@@ -91,12 +91,22 @@ struct WorkoutTimelineEntry: Identifiable {
     /// own "workout") still isn't worth interrupting the user for. Among the
     /// remaining candidates, prefers the longest session over merely the
     /// chronologically-first.
+    ///
+    /// `askedKeys` excludes entries already answered today BEFORE picking
+    /// the longest -- not after. BUG report: an earlier version picked the
+    /// single longest entry across the whole day first, and only then
+    /// checked whether IT had already been asked about; if it had, the
+    /// whole function gave up rather than considering any other entry, so a
+    /// long walk that was declined could permanently block a genuinely new,
+    /// shorter workout appearing later the same day from ever being offered
+    /// for confirmation at all.
     static func confirmationCandidate(
         from entries: [WorkoutTimelineEntry],
-        minimumMinutes: Int = 10
+        minimumMinutes: Int = 10,
+        excluding askedKeys: Set<String> = []
     ) -> WorkoutTimelineEntry? {
         entries
-            .filter { $0.durationMinutes >= minimumMinutes }
+            .filter { $0.durationMinutes >= minimumMinutes && !askedKeys.contains($0.stableKey) }
             .max(by: { $0.durationMinutes < $1.durationMinutes })
     }
 }
