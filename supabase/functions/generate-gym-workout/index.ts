@@ -25,9 +25,12 @@ import { checkGenerationLimit, GENERATION_LIMIT_MESSAGE, logGeneration, type Sub
 import { DEVICE_DETECTED_SOURCE } from "../_shared/workoutLogSources.ts";
 import { extractOutputText } from "../_shared/openai.ts";
 import { GymWorkoutTemplate, selectTemplate } from "./templates.ts";
+import { resolveTargetBodyPart } from "./targetBodyPart.ts";
 import { normalizeEquipment } from "../_shared/equipment.ts";
 import { computeTotalDuration } from "../_shared/duration.ts";
 import { languageName, normalizeLanguageCode } from "../_shared/language.ts";
+import { countRecentTrainingDaysByBodyPart } from "../_shared/trainingDayCounters.ts";
+import type { InjurySeverityLevel } from "../_shared/contraindications.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MODEL = "gpt-5.6-luna";
@@ -98,17 +101,29 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow } = await supabase
       .from("users")
-      .select("goals, subscription_tier")
+      .select("goals, subscription_tier, injury_tags, injury_severity")
       .eq("id", userId)
       .maybeSingle();
     const goals = (userRow?.goals as string[] | null) ?? [];
     const subscriptionTier = ((userRow?.subscription_tier as SubscriptionTier | null) ?? "free");
+    const injuryTags = (userRow?.injury_tags as string[] | null) ?? [];
+    const injurySeverity = ((userRow?.injury_severity as Record<string, InjurySeverityLevel> | null) ?? {});
 
     const { data: snapshots } = await supabase
       .from("daily_snapshot")
       .select("source, recovery_score, readiness_score, hrv_ms, sleep_hours, resting_hr, strain_score, stress_score")
       .eq("user_id", userId)
       .eq("date", date);
+
+    // Which body part today's session should actually target -- the same
+    // goals+injury-aware signal RecommendationDetailView's own default-
+    // suggestion picker already applies for the normal (non-photo) flow,
+    // plus the existing 7-day per-body-part rotation signal, reused rather
+    // than reimplemented. See targetBodyPart.ts for why gym-photo needs its
+    // own resolution step: unlike the normal flow, there's no client
+    // selection to read here.
+    const recentBodyPartCounts = await countRecentTrainingDaysByBodyPart(supabase, userId, date);
+    const targetBodyPart = resolveTargetBodyPart(category, goals, injuryTags, injurySeverity, recentBodyPartCounts);
 
     // Sorted + joined server-side so the client cannot influence cache
     // identity by reordering the list it sends.
@@ -125,12 +140,18 @@ Deno.serve(async (req: Request) => {
     // squat/lunge session that the new severity exists to withhold.
     // The requested language belongs here too, same reasoning as the
     // injury state above -- otherwise a language switch mid-day replays the morning's wording verbatim.
+    // The resolved target body part belongs here for the same reason: it's
+    // a new input to selectTemplate, derived from state (injury/rotation)
+    // that can change between calls the same way the injury flags above
+    // can, so a stale target must miss the cache and re-select rather than
+    // replay a plan built around this morning's rotation snapshot.
     const equipmentSignature = Array.from(equipmentSet).sort().join("|") +
       (safety.excludeHighImpact ? "|no-impact" : "") +
       (safety.excludedKeywords.length > 0
         ? "|kw:" + [...safety.excludedKeywords].sort().join(",")
         : "") +
-      "|lang:" + languageCode;
+      "|lang:" + languageCode +
+      "|target:" + targetBodyPart;
 
     // Same setup, same day -> same answer, so serve it rather than paying
     // for the wording pass again. A different setup is a different
@@ -204,7 +225,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ date, generation_limit_reached: true, message: GENERATION_LIMIT_MESSAGE });
     }
 
-    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact, safety.excludedKeywords);
+    const template = selectTemplate(category, equipmentSet, goals, safety.excludeHighImpact, safety.excludedKeywords, targetBodyPart);
 
     const wording = await callLunaForWording(
       template,
