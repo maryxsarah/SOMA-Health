@@ -1,11 +1,18 @@
 // Pure + query logic behind generate-recommendation's consecutive-days,
-// volume, and proactive-rest caps -- pulled out of index.ts so it's
-// directly unit-testable (importing index.ts itself for a test would run
-// its top-level Deno.serve as a side effect) -- same posture
-// _shared/independentCaps.ts already takes for this function's other
-// safety-critical cap predicates.
+// volume, and proactive-rest caps -- originally pulled out of that
+// function's index.ts so it's directly unit-testable (importing index.ts
+// itself for a test would run its top-level Deno.serve as a side effect),
+// same posture independentCaps.ts already takes for that function's other
+// safety-critical cap predicates. Moved here (2026-08-19) because
+// countRecentTrainingDaysByBodyPart is generic -- just a windowed
+// workout_log/daily_recommendation read -- and generate-gym-workout needs
+// the same 7-day per-body-part rotation signal to resolve today's target
+// body part (see generate-gym-workout/targetBodyPart.ts). This is the
+// established way functions share code in this codebase (see
+// docs/deployment-runbook.md) -- functions don't import each other's
+// directories directly.
 
-import type { Category } from "../_shared/independentCaps.ts";
+import type { Category } from "./independentCaps.ts";
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00.000Z`);

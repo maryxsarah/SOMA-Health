@@ -32,7 +32,7 @@ import {
   countRecentTrainingDaysByBodyPart,
   fetchRecentRecommendationCategories,
   fetchTrainingDates,
-} from "./trainingDayCounters.ts";
+} from "../_shared/trainingDayCounters.ts";
 
 
 const WHOOP_TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token";
