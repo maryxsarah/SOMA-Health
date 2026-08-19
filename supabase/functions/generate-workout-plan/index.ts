@@ -1103,7 +1103,15 @@ function describeHealthData(snapshots: SnapshotRow[]): string {
     if (s.recovery_score !== null) bits.push(`Whoop recovery ${s.recovery_score}%`);
     if (s.readiness_score !== null) bits.push(`Oura readiness ${s.readiness_score}`);
     if (s.hrv_ms !== null) bits.push(`HRV ${s.hrv_ms}ms`);
-    if (s.sleep_hours !== null) bits.push(`slept ${s.sleep_hours}h`);
+    // Rounded to 1dp, matching the app's own sleep-hours display
+    // convention (HomeView's sleep widget, "%.1f") -- wearable sleep
+    // totals arrive as raw seconds/3600 and carry long binary-float tails
+    // (9.888888333...), which the LLM would otherwise happily echo
+    // verbatim into generated coaching text ("since you slept
+    // 9.888888333333h..."). Same bug class already fixed once for the
+    // deterministic reasoning text (reasoningMessage.ts's roundSleepHours)
+    // but missed here, a sibling readiness-summary builder.
+    if (s.sleep_hours !== null) bits.push(`slept ${Math.round(s.sleep_hours * 10) / 10}h`);
     if (s.resting_hr !== null) bits.push(`resting HR ${s.resting_hr}bpm`);
     if (s.strain_score !== null) {
       // Whoop's cycle strain is a 0-21 day-strain number; Oura has no
