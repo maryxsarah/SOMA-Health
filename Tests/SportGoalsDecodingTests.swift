@@ -134,6 +134,29 @@ final class SportGoalsDecodingTests: XCTestCase {
         XCTAssertNil(null.goalBlock)
     }
 
+    /// generate-gym-workout's response shape (unchanged by the body-part-
+    /// targeting fix -- `bodyPart` was already a top-level field before it;
+    /// only which value it resolves to changed) decodes into
+    /// `templateBodyPart`, which AIWorkoutPlanSections.swift now reads to
+    /// show "Today: Lower Body" above a gym-photo plan's focus line.
+    func testAIWorkoutPlanDecodesTemplateBodyPart() throws {
+        let plan = try JSONDecoder().decode(AIWorkoutPlan.self, from: Data("""
+        {"focus": "F", "warm_up": [], "blocks": [], "cool_down": [], "bodyPart": "lower_body"}
+        """.utf8))
+        XCTAssertEqual(plan.templateBodyPart, "lower_body")
+    }
+
+    /// The normal (non-gym-photo) suggestion flow never sends `bodyPart` at
+    /// all -- see generate-workout-plan/index.ts, which never sets it on
+    /// its response. Absent-means-nil is what keeps the new "Today: ..."
+    /// label from showing on that flow's AI-plan card.
+    func testAIWorkoutPlanTemplateBodyPartAbsentMeansNilForTheSuggestionFlow() throws {
+        let plan = try JSONDecoder().decode(AIWorkoutPlan.self, from: Data("""
+        {"focus": "F", "warm_up": [], "blocks": [], "cool_down": []}
+        """.utf8))
+        XCTAssertNil(plan.templateBodyPart)
+    }
+
     func testGainRangeFormatting() {
         XCTAssertEqual(SportGoalFormat.gainRange(low: 3, high: 6, unit: "cm"), "+3–6 cm")
         XCTAssertEqual(SportGoalFormat.delta(-1, unit: "cm"), "−1 cm")
