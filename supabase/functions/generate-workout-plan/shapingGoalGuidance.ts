@@ -43,16 +43,57 @@ function isShapableBodyPart(bodyPart: string): bodyPart is ShapableBodyPart {
 /// to today's existing describeVolumeGuidance/describeRirGuidance defaults
 /// unchanged -- this module adds nothing for them rather than fabricating
 /// a rule.
-type ShapingGoalTag = "build_strength" | "gain_muscle" | "leaner_toned" | "more_sculpted" | "lose_weight";
+///
+/// The six body-part-targeted tags (lose_belly_fat/lean_out_legs/
+/// toned_arms/grow_glutes/stronger_core/more_visible_abs) are more specific
+/// siblings of leaner_toned/more_sculpted/gain_muscle -- same rep-range
+/// families, but with foundationMovements biased toward the named body
+/// part so the recurring anchor movements actually reflect what the user
+/// asked to change, not just a generic full-body list.
+type ShapingGoalTag =
+  | "build_strength"
+  | "gain_muscle"
+  | "leaner_toned"
+  | "more_sculpted"
+  | "lose_weight"
+  | "grow_glutes"
+  | "stronger_core"
+  | "lose_belly_fat"
+  | "lean_out_legs"
+  | "toned_arms"
+  | "more_visible_abs";
 
 /// Priority order used ONLY when a user's own `goals` array contains more
 /// than one recognized tag at once (e.g. both "build_strength" and
-/// "lose_weight" selected) -- build_strength/gain_muscle outrank the
-/// aesthetic-leaning tags: someone who explicitly asked to build strength
+/// "lose_weight" selected) -- build_strength/gain_muscle outrank every
+/// definition-family tag: someone who explicitly asked to build strength
 /// wants heavier work even if they also want to lean out, and the
 /// composition side of that is nutrition's job (training_emphasis/
-/// nutritionTargets.ts), not a lighter rep range here.
-const GOAL_PRIORITY: ShapingGoalTag[] = ["build_strength", "gain_muscle", "leaner_toned", "more_sculpted", "lose_weight"];
+/// nutritionTargets.ts), not a lighter rep range here. grow_glutes/
+/// stronger_core rank right after build_strength/gain_muscle for the same
+/// reason (their rep ranges are close enough kin to the general strength/
+/// hypertrophy families that an explicit general ask should still win the
+/// TIE, but a body-part-specific hypertrophy/strength ask still beats any
+/// definition-family tag). Within the definition family, the four
+/// body-part-specific tags (lose_belly_fat/lean_out_legs/toned_arms/
+/// more_visible_abs) rank ABOVE leaner_toned/more_sculpted/lose_weight --
+/// unlike the strength family, every definition-family tag shares the
+/// identical "12-15" rep range, so preferring the more specific tag only
+/// ever changes which foundation movements get picked, never the rep
+/// range itself, making specific-over-generic a free improvement here.
+const GOAL_PRIORITY: ShapingGoalTag[] = [
+  "build_strength",
+  "gain_muscle",
+  "grow_glutes",
+  "stronger_core",
+  "lose_belly_fat",
+  "lean_out_legs",
+  "toned_arms",
+  "more_visible_abs",
+  "leaner_toned",
+  "more_sculpted",
+  "lose_weight",
+];
 
 export interface ShapingGoalGuidance {
   /// Which recognized tag drove this decision, and which signal it came
@@ -143,6 +184,89 @@ const PROFILES: Record<ShapingGoalTag, ShapingGoalProfile> = {
       upper_body: ["push-up or dumbbell press pattern, higher rep/shorter rest", "row pattern, higher rep/shorter rest"],
       lower_body: ["goblet squat or lunge pattern, higher rep/shorter rest", "kettlebell swing (hip-hinge) pattern"],
       core: ["plank or mountain climber pattern", "bicycle crunch pattern"],
+      full_body: ["full-body circuit pattern (squat-to-press, burpee-style compound)", "kettlebell swing or carry pattern"],
+    },
+    hardConstraint: DEFINITION_HARD_CONSTRAINT,
+  },
+  // grow_glutes is gain_muscle's hypertrophy stimulus, biased toward the
+  // glutes specifically on a lower_body/full_body day -- upper_body/core
+  // foundation movements have no real glute angle, so those reuse
+  // gain_muscle's own list rather than inventing a distinct one.
+  grow_glutes: {
+    repRangeLabel: "6-12",
+    repRangeRationale: "classic hypertrophy rep range (widely-cited resistance-training literature), glute-emphasized",
+    foundationMovements: {
+      upper_body: ["flat or incline press pattern (chest)", "row pattern (back)", "overhead press pattern (shoulders)"],
+      lower_body: ["hip thrust or glute bridge pattern (primary glute driver)", "Romanian deadlift or single-leg RDL pattern (hamstrings/glutes)", "walking lunge or Bulgarian split squat pattern", "cable or banded glute kickback pattern"],
+      core: ["weighted crunch or cable crunch pattern", "hanging leg raise or reverse crunch pattern"],
+      full_body: ["squat pattern", "hip-hinge pattern, glute-focused", "row pattern (upper pull)"],
+    },
+    hardConstraint: STRENGTH_HARD_CONSTRAINT,
+  },
+  // stronger_core is build_strength's loaded, controlled-tempo stimulus
+  // applied to the core specifically -- unlike gain_muscle's higher-rep
+  // ab work, this is about real anti-extension/anti-rotation strength and
+  // stability, not just muscle size.
+  stronger_core: {
+    repRangeLabel: "6-10",
+    repRangeRationale: "moderate-load, controlled-tempo work that builds real core strength and stability, not just endurance",
+    foundationMovements: {
+      upper_body: ["bench press or push-up press pattern (horizontal press)", "bent-over or seated row pattern (horizontal pull)"],
+      lower_body: ["back squat or goblet squat pattern", "deadlift or Romanian deadlift pattern (hip hinge)"],
+      core: ["weighted plank or loaded carry pattern (anti-extension bracing)", "cable or banded anti-rotation pattern (Pallof press)", "hanging leg raise or weighted sit-up pattern", "dead bug or bird-dog pattern (core stability)"],
+      full_body: ["loaded carry pattern (farmer's or suitcase carry)", "squat or hip-hinge pattern with a strong core-bracing cue"],
+    },
+    hardConstraint: STRENGTH_HARD_CONSTRAINT,
+  },
+  // The remaining four tags are all leaner_toned's higher-rep, definition-
+  // focused stimulus, each biased toward a specific body part -- same
+  // "no real physiological basis to differentiate the rep range itself"
+  // reasoning leaner_toned/more_sculpted's shared comment already gives,
+  // just applied to a narrower target than "overall look." None of these
+  // claim spot-reduction is real (it isn't -- fat loss is systemic): the
+  // rationale text frames each as building/revealing the muscle under
+  // regional fat, on top of the same session-density fat-loss work the
+  // other definition tags already call for.
+  lose_belly_fat: {
+    repRangeLabel: "12-15",
+    repRangeRationale: "higher-rep, moderate-load, full-body-leaning work for overall fat loss (spot-reduction isn't real), paired with extra core work so the muscle underneath shows as fat comes down",
+    foundationMovements: {
+      upper_body: ["push-up or dumbbell press pattern, higher rep/shorter rest", "row pattern, higher rep/shorter rest"],
+      lower_body: ["goblet squat or lunge pattern, higher rep/shorter rest", "kettlebell swing (hip-hinge) pattern"],
+      core: ["weighted or cable crunch pattern, higher rep", "hanging or lying leg raise pattern", "plank-to-mountain-climber circuit pattern (metabolic core work)"],
+      full_body: ["full-body circuit pattern (squat-to-press, burpee-style compound)", "kettlebell swing or carry pattern"],
+    },
+    hardConstraint: DEFINITION_HARD_CONSTRAINT,
+  },
+  lean_out_legs: {
+    repRangeLabel: "12-15",
+    repRangeRationale: "higher-rep, moderate-load lower-body work commonly recommended for a leaner, more defined look in the legs",
+    foundationMovements: {
+      upper_body: ["push-up or dumbbell press pattern, moderate load/higher rep", "row pattern, moderate load/higher rep"],
+      lower_body: ["goblet squat or bodyweight squat pattern, moderate load/higher rep", "walking lunge or reverse lunge pattern, higher rep", "glute bridge or hip thrust pattern, higher rep", "calf raise pattern, higher rep"],
+      core: ["plank variation", "bicycle crunch or mountain climber pattern"],
+      full_body: ["kettlebell swing or hinge-carry pattern", "squat-to-press or lunge-circuit pattern"],
+    },
+    hardConstraint: DEFINITION_HARD_CONSTRAINT,
+  },
+  toned_arms: {
+    repRangeLabel: "12-15",
+    repRangeRationale: "higher-rep, moderate-load arm and shoulder work commonly recommended for a leaner, more defined look in the arms",
+    foundationMovements: {
+      upper_body: ["dumbbell curl and triceps press-down or dip pattern, higher rep", "lateral raise or banded pull-apart pattern", "push-up or dumbbell press pattern, moderate load/higher rep", "row pattern, moderate load/higher rep"],
+      lower_body: ["goblet squat or bodyweight squat pattern, moderate load/higher rep", "glute bridge or hip thrust pattern", "walking lunge pattern"],
+      core: ["plank variation", "bicycle crunch or mountain climber pattern"],
+      full_body: ["dumbbell thruster or squat-to-press circuit pattern", "kettlebell swing or hinge-carry pattern"],
+    },
+    hardConstraint: DEFINITION_HARD_CONSTRAINT,
+  },
+  more_visible_abs: {
+    repRangeLabel: "12-15",
+    repRangeRationale: "higher-rep ab work paired with overall fat-loss-supporting training -- visible abs come from lower body fat, not ab exercises alone, so this pairs direct ab work with the same higher-density approach as the other definition-focused goals",
+    foundationMovements: {
+      upper_body: ["push-up or dumbbell press pattern, moderate load/higher rep", "row pattern, moderate load/higher rep"],
+      lower_body: ["goblet squat or bodyweight squat pattern, moderate load/higher rep", "walking lunge pattern"],
+      core: ["weighted or cable crunch pattern, higher rep", "hanging or lying leg raise pattern", "bicycle crunch or mountain climber pattern", "plank variation with rotation"],
       full_body: ["full-body circuit pattern (squat-to-press, burpee-style compound)", "kettlebell swing or carry pattern"],
     },
     hardConstraint: DEFINITION_HARD_CONSTRAINT,

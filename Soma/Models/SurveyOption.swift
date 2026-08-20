@@ -52,6 +52,12 @@ extension GoalTag: SurveyOption {
         case .betterSleep: "moon.zzz.fill"
         case .generalFitness: "sparkles"
         case .activeRecovery: "figure.walk"
+        case .loseBellyFat: "flame.fill"
+        case .leanOutLegs: "figure.walk.motion"
+        case .tonedArms: "figure.strengthtraining.functional"
+        case .growGlutes: "figure.step.training"
+        case .strongerCore: "shield.lefthalf.filled"
+        case .moreVisibleAbs: "eye.fill"
         case .other: "ellipsis.circle.fill"
         }
     }

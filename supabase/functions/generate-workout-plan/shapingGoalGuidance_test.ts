@@ -44,11 +44,59 @@ Deno.test("leaner_toned/more_sculpted/lose_weight all carry the same hard 'no ne
   }
 });
 
+Deno.test("grow_glutes/stronger_core are hypertrophy/strength-family: no hard constraint, and their lower_body/core movements name the target muscle", () => {
+  const glutes = decideShapingGoalGuidance(["grow_glutes"], null, null, "lower_body", "moderate");
+  assert(glutes);
+  assertEquals(glutes.repRangeLabel, "6-12");
+  assertEquals(glutes.hardConstraint, null);
+  assert(glutes.foundationMovements.some((m) => m.toLowerCase().includes("glute")), "expected a glute-named movement");
+
+  const core = decideShapingGoalGuidance(["stronger_core"], null, null, "core", "moderate");
+  assert(core);
+  assertEquals(core.hardConstraint, null);
+  assert(core.foundationMovements.length > 0);
+});
+
+Deno.test("lose_belly_fat/lean_out_legs/toned_arms/more_visible_abs are definition-family: same hard constraint as leaner_toned, body-part-biased movements", () => {
+  const cases: [string, "core" | "lower_body" | "upper_body", string][] = [
+    ["lose_belly_fat", "core", "crunch"],
+    ["lean_out_legs", "lower_body", "lunge"],
+    ["toned_arms", "upper_body", "curl"],
+    ["more_visible_abs", "core", "crunch"],
+  ];
+  for (const [tag, bodyPart, expectedSubstring] of cases) {
+    const g = decideShapingGoalGuidance([tag], null, null, bodyPart, "moderate");
+    assert(g, tag);
+    assert(g.hardConstraint, `${tag} should carry the definition hard constraint`);
+    assert(g.hardConstraint!.toLowerCase().includes("1-3"), tag);
+    assert(g.foundationMovements.some((m) => m.toLowerCase().includes(expectedSubstring)), `${tag}/${bodyPart} expected a movement mentioning "${expectedSubstring}"`);
+  }
+});
+
 Deno.test("REGRESSION: when multiple recognized goals are present, build_strength/gain_muscle outrank the aesthetic tags", () => {
   const g = decideShapingGoalGuidance(["lose_weight", "build_strength"], null, null, "full_body", "moderate");
   assert(g);
   assertEquals(g.goalTag, "build_strength");
   assertEquals(g.hardConstraint, null);
+});
+
+Deno.test("priority: a body-part-specific tag outranks its generic same-family sibling, but still loses to an explicit general strength/hypertrophy ask", () => {
+  // Within the definition family, specific beats generic (free improvement --
+  // every definition tag shares the same 12-15 rep range).
+  const specificOverGeneric = decideShapingGoalGuidance(["leaner_toned", "lose_belly_fat"], null, null, "core", "moderate");
+  assert(specificOverGeneric);
+  assertEquals(specificOverGeneric.goalTag, "lose_belly_fat");
+
+  // grow_glutes/stronger_core still lose to an explicit build_strength/
+  // gain_muscle ask.
+  const generalStillWins = decideShapingGoalGuidance(["grow_glutes", "build_strength"], null, null, "lower_body", "moderate");
+  assert(generalStillWins);
+  assertEquals(generalStillWins.goalTag, "build_strength");
+
+  // ...but grow_glutes/stronger_core still outrank every definition-family tag.
+  const strengthFamilyOverDefinition = decideShapingGoalGuidance(["more_visible_abs", "stronger_core"], null, null, "core", "moderate");
+  assert(strengthFamilyOverDefinition);
+  assertEquals(strengthFamilyOverDefinition.goalTag, "stronger_core");
 });
 
 Deno.test("unrecognized goal tags are ignored, not treated as a match", () => {
@@ -121,7 +169,10 @@ Deno.test("foundation movements are stable across repeated calls -- a fixed recu
 });
 
 Deno.test("every shapable body part yields a non-empty foundation list for every recognized goal", () => {
-  const goals = ["build_strength", "gain_muscle", "leaner_toned", "more_sculpted", "lose_weight"];
+  const goals = [
+    "build_strength", "gain_muscle", "leaner_toned", "more_sculpted", "lose_weight",
+    "grow_glutes", "stronger_core", "lose_belly_fat", "lean_out_legs", "toned_arms", "more_visible_abs",
+  ];
   const bodyParts = ["upper_body", "lower_body", "core", "full_body"];
   for (const goal of goals) {
     for (const bodyPart of bodyParts) {

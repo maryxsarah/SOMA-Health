@@ -185,16 +185,29 @@ enum GoalTag: String, Codable, CaseIterable, Identifiable {
     case betterSleep = "better_sleep"
     case generalFitness = "general_fitness"
     case activeRecovery = "active_recovery"
+    /// Body-part-targeted aesthetic goals -- more specific than
+    /// leanerToned/moreSculpted, which stay as the general "overall look"
+    /// options. Considered in AI workout generation via
+    /// generate-workout-plan/shapingGoalGuidance.ts's rep-range +
+    /// foundation-movement profiles, same mechanism leanerToned/
+    /// moreSculpted/loseWeight already use.
+    case loseBellyFat = "lose_belly_fat"
+    case leanOutLegs = "lean_out_legs"
+    case tonedArms = "toned_arms"
+    case growGlutes = "grow_glutes"
+    case strongerCore = "stronger_core"
+    case moreVisibleAbs = "more_visible_abs"
     case other
 
     var id: String { rawValue }
 
-    /// Exact 9-option subset (in order) for the onboarding "What is your
+    /// Exact 15-option subset (in order) for the onboarding "What is your
     /// goal?" screen -- excludes buildStrength/generalFitness/other, which
     /// only apply to the post-onboarding Profile screen's fuller list.
     static let onboardingOptions: [GoalTag] = [
         .loseWeight, .maintain, .leanerToned, .gainMuscle, .cardioEndurance,
         .betterSleep, .improveFlexibility, .activeRecovery, .moreSculpted,
+        .loseBellyFat, .leanOutLegs, .tonedArms, .growGlutes, .strongerCore, .moreVisibleAbs,
     ]
 
     var displayName: String {
@@ -210,6 +223,12 @@ enum GoalTag: String, Codable, CaseIterable, Identifiable {
         case .betterSleep: String(localized: "goalTag.betterSleep", defaultValue: "Better Sleep", comment: "Training goal tag label")
         case .generalFitness: String(localized: "goalTag.generalFitness", defaultValue: "General Fitness", comment: "Training goal tag label")
         case .activeRecovery: String(localized: "goalTag.activeRecovery", defaultValue: "Active Recovery", comment: "Training goal tag label")
+        case .loseBellyFat: String(localized: "goalTag.loseBellyFat", defaultValue: "Lose Belly Fat", comment: "Training goal tag label")
+        case .leanOutLegs: String(localized: "goalTag.leanOutLegs", defaultValue: "Lean Out Legs", comment: "Training goal tag label")
+        case .tonedArms: String(localized: "goalTag.tonedArms", defaultValue: "Toned Arms", comment: "Training goal tag label")
+        case .growGlutes: String(localized: "goalTag.growGlutes", defaultValue: "Grow Glutes", comment: "Training goal tag label")
+        case .strongerCore: String(localized: "goalTag.strongerCore", defaultValue: "Stronger Core", comment: "Training goal tag label")
+        case .moreVisibleAbs: String(localized: "goalTag.moreVisibleAbs", defaultValue: "More Visible Abs", comment: "Training goal tag label")
         case .other: String(localized: "goalTag.other", defaultValue: "Other", comment: "Training goal tag label: catch-all option")
         }
     }

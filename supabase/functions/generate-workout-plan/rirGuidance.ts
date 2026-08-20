@@ -16,8 +16,8 @@ export function describeRirGuidance(goals: string, experience: ExperienceLevel, 
     return "";
   }
 
-  const strengthFocused = /build_strength|gain_muscle/.test(goals);
-  const enduranceFocused = /cardio_endurance|lose_weight|leaner_toned/.test(goals);
+  const strengthFocused = /build_strength|gain_muscle|grow_glutes|stronger_core/.test(goals);
+  const enduranceFocused = /cardio_endurance|lose_weight|leaner_toned|lose_belly_fat|lean_out_legs|toned_arms|more_visible_abs/.test(goals);
 
   // Working-set RIR/RPE band -- the LAST 1-2 sets of a movement can push
   // toward the bottom of the range; earlier sets should stay a rep or two

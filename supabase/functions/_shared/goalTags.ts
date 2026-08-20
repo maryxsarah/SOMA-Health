@@ -20,6 +20,12 @@ export const GOAL_TAG_VOCABULARY = [
   "better_sleep",
   "general_fitness",
   "active_recovery",
+  "lose_belly_fat",
+  "lean_out_legs",
+  "toned_arms",
+  "grow_glutes",
+  "stronger_core",
+  "more_visible_abs",
   "other",
 ] as const;
 
