@@ -1,0 +1,21 @@
+-- Structured "what's actually in your gym" inventory -- a much more
+-- granular hard input to generate-workout-plan than the existing
+-- coarse `equipment` (access type: gym/home gym/yoga studio/...) column.
+-- Collected once at onboarding (GymEquipmentQuestionView, always
+-- skippable) and editable afterward from ProfileView, same
+-- "collect once, edit forever" shape as `equipment`/`household_equipment`.
+-- See Soma/Models/GymEquipmentTag.swift and
+-- supabase/functions/_shared/gymEquipmentCatalog.ts for the fixed
+-- 78-item catalog this column's values are drawn from.
+--
+-- `custom_gym_equipment` holds free-typed items the user added via the
+-- picker's "Other" confirm flow -- unlike other_equipment_notes (a
+-- single free-text blob), each entry here is a first-class array element
+-- so the client can render/toggle/remove them individually, same as any
+-- catalog item.
+--
+-- `not null default '{}'`, matching household_equipment (20260809030000)
+-- -- the Swift side decodes both as non-optional arrays, so a NULL here
+-- would fail the whole profile decode rather than reading as "not set".
+alter table users add column gym_equipment_items text[] not null default '{}';
+alter table users add column custom_gym_equipment text[] not null default '{}';

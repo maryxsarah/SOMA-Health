@@ -828,6 +828,12 @@ final class ProfileStore: ObservableObject {
     @Published var goals: Set<GoalTag> = []
     @Published var equipment: Set<EquipmentTag> = []
     @Published var householdEquipment: Set<KitchenEquipmentTag> = []
+    @Published var gymEquipmentItems: Set<GymEquipmentTag> = []
+    @Published var customGymEquipment: [String] = []
+    /// Catalog + custom items combined -- shown as a count on the
+    /// settings row rather than the other rows' comma-joined summary,
+    /// which would be unreadable at up to 78 possible selections.
+    var gymEquipmentSelectedCount: Int { gymEquipmentItems.count + customGymEquipment.count }
     @Published var injuryTags: Set<InjuryTag> = []
     @Published var injurySeverity: [InjuryTag: InjurySeverity] = [:]
     @Published var injuryType: [InjuryTag: InjuryType] = [:]
@@ -1150,6 +1156,8 @@ final class ProfileStore: ObservableObject {
         otherEquipmentText = profile.otherEquipmentNotes ?? ""
         householdEquipment = Set(profile.householdEquipment)
         otherHouseholdEquipmentText = profile.otherHouseholdEquipmentNotes ?? ""
+        gymEquipmentItems = Set(profile.gymEquipmentItems)
+        customGymEquipment = profile.customGymEquipment
         injuryTags = Set(profile.injuryTags)
         injurySeverity = Dictionary(uniqueKeysWithValues: profile.injurySeverity.compactMap { key, value in
             InjuryTag(rawValue: key).map { ($0, value) }
@@ -1334,6 +1342,8 @@ final class ProfileStore: ObservableObject {
             otherEquipmentNotes: otherEquipmentText.isEmpty ? nil : otherEquipmentText,
             householdEquipment: Array(householdEquipment),
             otherHouseholdEquipmentNotes: otherHouseholdEquipmentText.isEmpty ? nil : otherHouseholdEquipmentText,
+            gymEquipmentItems: Array(gymEquipmentItems),
+            customGymEquipment: customGymEquipment,
             injuryTags: Array(injuryTags),
             injuryNotes: injuryNotesText.isEmpty ? nil : injuryNotesText,
             experienceLevel: experienceLevel,
@@ -1504,6 +1514,12 @@ private struct TrainingSettingsView: View {
                         value: store.equipment.isEmpty ? store.notSetLabel : EquipmentTag.allCases.filter(store.equipment.contains).map(\.displayName).joined(separator: ", "),
                         isSet: !store.equipment.isEmpty
                     ) { store.activeSheet = .equipment }
+                    groupDivider
+                    groupRow(
+                        title: LocalizedStringKey(String(localized: "profile.gymEquipment.rowTitle", defaultValue: "Gym equipment", comment: "Row title opening the specific gym-equipment editor")),
+                        value: store.gymEquipmentSelectedCount == 0 ? store.notSetLabel : String(localized: "profile.gymEquipment.selectedCount", defaultValue: "\(store.gymEquipmentSelectedCount) selected", comment: "Gym equipment row value: number of items selected (catalog + custom)"),
+                        isSet: store.gymEquipmentSelectedCount > 0
+                    ) { store.activeSheet = .gymEquipmentDetail }
                     groupDivider
                     groupRow(
                         title: LocalizedStringKey(String(localized: "profile.kitchenEquipment.title", defaultValue: "Kitchen equipment", comment: "Row title for the kitchen-equipment editor")),
@@ -1980,7 +1996,7 @@ private func deviceRow(_ provider: Provider, appState: AppState, store: ProfileS
 // MARK: - Detail sheets (field editors, shared by every page)
 
 private enum ProfileSheet: String, Identifiable {
-    case experience, goals, equipment, kitchenEquipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession, cycleTracking, language, quietHours
+    case experience, goals, equipment, gymEquipmentDetail, kitchenEquipment, weeklyTarget, injuries, pregnancy, contactEmail, region, knownLifts, dateOfBirth, anchorSession, cycleTracking, language, quietHours
     var id: String { rawValue }
 
     /// Resolved explicitly against `locale` rather than a bare
@@ -1998,6 +2014,7 @@ private enum ProfileSheet: String, Identifiable {
         case .experience: localizedString("profile.experience.title", locale: locale)
         case .goals: localizedString("profile.goals.title", locale: locale)
         case .equipment: localizedString("profile.equipmentAccess.sheetTitle", locale: locale)
+        case .gymEquipmentDetail: localizedString("profile.gymEquipment.rowTitle", locale: locale)
         case .kitchenEquipment: localizedString("profile.kitchenEquipment.title", locale: locale)
         case .weeklyTarget: localizedString("profile.weeklyTarget.title", locale: locale)
         case .injuries: localizedString("profile.injuries.title", locale: locale)
@@ -2027,6 +2044,7 @@ private struct DetailSheetContent: View {
                     case .experience: experienceEditor
                     case .goals: goalsEditor
                     case .equipment: equipmentEditor
+                    case .gymEquipmentDetail: gymEquipmentDetailEditor
                     case .kitchenEquipment: kitchenEquipmentEditor
                     case .weeklyTarget: weeklyTargetEditor
                     case .injuries: injuriesEditor
@@ -2108,6 +2126,15 @@ private struct DetailSheetContent: View {
                 TextField(String(localized: "profile.equipment.otherPlaceholder", defaultValue: "What else do you have access to?", comment: "Placeholder for the free-text 'other equipment' field"), text: $store.otherEquipmentText)
                     .textFieldStyle(.roundedBorder)
             }
+        }
+    }
+
+    private var gymEquipmentDetailEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "profile.gymEquipment.explainer", defaultValue: "So we only ever build workouts around gear you actually have.", comment: "Explainer text at top of the gym-equipment editor sheet"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            GymEquipmentPicker(selection: $store.gymEquipmentItems, customItems: $store.customGymEquipment)
         }
     }
 

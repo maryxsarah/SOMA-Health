@@ -1150,6 +1150,7 @@ final class FixtureURLProtocol: URLProtocol {
                 "contact_email": "fixture@soma4health.com",
                 "country": "US", "city": "New York",
                 "goals": [], "equipment": [], "household_equipment": [],
+                "gym_equipment_items": [], "custom_gym_equipment": [],
                 "injury_tags": [], "injury_severity": [:], "injury_type": [:],
                 "injury_pain_level": [:], "anchor_sessions": [],
             ]

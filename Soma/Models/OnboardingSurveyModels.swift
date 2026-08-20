@@ -304,5 +304,10 @@ struct OnboardingSurveyAnswers: Equatable {
     /// is used), not a validation failure.
     var householdEquipment: Set<KitchenEquipmentTag> = []
     var otherHouseholdEquipmentNotes: String?
+    /// What's in the user's gym (generate-workout-plan) -- same
+    /// "structured field, freely optional" rule as householdEquipment
+    /// above. See GymEquipmentTag/GymEquipmentPicker.
+    var gymEquipmentItems: Set<GymEquipmentTag> = []
+    var customGymEquipment: [String] = []
     var marketingOptIn = false
 }

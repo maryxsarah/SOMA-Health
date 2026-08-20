@@ -133,6 +133,16 @@ struct UserProfile: Codable, Equatable {
     /// field rather than folded into `equipment`.
     var householdEquipment: [KitchenEquipmentTag]
     var otherHouseholdEquipmentNotes: String?
+    /// What's actually in the user's gym -- a much more granular hard
+    /// input to generate-workout-plan than `equipment` above (an access
+    /// type, not specific gear). See GymEquipmentTag's own doc comment.
+    var gymEquipmentItems: [GymEquipmentTag]
+    /// User-typed "Other" entries from GymEquipmentPicker -- each a
+    /// first-class item (unlike otherEquipmentNotes/
+    /// otherHouseholdEquipmentNotes, which are a single free-text blob),
+    /// so a custom item can be shown/toggled/removed individually the
+    /// same way a catalog item can.
+    var customGymEquipment: [String]
     var injuryTags: [InjuryTag]
     var injuryNotes: String?
     /// Keyed by InjuryTag.rawValue. A tag present in `injuryTags` with no
@@ -252,6 +262,8 @@ struct UserProfile: Codable, Equatable {
         case otherEquipmentNotes = "other_equipment_notes"
         case householdEquipment = "household_equipment"
         case otherHouseholdEquipmentNotes = "other_household_equipment_notes"
+        case gymEquipmentItems = "gym_equipment_items"
+        case customGymEquipment = "custom_gym_equipment"
         case injuryTags = "injury_tags"
         case injuryNotes = "injury_notes"
         case injurySeverity = "injury_severity"
@@ -298,6 +310,8 @@ struct UserProfile: Codable, Equatable {
         otherEquipmentNotes: nil,
         householdEquipment: [],
         otherHouseholdEquipmentNotes: nil,
+        gymEquipmentItems: [],
+        customGymEquipment: [],
         injuryTags: [],
         injuryNotes: nil,
         experienceLevel: nil,

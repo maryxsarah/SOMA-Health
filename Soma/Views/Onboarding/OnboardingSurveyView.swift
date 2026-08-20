@@ -3,7 +3,7 @@ import SwiftUI
 private enum SurveyStep: Int, CaseIterable {
     case sex, workoutFrequency, dateOfBirth, referralSource, trustChart
     case currentWeight, heightEntry, personalTrainer, goal, desiredWeight, weightDeltaReaction
-    case goalPace, comparisonBar, journeyStage, blockers, blockersNotes, anchorSession, dietType, kitchenEquipment, accomplishment
+    case goalPace, comparisonBar, journeyStage, blockers, blockersNotes, anchorSession, dietType, kitchenEquipment, gymEquipment, accomplishment
     case onTrack, celebration
 }
 
@@ -196,6 +196,14 @@ struct OnboardingSurveyView: View {
                         get: { answers.otherHouseholdEquipmentNotes ?? "" },
                         set: { answers.otherHouseholdEquipmentNotes = $0 }
                     ),
+                    onBack: goBack,
+                    onContinue: advance
+                )
+            case .gymEquipment:
+                GymEquipmentQuestionView(
+                    progress: progress,
+                    selection: $answers.gymEquipmentItems,
+                    customItems: $answers.customGymEquipment,
                     onBack: goBack,
                     onContinue: advance
                 )

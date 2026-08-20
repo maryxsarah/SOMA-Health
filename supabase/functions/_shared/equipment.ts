@@ -234,3 +234,21 @@ export function resolveFreeTextEquipment(text: string | null | undefined): FreeT
   }
   return { libraryEquipment: Array.from(libraryEquipment), cardioLibraryEquipment: Array.from(cardioLibraryEquipment), unlocksCardio };
 }
+
+/// Unions any number of resolutions into one -- used to combine the
+/// free-text other_equipment_notes resolution with the structured
+/// gym-equipment-catalog resolution (see gymEquipmentCatalog.ts's
+/// resolveGymEquipmentItems), so every downstream consumer (candidate
+/// filtering, the finisher's cardio check) sees a single merged signal
+/// instead of having to remember to check both sources separately.
+export function mergeEquipmentResolutions(...resolutions: FreeTextEquipmentResolution[]): FreeTextEquipmentResolution {
+  const libraryEquipment = new Set<string>();
+  const cardioLibraryEquipment = new Set<string>();
+  let unlocksCardio = false;
+  for (const resolution of resolutions) {
+    for (const value of resolution.libraryEquipment) libraryEquipment.add(value);
+    for (const value of resolution.cardioLibraryEquipment) cardioLibraryEquipment.add(value);
+    unlocksCardio = unlocksCardio || resolution.unlocksCardio;
+  }
+  return { libraryEquipment: Array.from(libraryEquipment), cardioLibraryEquipment: Array.from(cardioLibraryEquipment), unlocksCardio };
+}

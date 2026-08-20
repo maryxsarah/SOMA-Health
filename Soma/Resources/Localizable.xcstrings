@@ -104513,6 +104513,18 @@
         }
       }
     },
+    "profile.gymEquipment.rowTitle" : {
+      "comment" : "Row title opening the specific gym-equipment editor",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gym equipment"
+          }
+        }
+      }
+    },
     "profile.header.connectedDevices" : {
       "comment" : "Profile header status line naming the connected device providers, e.g. 'Whoop & Oura connected'",
       "extractionState" : "manual",

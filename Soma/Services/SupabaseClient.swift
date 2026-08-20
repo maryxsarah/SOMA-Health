@@ -504,6 +504,10 @@ final class SupabaseClient {
            !otherHouseholdEquipmentNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             body["other_household_equipment_notes"] = otherHouseholdEquipmentNotes
         }
+        // Same always-skippable rule as household_equipment above --
+        // GymEquipmentQuestionView's Continue is never gated either.
+        if !answers.gymEquipmentItems.isEmpty { body["gym_equipment_items"] = answers.gymEquipmentItems.map(\.rawValue) }
+        if !answers.customGymEquipment.isEmpty { body["custom_gym_equipment"] = answers.customGymEquipment }
         // Name is the primary signal -- a day picked with no name isn't
         // saved (there's nothing to name the day against); a name with no
         // day is still saved as context even though it can't drive
@@ -537,7 +541,7 @@ final class SupabaseClient {
         // omitting it made every profile fetch throw keyNotFound, which
         // `try?` call sites turned into an empty profile (and a subsequent
         // Save would then wipe the user's real data).
-        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,household_equipment,other_household_equipment_notes,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_sessions,last_period_start_date,typical_cycle_length_days&limit=1"
+        let path = "rest/v1/users?id=eq.\(id)&select=contact_email,goals,other_goal_notes,equipment,other_equipment_notes,household_equipment,other_household_equipment_notes,gym_equipment_items,custom_gym_equipment,injury_tags,injury_severity,injury_type,injury_pain_level,injury_notes,experience_level,pregnancy,pregnancy_week,weekly_session_target,goal_body_photo_path,current_body_photo_path,avatar_photo_path,weight_kg,desired_weight_kg,country,city,height_cm,journey_stage,blockers_notes,date_of_birth,goal_pace,created_at,body_photo_emphasis_tags,training_emphasis,known_lifts,anchor_sessions,last_period_start_date,typical_cycle_length_days&limit=1"
         var request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try assertSuccess(response, data: data)
@@ -557,6 +561,8 @@ final class SupabaseClient {
             "goals": profile.goals.map(\.rawValue),
             "equipment": profile.equipment.map(\.rawValue),
             "household_equipment": profile.householdEquipment.map(\.rawValue),
+            "gym_equipment_items": profile.gymEquipmentItems.map(\.rawValue),
+            "custom_gym_equipment": profile.customGymEquipment,
         ]
         // JSONSerialization can't encode `nil` -- use NSNull so Postgres
         // actually clears these columns rather than leaving them untouched.

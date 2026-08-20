@@ -49,7 +49,8 @@ import { reconcileExerciseDurations } from "./durationValidation.ts";
 import { buildLoadGuidance } from "./loadGuidance.ts";
 import { buildWorkoutSchema } from "./workoutSchema.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
-import { resolveFreeTextEquipment } from "../_shared/equipment.ts";
+import { mergeEquipmentResolutions, resolveFreeTextEquipment } from "../_shared/equipment.ts";
+import { resolveGymEquipmentItems } from "../_shared/gymEquipmentCatalog.ts";
 import { fetchOutdoorSafetyForCity, isOutdoorCardioExerciseName } from "../_shared/weatherSafety.ts";
 import {
   computeEtaShift,
@@ -101,6 +102,13 @@ interface UserRow {
   /// Onboarding's "what else do you have access to?" free text -- see
   /// resolveFreeTextEquipment for why this is now actually read.
   other_equipment_notes: string | null;
+  /// Structured "what's actually in your gym" inventory (78-item fixed
+  /// catalog, GymEquipmentPicker) -- see resolveGymEquipmentItems in
+  /// _shared/gymEquipmentCatalog.ts.
+  gym_equipment_items: string[] | null;
+  /// Free-typed items added via that picker's "Other" confirm flow --
+  /// each a first-class array entry, unlike other_equipment_notes above.
+  custom_gym_equipment: string[] | null;
   injury_tags: string[] | null;
   injury_notes: string | null;
   injury_severity: Record<string, string> | null;
@@ -384,7 +392,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: userRow, error: userReadError } = await supabase
       .from("users")
-      .select("goals, equipment, other_equipment_notes, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_sessions, last_period_start_date, typical_cycle_length_days")
+      .select("goals, equipment, other_equipment_notes, gym_equipment_items, custom_gym_equipment, injury_tags, injury_notes, injury_severity, experience_level, sex, date_of_birth, weight_kg, pregnancy, pregnancy_week, body_photo_emphasis_tags, workouts_per_week, diet_type, goal_pace, blockers, accomplishment_goals, desired_weight_kg, training_emphasis, known_lifts, country, city, anchor_sessions, last_period_start_date, typical_cycle_length_days")
       .eq("id", userId)
       .maybeSingle();
     // Fail loud (BUG-70): an unread error here left userRow null, silently
@@ -443,7 +451,17 @@ Deno.serve(async (req: Request) => {
     // candidate-exercise filtering) so the finisher decision below can see
     // it too -- depends only on userRow, already fetched, so there's no
     // ordering hazard in moving it earlier.
-    const freeTextEquipment = resolveFreeTextEquipment((userRow as UserRow | null)?.other_equipment_notes ?? null);
+    const freeTextEquipmentNotes = resolveFreeTextEquipment((userRow as UserRow | null)?.other_equipment_notes ?? null);
+    // Structured "what's actually in your gym" inventory (78-item fixed
+    // catalog + free-typed "Other" entries) -- a much more specific
+    // signal than the free-text notes above, merged into the same
+    // resolution shape so every consumer below sees one union rather
+    // than having to check both sources.
+    const gymEquipmentResolution = resolveGymEquipmentItems(
+      (userRow as UserRow | null)?.gym_equipment_items ?? [],
+      (userRow as UserRow | null)?.custom_gym_equipment ?? [],
+    );
+    const freeTextEquipment = mergeEquipmentResolutions(freeTextEquipmentNotes, gymEquipmentResolution);
     // Deterministic finisher decision -- whether one appears at all today,
     // and whether it's the exceptional max-effort version. Never left to
     // the LLM: gated on category, readiness, injury contraindications, and
@@ -927,6 +945,17 @@ function buildPrompt(
   const equipment = userRow?.equipment?.length
     ? userRow.equipment.join(", ")
     : "no equipment (bodyweight only)";
+  // Granular catalog + free-typed "Other" items (GymEquipmentPicker) --
+  // named alongside the coarse access-type line above, never instead of
+  // it, so the model sees both "what kind of access" and "specifically
+  // what gear."
+  const gymEquipmentDisplayLine = resolveGymEquipmentItems(
+    userRow?.gym_equipment_items ?? [],
+    userRow?.custom_gym_equipment ?? [],
+  ).displayLine;
+  const equipmentWithGymDetail = gymEquipmentDisplayLine
+    ? `${equipment} Specific gym equipment available: ${gymEquipmentDisplayLine}.`
+    : equipment;
   // Deterministic exclusion sentence -- never left to the model to infer
   // what's safe, same rule this codebase applies everywhere else.
   const { promptLine: injuries } = describeContraindications(
@@ -1056,7 +1085,7 @@ Today's training intensity (already decided by the app's recovery-based rules --
 Today's actual health data driving that intensity: ${healthLines}
 User's goals: ${goals}.${bodyPhotoEmphasisLine}${trainingEmphasisLine}
 Training experience: ${experience}. ${experienceGuidance}
-Available equipment: ${equipment}.
+Available equipment: ${equipmentWithGymDetail}.
 Noted injuries: ${injuries}.${injuryNotes}
 ${sexLine}${ageLine ? `\n${ageLine}` : ""}${pregnancyLine}
 ${loadGuidance}
