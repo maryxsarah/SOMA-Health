@@ -62,6 +62,20 @@ jobs:
             echo "::error::POSTHOG_API_KEY secret is empty -- PostHog would never initialize and this build would report zero analytics. Set it in repo Settings -> Secrets and variables -> Actions."
             exit 1
           fi
+          # Same failure class as Superwall/PostHog above: a blank client ID
+          # here compiles and uploads fine, but OuraOAuthManager/WhoopOAuthManager
+          # send it straight into the provider's /oauth/authorize URL, which the
+          # provider then rejects outright (e.g. Oura's "400 invalid_request:
+          # Invalid Token") before the user ever sees a login prompt -- silent
+          # until a user reports "I can't connect my ring/strap".
+          if [ -z "$WHOOP_CLIENT_ID" ]; then
+            echo "::error::WHOOP_CLIENT_ID secret is empty -- Whoop's /oauth/authorize would reject every connect attempt. Set it in repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          if [ -z "$OURA_CLIENT_ID" ]; then
+            echo "::error::OURA_CLIENT_ID secret is empty -- Oura's /oauth/authorize would reject every connect attempt. Set it in repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
           # Decode the .p8 signing key (tolerate any whitespace/line-wrapping).
           mkdir -p "$HOME/.appstoreconnect/private_keys"
           KEYFILE="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
