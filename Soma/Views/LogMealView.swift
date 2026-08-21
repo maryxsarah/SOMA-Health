@@ -8,8 +8,17 @@ import SwiftUI
 /// assist, never a silent auto-log. Calories and protein are required
 /// (the two numbers most people actually know off-hand); carbs/fat are
 /// optional.
+///
+/// No `date` is captured at construction time -- `save()` computes
+/// `NutritionView.todayDateString()` itself, at the moment of the actual
+/// write. This sheet can stay open through a whole dictate ->
+/// AI-estimate -> review round trip; capturing "today" once when the
+/// sheet opens meant a save that happened to land after local midnight
+/// silently wrote yesterday's date, and the entry would never show up in
+/// "today's" totals even though it saved successfully. Same fix already
+/// applied correctly in MealRecommendationView.logThisMeal -- this just
+/// brings LogMealView in line with that existing pattern.
 struct LogMealView: View {
-    let date: String
     @Environment(\.dismiss) private var dismiss
     @StateObject private var speechRecognizer = SpeechRecognizer()
 
@@ -210,7 +219,7 @@ struct LogMealView: View {
         defer { isSaving = false }
         do {
             try await SupabaseClient.shared.logMeal(
-                date: date,
+                date: NutritionView.todayDateString(),
                 label: label,
                 calories: calories,
                 proteinG: protein,
@@ -226,5 +235,5 @@ struct LogMealView: View {
 }
 
 #Preview {
-    LogMealView(date: "2026-08-06")
+    LogMealView()
 }
