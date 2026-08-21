@@ -92,7 +92,7 @@ struct NutritionView: View {
         .sheet(isPresented: $showLogSheet, onDismiss: {
             Task { await loadEntries() }
         }) {
-            LogMealView(date: Self.todayDateString())
+            LogMealView()
         }
         .sheet(isPresented: $showGoalBodyProgress, onDismiss: {
             Task { await load() }
