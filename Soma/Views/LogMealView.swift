@@ -42,6 +42,18 @@ struct LogMealView: View {
     /// just another way of producing the text that gets estimated, so it
     /// shares this same flag rather than a separate "text_ai_voice" value.
     @State private var usedAIEstimate = false
+    /// Per-ingredient breakdown from the latest estimate, shown read-only
+    /// for transparency into what was actually estimated -- and, if still
+    /// present at save time, persisted alongside the totals (see
+    /// meal_log.ingredient_breakdown). Dropped the moment the user edits
+    /// any total field afterward (see dropStaleIngredientsIfNeeded): a
+    /// breakdown that no longer sums to the saved total would be actively
+    /// misleading shown later in MealDetailView.
+    @State private var ingredients: [MealIngredient] = []
+    /// Guards dropStaleIngredientsIfNeeded from misfiring on the writes
+    /// estimate() itself makes to the four total fields -- only a
+    /// genuine user edit afterward should clear `ingredients`.
+    @State private var isPopulatingFromEstimate = false
 
     private var calories: Int? { Int(caloriesText) }
     private var protein: Int? { Int(proteinText) }
@@ -98,6 +110,30 @@ struct LogMealView: View {
                     Text(String(localized: "logMeal.footer.description", defaultValue: "Type it, dictate it, or describe your meal in words -- Soma fills in the fields below either way. Review and adjust anything before saving.", comment: "Footer note explaining the meal entry section on the log meal screen"))
                 }
                 .listRowBackground(SomaTokens.surface2)
+                if !ingredients.isEmpty {
+                    Section {
+                        ForEach(ingredients) { ingredient in
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(ingredient.name)
+                                        .font(.system(size: 13.5))
+                                    Text(String(localized: "logMeal.ingredient.grams", defaultValue: "\(Int(ingredient.gramsEstimate.rounded()))g", comment: "Estimated gram portion for one ingredient in the meal breakdown, e.g. '150g'"))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(String(localized: "logMeal.ingredient.macros", defaultValue: "\(ingredient.calories) kcal · \(ingredient.proteinG)g P", comment: "Per-ingredient calorie and protein summary in the meal breakdown, e.g. '250 kcal · 32g P'"))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } header: {
+                        Text(String(localized: "logMeal.ingredients.header", defaultValue: "Estimated breakdown", comment: "Header for the read-only per-ingredient estimate list on the log meal screen"))
+                    } footer: {
+                        Text(String(localized: "logMeal.ingredients.footer", defaultValue: "Editing the totals below clears this breakdown.", comment: "Footer explaining that editing the total fields discards the per-ingredient breakdown"))
+                    }
+                    .listRowBackground(SomaTokens.surface2)
+                }
                 Section("Required") {
                     LabeledContent("Calories") {
                         TextField("kcal", text: $caloriesText)
@@ -165,6 +201,20 @@ struct LogMealView: View {
         .onDisappear {
             speechRecognizer.stop()
         }
+        .onChange(of: caloriesText) { _, _ in dropStaleIngredientsIfNeeded() }
+        .onChange(of: proteinText) { _, _ in dropStaleIngredientsIfNeeded() }
+        .onChange(of: carbsText) { _, _ in dropStaleIngredientsIfNeeded() }
+        .onChange(of: fatText) { _, _ in dropStaleIngredientsIfNeeded() }
+    }
+
+    /// A genuine user edit to any total field after an estimate populated
+    /// it invalidates the stored per-ingredient breakdown -- see
+    /// `ingredients`'s own doc comment. Guarded by isPopulatingFromEstimate
+    /// so estimate()'s own writes to these same fields don't immediately
+    /// clear the breakdown it just set.
+    private func dropStaleIngredientsIfNeeded() {
+        guard !isPopulatingFromEstimate, !ingredients.isEmpty else { return }
+        ingredients = []
     }
 
     private var dictateButton: some View {
@@ -204,10 +254,13 @@ struct LogMealView: View {
             } else {
                 label = typed
             }
+            isPopulatingFromEstimate = true
             caloriesText = String(result.calories)
             proteinText = String(result.proteinG)
             carbsText = String(result.carbsG)
             fatText = String(result.fatG)
+            ingredients = result.ingredients
+            isPopulatingFromEstimate = false
             usedAIEstimate = true
         } catch {
             errorMessage = String(localized: "logMeal.estimateFailed", defaultValue: "Couldn't estimate that -- try describing it differently, or enter the numbers below yourself.", comment: "Error shown when AI meal estimation fails")
@@ -231,7 +284,8 @@ struct LogMealView: View {
                 proteinG: protein,
                 carbsG: Int(carbsText),
                 fatG: Int(fatText),
-                source: usedAIEstimate ? "text_ai" : "manual"
+                source: usedAIEstimate ? "text_ai" : "manual",
+                ingredients: ingredients.isEmpty ? nil : ingredients
             )
             dismiss()
         } catch {

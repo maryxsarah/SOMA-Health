@@ -27,9 +27,10 @@
 
 import { handleOptions, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, serviceRoleClient } from "../_shared/clients.ts";
+import { classifyGenerationError } from "../_shared/anthropicErrors.ts";
 import { checkFlatDailyLimit, logGeneration } from "../_shared/generationLimits.ts";
 import { normalizeLanguageCode } from "../_shared/language.ts";
-import { type MealMacros, mealSlotFromHour, type ProcessedLevel, scoreMeal, type TrainingEmphasis } from "./scoreMeal.ts";
+import { type MealMacros, mealSlotFromHour, type NutritionTargets, type ProcessedLevel, scoreMeal, type TrainingEmphasis } from "./scoreMeal.ts";
 import { buildRationale } from "./rationale.ts";
 
 // Realistically bounded by how many meals a person logs in a day anyway
@@ -86,11 +87,17 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Too many meal ratings today. Try again tomorrow." }, 429);
     }
 
+    // Previously fetched but never actually used below -- "scored against
+    // the user's real nutrition_targets" (this file's own header comment)
+    // was aspirational until this fix; scoreMeal now takes it as a real
+    // parameter (null when the user has no computed targets yet, which
+    // every targets-relative modifier there degrades gracefully for).
     const { data: targetsRow } = await supabase
       .from("nutrition_targets")
       .select("daily_calories, daily_protein_g, daily_carbs_g, daily_fat_g")
       .eq("user_id", userId)
       .maybeSingle();
+    const targets = (targetsRow ?? null) as NutritionTargets | null;
 
     const { data: userRow } = await supabase
       .from("users")
@@ -106,7 +113,7 @@ Deno.serve(async (req: Request) => {
       fatG: meal.fat_g,
     };
     const tags = await extractMealTags({ label: meal.label, calories: meal.calories, proteinG: meal.protein_g });
-    const mealScore = scoreMeal(macros, trainingEmphasis, tags.containsAlcohol, tags.processedLevel);
+    const mealScore = scoreMeal(macros, targets, trainingEmphasis, tags.containsAlcohol, tags.processedLevel);
     const rationale = buildRationale(mealScore, meal.label, language);
     // Tagged for future use (not wired into scoring this round -- see
     // scoreMeal.ts's own doc comment); logged_at is stored UTC, so this is
@@ -128,9 +135,8 @@ Deno.serve(async (req: Request) => {
     await logGeneration(supabase, userId, date, "meal_rating");
     return jsonResponse({ score: mealScore.score, rationale, breakdown });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const status = msg === "unauthorized" ? 401 : 500;
-    return jsonResponse({ error: msg }, status);
+    const { status, body } = classifyGenerationError(err);
+    return jsonResponse(body, status);
   }
 });
 
