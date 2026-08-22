@@ -31,6 +31,14 @@ struct MealLogEntry: Codable, Identifiable {
     /// MealDetailView maps each key to a localized short phrase, same
     /// "server derives, client localizes" split as MealVerdict itself.
     var scoreBreakdown: [String]? = nil
+    /// Per-ingredient estimate (name/portion/macros), stored exactly as
+    /// parse-meal-text returned it -- nil for a manual entry, a recipe-
+    /// sourced entry, any meal logged before this field existed, or one
+    /// whose totals were edited after the fact (see LogMealView's
+    /// dropStaleIngredientsIfNeeded / SupabaseClient.updateMealLog, both
+    /// of which clear this rather than leave a breakdown that no longer
+    /// sums to the saved total).
+    var ingredientBreakdown: [MealIngredient]? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, date, label, calories, source, score, rationale
@@ -39,6 +47,7 @@ struct MealLogEntry: Codable, Identifiable {
         case fatG = "fat_g"
         case loggedAt = "logged_at"
         case scoreBreakdown = "score_breakdown"
+        case ingredientBreakdown = "ingredient_breakdown"
     }
 
     var verdict: MealVerdict? { score.map(MealVerdict.forScore) }
@@ -69,6 +78,7 @@ struct MealScoreModifier: Identifiable {
         case "solidProteinDensity": String(localized: "mealScore.modifier.solidProteinDensity", defaultValue: "Solid protein for its calories", comment: "Meal score breakdown line: solid protein density")
         case "lowProteinDensity": String(localized: "mealScore.modifier.lowProteinDensity", defaultValue: "Low protein for its calories", comment: "Meal score breakdown line: low protein density")
         case "largeCutShare": String(localized: "mealScore.modifier.largeCutShare", defaultValue: "A large share of today's calorie budget for a cut", comment: "Meal score breakdown line: large share of daily calories while cutting")
+        case "strongProteinShare": String(localized: "mealScore.modifier.strongProteinShare", defaultValue: "Covers a large share of today's protein target", comment: "Meal score breakdown line: meal covers a large share of the day's real protein target")
         case "veryHighFatShare": String(localized: "mealScore.modifier.veryHighFatShare", defaultValue: "Over half its calories are from fat", comment: "Meal score breakdown line: very high fat share")
         case "highFatShare": String(localized: "mealScore.modifier.highFatShare", defaultValue: "A high share of its calories are from fat", comment: "Meal score breakdown line: high fat share")
         case "ultraProcessed": String(localized: "mealScore.modifier.ultraProcessed", defaultValue: "Ultra-processed", comment: "Meal score breakdown line: ultra-processed food")

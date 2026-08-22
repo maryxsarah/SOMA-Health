@@ -1016,7 +1016,7 @@ final class SupabaseClient {
 
     /// Today's (or any date's) logged food entries, most recent first.
     func fetchMealLogs(date: String) async throws -> [MealLogEntry] {
-        let path = "rest/v1/meal_log?date=eq.\(date)&select=id,date,label,calories,protein_g,carbs_g,fat_g,source,logged_at,score,rationale,score_breakdown&order=logged_at.desc"
+        let path = "rest/v1/meal_log?date=eq.\(date)&select=id,date,label,calories,protein_g,carbs_g,fat_g,source,logged_at,score,rationale,score_breakdown,ingredient_breakdown&order=logged_at.desc"
         let request = try await authorizedRequest(path: path, method: "GET")
         let (data, response) = try await urlSession.data(for: request)
         try assertSuccess(response, data: data)
@@ -1066,7 +1066,15 @@ final class SupabaseClient {
     /// feature. carbs/fat are optional (protein and calories are the two
     /// numbers most people actually know off-hand); calories/protein are
     /// required.
-    func logMeal(date: String, label: String?, calories: Int, proteinG: Int, carbsG: Int?, fatG: Int?, source: String = "manual") async throws {
+    ///
+    /// `ingredients` persists the per-ingredient breakdown alongside the
+    /// totals (meal_log.ingredient_breakdown, jsonb) -- nil for a manual
+    /// entry, or when LogMealView dropped a now-stale breakdown after the
+    /// user edited a total field post-estimate (see that view's
+    /// dropStaleIngredientsIfNeeded). Shape stored is identical to
+    /// parseMealText's response, so MealDetailView can render it back
+    /// with no transformation.
+    func logMeal(date: String, label: String?, calories: Int, proteinG: Int, carbsG: Int?, fatG: Int?, source: String = "manual", ingredients: [MealIngredient]? = nil) async throws {
         guard let userId = currentUserID else { throw SupabaseError.notSignedIn }
         var body: [String: Any] = [
             "user_id": userId,
@@ -1078,6 +1086,15 @@ final class SupabaseClient {
         if let label, !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { body["label"] = label }
         if let carbsG { body["carbs_g"] = carbsG }
         if let fatG { body["fat_g"] = fatG }
+        // Same encode-then-jsonObject pattern logWorkout uses for
+        // plan_snapshot -- the existing raw-dictionary body writer has no
+        // Encodable conformance, this is the established way to fold a
+        // Codable value into it.
+        if let ingredients, !ingredients.isEmpty,
+           let encoded = try? JSONEncoder().encode(ingredients),
+           let obj = try? JSONSerialization.jsonObject(with: encoded) {
+            body["ingredient_breakdown"] = obj
+        }
 
         var request = try await authorizedRequest(path: "rest/v1/meal_log", method: "POST")
         request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
@@ -1098,6 +1115,11 @@ final class SupabaseClient {
     /// so the caller re-rates against the corrected macros, same "clear on
     /// edit, re-derive lazily" shape as WorkoutLogEntry's reasonSnapshot
     /// would need if a completed workout were ever editable this way.
+    /// Also clears ingredient_breakdown -- same stale-breakdown rule
+    /// LogMealView applies pre-save (dropStaleIngredientsIfNeeded):
+    /// editing the totals after the fact means a stored per-ingredient
+    /// list no longer sums to what's now saved, so it must not be shown
+    /// back as if it still describes this entry.
     func updateMealLog(id: String, calories: Int, proteinG: Int, carbsG: Int?, fatG: Int?) async throws {
         let body: [String: Any] = [
             "calories": calories,
@@ -1107,6 +1129,7 @@ final class SupabaseClient {
             "score": NSNull(),
             "rationale": NSNull(),
             "score_breakdown": NSNull(),
+            "ingredient_breakdown": NSNull(),
         ]
         var request = try await authorizedRequest(path: "rest/v1/meal_log?id=eq.\(id)", method: "PATCH")
         request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
@@ -1116,8 +1139,10 @@ final class SupabaseClient {
     }
 
     /// Freeform "what did you eat" text -> an estimated calorie/macro
-    /// breakdown via Claude Haiku. Never writes anything itself -- the
-    /// caller shows the result back in LogMealView's normal editable
+    /// breakdown, reasoned per-ingredient then summed server-side (see
+    /// parse-meal-text's own header comment for why -- single-shot totals
+    /// measurably drifted from reality). Never writes anything itself --
+    /// the caller shows the result back in LogMealView's normal editable
     /// fields for review before saving via logMeal(...).
     func parseMealText(_ text: String) async throws -> MealEstimate {
         var request = try await authorizedRequest(path: "functions/v1/parse-meal-text", method: "POST")

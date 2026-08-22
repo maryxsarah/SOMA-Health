@@ -26,6 +26,11 @@ struct MealDetailView: View {
     @State private var proteinG: Int
     @State private var carbsG: Int?
     @State private var fatG: Int?
+    /// Same "own mutable copy" reasoning as calories/proteinG/etc. above --
+    /// cleared (not just left stale) the moment macros are edited, same
+    /// stale-breakdown rule SupabaseClient.updateMealLog applies
+    /// server-side.
+    @State private var ingredientBreakdown: [MealIngredient]?
 
     init(entry: MealLogEntry) {
         self.entry = entry
@@ -36,6 +41,7 @@ struct MealDetailView: View {
         _proteinG = State(initialValue: entry.proteinG)
         _carbsG = State(initialValue: entry.carbsG)
         _fatG = State(initialValue: entry.fatG)
+        _ingredientBreakdown = State(initialValue: entry.ingredientBreakdown)
     }
 
     private var verdict: MealVerdict? { score.map(MealVerdict.forScore) }
@@ -45,6 +51,7 @@ struct MealDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     detailsCard
+                    ingredientsCard
                     ratingCard
                 }
                 .padding(20)
@@ -100,6 +107,41 @@ struct MealDetailView: View {
         }
     }
 
+    // MARK: - Ingredients
+
+    /// Renders only when this entry actually has a breakdown -- manual
+    /// entries, recipe entries, meals logged before this feature existed,
+    /// and meals whose macros were edited after estimation all show
+    /// nothing extra, exactly like today's detailsCard-only behavior for
+    /// those cases.
+    @ViewBuilder
+    private var ingredientsCard: some View {
+        if let ingredientBreakdown, !ingredientBreakdown.isEmpty {
+            CardView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(String(localized: "meal.detail.ingredientsSectionTitle", defaultValue: "Ingredients", comment: "Section title above a logged meal's per-ingredient breakdown"))
+                        .font(.subheadline.bold())
+                    ForEach(ingredientBreakdown) { ingredient in
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(ingredient.name)
+                                    .font(.caption.bold())
+                                Text(String(localized: "meal.detail.ingredientGrams", defaultValue: "\(Int(ingredient.gramsEstimate.rounded()))g", comment: "Estimated gram portion for one ingredient in the meal detail breakdown, e.g. '150g'"))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Text(String(localized: "meal.detail.ingredientMacros", defaultValue: "\(ingredient.calories) kcal · \(ingredient.proteinG)g P · \(ingredient.carbsG)g C · \(ingredient.fatG)g F", comment: "Per-ingredient calorie/protein/carbs/fat summary in the meal detail breakdown"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func detailRow(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label)
@@ -126,6 +168,7 @@ struct MealDetailView: View {
             score = nil
             rationale = nil
             scoreBreakdown = nil
+            ingredientBreakdown = nil
             await rate()
         } catch {
             ratingError = String(localized: "meal.editMacros.error", defaultValue: "Couldn't save those changes. Try again later.", comment: "Error shown when saving edited meal macros fails")

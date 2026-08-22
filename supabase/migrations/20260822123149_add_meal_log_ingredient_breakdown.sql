@@ -1,0 +1,31 @@
+-- Per-ingredient calorie/macro breakdown for a logged meal, alongside the
+-- existing summed totals (calories/protein_g/carbs_g/fat_g). Real
+-- feedback: parse-meal-text's estimate was measurably inaccurate (a
+-- reported ~400 kcal overshoot on a real meal) because it asked for one
+-- single-shot total instead of reasoning per-ingredient like Claude's own
+-- nutrition chat does. The redesigned estimation flow now returns (and
+-- this persists) an array of {name, gramsEstimate, calories, proteinG,
+-- carbsG, fatG} per food item, so MealDetailView can show the breakdown
+-- later without re-estimating.
+--
+-- jsonb, nullable, no default -- following this codebase's own existing
+-- pattern for structured AI output attached to one row (see
+-- daily_meal_plan.recommendation, ai_workout_plan.plan,
+-- workout_log.plan_snapshot), not a normalized child table; there is no
+-- precedent anywhere in this schema for the latter for this kind of data.
+--
+-- Nil for: a manual entry, a recipe-sourced entry (source = 'recipe_ai'),
+-- any meal logged before this migration, and any meal whose totals were
+-- edited after being estimated (LogMealView / updateMealLog both clear
+-- this rather than persist a breakdown that no longer sums to the saved
+-- total -- see their own comments).
+--
+-- No RLS/policy change: meal_log's existing four policies
+-- (meal_log_select_own / meal_log_insert_own / meal_log_update_own /
+-- meal_log_delete_own, all `auth.uid() = user_id`) already cover every
+-- column on the row, this one included.
+--
+-- Rollback: `alter table meal_log drop column ingredient_breakdown;` --
+-- recovers the exact pre-migration schema; the only data loss is this
+-- column's own contents, which nothing else references.
+alter table meal_log add column ingredient_breakdown jsonb;
