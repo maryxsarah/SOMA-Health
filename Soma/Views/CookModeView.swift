@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -9,7 +10,7 @@ import UIKit
 /// this view goes away, however it goes away.
 struct CookModeView: View {
     let mealName: String
-    let steps: [String]
+    let steps: [MealRecommendationStep]
     /// Called once the user finishes the last step (taps "Done cooking")
     /// -- lets the presenter (MealRecommendationView) offer "Log this
     /// meal" right at the moment of actually finishing, not before.
@@ -18,26 +19,49 @@ struct CookModeView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var index = 0
 
+    /// Wall-clock end time for the current step's timer -- nil means
+    /// idle (never started, or reset). Deliberately not a plain
+    /// decrementing counter: driving the display off `endDate.
+    /// timeIntervalSinceNow` on every tick means the countdown is still
+    /// correct even if the app was backgrounded and resumed mid-timer,
+    /// same reasoning NotificationManager's own scheduled alert relies on.
+    @State private var timerEndDate: Date?
+    @State private var remainingSeconds: Int = 0
+    /// Guards the "time's up" haptic to fire exactly once per timer run,
+    /// not on every tick after remainingSeconds reaches 0.
+    @State private var timerDidFinish = false
+    private let timerTick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
     private var isLastStep: Bool { index == steps.count - 1 }
+    private var currentStepDuration: Int? { steps[index].durationSeconds }
+    private var isTimerRunning: Bool { timerEndDate != nil }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             progressBar
             Spacer()
-            stepText
-                .id(index)
-                .transition(.asymmetric(
-                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                    removal: .move(edge: .leading).combined(with: .opacity)
-                ))
+            VStack(spacing: 20) {
+                stepText
+                stepTimerView
+            }
+            .id(index)
+            .transition(.asymmetric(
+                insertion: .move(edge: .trailing).combined(with: .opacity),
+                removal: .move(edge: .leading).combined(with: .opacity)
+            ))
             Spacer()
             controls
         }
         .padding(20)
         .somaBackground()
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+            NotificationManager.shared.cancelCookingTimer()
+        }
+        .onChange(of: index) { _, _ in resetTimer() }
+        .onReceive(timerTick) { _ in tick() }
     }
 
     private var header: some View {
@@ -86,12 +110,47 @@ struct CookModeView: View {
     }
 
     private var stepText: some View {
-        Text(steps[index])
+        Text(steps[index].text)
             .font(.system(size: 24, weight: .semibold, design: .rounded))
             .foregroundStyle(SomaTokens.ink)
             .multilineTextAlignment(.leading)
             .lineSpacing(4)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Renders only when this step actually has a wait attached
+    /// (durationSeconds != nil) -- most steps (chopping, seasoning) show
+    /// no timer control at all, same as today.
+    @ViewBuilder
+    private var stepTimerView: some View {
+        if let duration = currentStepDuration {
+            VStack(spacing: 12) {
+                Text(Self.formattedClock(isTimerRunning ? remainingSeconds : duration))
+                    .font(.system(size: 44, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(timerDidFinish ? SomaTokens.accent : SomaTokens.ink)
+                if timerDidFinish {
+                    Label(
+                        String(localized: "cookMode.timer.done", defaultValue: "Time's up", comment: "Shown in cook mode once a step's timer reaches zero"),
+                        systemImage: "checkmark.circle.fill"
+                    )
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(SomaTokens.accent)
+                    SomaButton(title: LocalizedStringKey(String(localized: "cookMode.timer.reset", defaultValue: "Reset timer", comment: "Button to reset a finished or running cook mode step timer")), size: .md, variant: .secondary) {
+                        resetTimer()
+                    }
+                } else if isTimerRunning {
+                    SomaButton(title: LocalizedStringKey(String(localized: "cookMode.timer.reset", defaultValue: "Reset timer", comment: "Button to reset a finished or running cook mode step timer")), size: .md, variant: .secondary) {
+                        resetTimer()
+                    }
+                } else {
+                    SomaButton(title: LocalizedStringKey(String(localized: "cookMode.timer.start", defaultValue: "Start timer", comment: "Button to start a cook mode step's countdown timer")), size: .md, variant: .primary) {
+                        startTimer(seconds: duration)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 8)
+        }
     }
 
     private var controls: some View {
@@ -116,16 +175,47 @@ struct CookModeView: View {
             }
         }
     }
+
+    // MARK: - Timer
+
+    private func startTimer(seconds: Int) {
+        timerEndDate = Date().addingTimeInterval(TimeInterval(seconds))
+        remainingSeconds = seconds
+        timerDidFinish = false
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Task { await NotificationManager.shared.scheduleCookingTimer(seconds: TimeInterval(seconds), stepText: steps[index].text) }
+    }
+
+    private func resetTimer() {
+        timerEndDate = nil
+        remainingSeconds = 0
+        timerDidFinish = false
+        NotificationManager.shared.cancelCookingTimer()
+    }
+
+    private func tick() {
+        guard let timerEndDate, !timerDidFinish else { return }
+        remainingSeconds = max(0, Int(timerEndDate.timeIntervalSinceNow.rounded(.up)))
+        if remainingSeconds == 0 {
+            timerDidFinish = true
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
+    }
+
+    private static func formattedClock(_ seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
 }
 
 #Preview {
     CookModeView(
         mealName: "Sheet-Pan Chicken and Veggies",
         steps: [
-            "Preheat the oven to 200°C/400°F.",
-            "Toss the chicken thighs and chopped vegetables with a tablespoon of olive oil, salt, and pepper on a sheet pan.",
-            "Roast for 25-30 minutes, until the chicken reaches 165°F internally and the vegetables are tender.",
-            "Rest for 5 minutes, then plate and serve.",
+            MealRecommendationStep(text: "Preheat the oven to 200°C/400°F."),
+            MealRecommendationStep(text: "Toss the chicken thighs and chopped vegetables with a tablespoon of olive oil, salt, and pepper on a sheet pan."),
+            MealRecommendationStep(text: "Roast for 25-30 minutes, until the chicken reaches 165°F internally and the vegetables are tender.", durationSeconds: 1500),
+            MealRecommendationStep(text: "Flip halfway through, after about 12 minutes.", durationSeconds: 720),
+            MealRecommendationStep(text: "Rest for 5 minutes, then plate and serve.", durationSeconds: 300),
         ]
     )
 }
