@@ -9,16 +9,22 @@ import SwiftUI
 /// (the two numbers most people actually know off-hand); carbs/fat are
 /// optional.
 ///
-/// No `date` is captured at construction time -- `save()` computes
-/// `NutritionView.todayDateString()` itself, at the moment of the actual
-/// write. This sheet can stay open through a whole dictate ->
-/// AI-estimate -> review round trip; capturing "today" once when the
-/// sheet opens meant a save that happened to land after local midnight
-/// silently wrote yesterday's date, and the entry would never show up in
-/// "today's" totals even though it saved successfully. Same fix already
-/// applied correctly in MealRecommendationView.logThisMeal -- this just
-/// brings LogMealView in line with that existing pattern.
+/// `date` defaults to nil, meaning "today, resolved by save() itself at
+/// the moment of the actual write" -- this sheet can stay open through a
+/// whole dictate -> AI-estimate -> review round trip, and capturing
+/// "today" once when the sheet opens (the old behavior) meant a save
+/// that happened to land after local midnight silently wrote yesterday's
+/// date, so the entry never showed up in "today's" totals even though it
+/// saved successfully. Same fix already applied correctly in
+/// MealRecommendationView.logThisMeal.
+///
+/// A non-nil `date` pins the entry to that exact day regardless of when
+/// save() runs -- used when logging for a specific PAST day (Home's
+/// swipeable day view / NutritionView's viewingDate), where the day is a
+/// deliberate choice the user already made by navigating there, not
+/// something that should drift to "whatever now is".
 struct LogMealView: View {
+    var date: String? = nil
     @Environment(\.dismiss) private var dismiss
     @StateObject private var speechRecognizer = SpeechRecognizer()
 
@@ -219,7 +225,7 @@ struct LogMealView: View {
         defer { isSaving = false }
         do {
             try await SupabaseClient.shared.logMeal(
-                date: NutritionView.todayDateString(),
+                date: date ?? NutritionView.todayDateString(),
                 label: label,
                 calories: calories,
                 proteinG: protein,

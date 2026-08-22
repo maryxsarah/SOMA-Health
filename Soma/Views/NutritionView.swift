@@ -7,6 +7,15 @@ import SwiftUI
 struct NutritionView: View {
     @Environment(\.dismiss) private var dismiss
 
+    /// Which day this screen shows -- defaults to today for every
+    /// existing call site (unchanged behavior). Home's swipeable day view
+    /// passes a past day here so "log a meal for [that day]" actually
+    /// works; the nutrition TARGET itself stays account-level (one
+    /// standing row, not per-day) regardless of viewingDate -- only the
+    /// entries list and LogMealView's pinned date follow it.
+    var viewingDate: String = NutritionView.todayDateString()
+    private var isViewingToday: Bool { viewingDate == NutritionView.todayDateString() }
+
     @State private var target: NutritionTargets?
     @State private var entries: [MealLogEntry] = []
     @State private var isLoading = true
@@ -92,7 +101,11 @@ struct NutritionView: View {
         .sheet(isPresented: $showLogSheet, onDismiss: {
             Task { await loadEntries() }
         }) {
-            LogMealView()
+            // nil on the live "today" path lets LogMealView compute the
+            // date at save time (the midnight-safe fix) -- a genuine past
+            // day pins to that exact date instead, since the user
+            // deliberately navigated there.
+            LogMealView(date: isViewingToday ? nil : viewingDate)
         }
         .sheet(isPresented: $showGoalBodyProgress, onDismiss: {
             Task { await load() }
@@ -401,7 +414,7 @@ struct NutritionView: View {
     }
 
     private func loadEntries() async {
-        entries = (try? await SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
+        entries = (try? await SupabaseClient.shared.fetchMealLogs(date: viewingDate)) ?? []
         autoRateUnratedEntries()
     }
 
@@ -413,7 +426,10 @@ struct NutritionView: View {
     /// that would just come back `.empty` anyway; the server handles an
     /// empty pantry gracefully either way.
     private func loadTodaysMealPlan() async {
-        guard !pantryItems.isEmpty else {
+        // fetch-OR-GENERATE -- a cache miss triggers a real Claude call,
+        // which has no sound meaning for a bygone day (same reasoning as
+        // Home's checkNow()). Autopilot only ever applies to today.
+        guard isViewingToday, !pantryItems.isEmpty else {
             todaysMealPlan = nil
             return
         }

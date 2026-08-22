@@ -15,12 +15,21 @@ struct LogManualWorkoutView: View {
     @State private var title = ""
     @State private var bodyPart: BodyPartFocus = .cardio
     @State private var category: RecommendationCategory = .moderate
-    @State private var date = Date()
+    /// Defaults to today, same as always -- but Home's swipeable day view
+    /// passes the day currently being viewed, so "log a missed workout"
+    /// from a past day starts the picker there instead of forcing an
+    /// extra manual scroll back. The user can still pick any other date;
+    /// this is only the initial value.
+    @State private var date: Date
     @State private var startTime = Date()
     @State private var durationMinutes = 60
     @State private var notes = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
+
+    init(initialDate: Date = Date()) {
+        _date = State(initialValue: initialDate)
+    }
 
     /// Logging a completed session as "Rest" doesn't make sense -- that
     /// category is for what Soma recommends on a day off, not something
