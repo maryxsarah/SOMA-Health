@@ -1101,6 +1101,14 @@ struct RecommendationDetailView: View {
                 date: recommendation.date,
                 selectedTitle: selectedTitle,
                 selectedBodyPart: selectedBodyPart,
+                // currentPickSuggestion is nil for a gym-photo-generated
+                // selection (see this function's own doc comment above) --
+                // nil is the correct value to send there too, not a gap:
+                // that flow is "whatever equipment the photo scan found",
+                // not one of the fixed catalog's narrow EquipmentTag
+                // categories, so the server's full-profile fallback is
+                // exactly right for it, same as an older client.
+                selectedEquipment: currentPickSuggestion?.equipment,
                 notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
                 targetDurationMinutes: selectedDurationRange,
                 forceRegenerate: forceRegenerate

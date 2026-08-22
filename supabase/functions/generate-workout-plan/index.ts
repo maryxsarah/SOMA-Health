@@ -51,6 +51,7 @@ import { buildWorkoutSchema } from "./workoutSchema.ts";
 import { fetchCandidateExerciseNames } from "../_shared/exerciseLibraryMatch.ts";
 import { mergeEquipmentResolutions, resolveFreeTextEquipment } from "../_shared/equipment.ts";
 import { resolveGymEquipmentItems } from "../_shared/gymEquipmentCatalog.ts";
+import { type EquipmentScope, resolveEquipmentScope } from "./equipmentScope.ts";
 import { fetchOutdoorSafetyForCity, isOutdoorCardioExerciseName } from "../_shared/weatherSafety.ts";
 import {
   computeEtaShift,
@@ -89,6 +90,15 @@ const MIN_CANDIDATES_AFTER_WEATHER_EXCLUSION = 5;
 interface Selection {
   title: string;
   bodyPart: string;
+  /// Raw value of the WorkoutSuggestion's EquipmentTag (Soma/Models/
+  /// DailyRecommendation.swift), e.g. "resistance_bands" -- optional so
+  /// an older client (or a request that genuinely has none, defensively)
+  /// falls back to today's full-profile behavior rather than a hard
+  /// error. See equipmentScope.ts's resolveEquipmentScope: title/bodyPart
+  /// alone can't reconstruct which tag a suggestion was labeled with
+  /// (title is a free, localized display string, not a stable key), so
+  /// this must be sent explicitly by the client.
+  equipment?: string;
 }
 
 interface DurationRange {
@@ -462,6 +472,20 @@ Deno.serve(async (req: Request) => {
       (userRow as UserRow | null)?.custom_gym_equipment ?? [],
     );
     const freeTextEquipment = mergeEquipmentResolutions(freeTextEquipmentNotes, gymEquipmentResolution);
+    // BUG report: a suggestion like "30 min resistance band circuit"
+    // (EquipmentTag.resistanceBands) generated a session pulling in
+    // kettlebells/bench/machines whenever the user's profile ALSO had
+    // real gym equipment set -- nothing scoped exercise selection back to
+    // the specific category the suggestion promised. Computed once, here,
+    // and reused for both the candidate-exercise fetch below AND the
+    // prompt's equipment line (buildPrompt call further down) -- see
+    // equipmentScope.ts's own header for the full scoping rule.
+    const equipmentScope = resolveEquipmentScope(
+      selection.equipment ?? null,
+      (userRow as UserRow | null)?.equipment ?? [],
+      freeTextEquipment,
+      gymEquipmentResolution.displayLine,
+    );
     // Deterministic finisher decision -- whether one appears at all today,
     // and whether it's the exceptional max-effort version. Never left to
     // the LLM: gated on category, readiness, injury contraindications, and
@@ -591,6 +615,7 @@ Deno.serve(async (req: Request) => {
       anchorSessionLine,
       cyclePhase,
       language,
+      equipmentScope,
     );
 
     // Goal-mapped exercise ids join the closed vocabulary inside, under
@@ -616,17 +641,23 @@ Deno.serve(async (req: Request) => {
     // check below -- see fetchYesterdaysCoolDownNames's own doc comment
     // for why this is separate from recentExerciseNames above.
     const yesterdaysCoolDownNames = await fetchYesterdaysCoolDownNames(supabase, userId, selection.title, date);
+    // equipmentScope (computed once, above, alongside freeTextEquipment)
+    // replaces the raw userRow.equipment/freeTextEquipment.* args this
+    // used to pass unconditionally -- THIS is the actual fix: a narrow
+    // category (resistance bands, yoga, bodyweight, bike, pool, etc.)
+    // gets candidates filtered to just that category's own equipment,
+    // never the user's whole stored profile.
     let candidateExerciseNames = await fetchCandidateExerciseNames(
       supabase,
       resolvedBodyPart,
-      (userRow as UserRow | null)?.equipment ?? [],
+      equipmentScope.equipment,
       goalExcludedKeywords,
       (userRow as UserRow | null)?.experience_level ?? null,
       goalDecision?.kind === "preset" ? goalExerciseIds : [],
-      freeTextEquipment.libraryEquipment,
-      freeTextEquipment.unlocksCardio,
+      equipmentScope.extraLibraryEquipment,
+      equipmentScope.unlocksCardio,
       recentExerciseNames,
-      freeTextEquipment.cardioLibraryEquipment,
+      equipmentScope.cardioLibraryEquipment,
     );
     // Post-filter rather than folded into fetchCandidateExerciseNames's own
     // excludedKeywords param -- that mechanism is plain substring matching
@@ -922,6 +953,7 @@ function buildPrompt(
   anchorSessionLine: string | null,
   cyclePhase: CyclePhaseResult | null,
   language: string,
+  equipmentScope: EquipmentScope,
 ): string {
   const goals = userRow?.goals?.length ? userRow.goals.join(", ") : "general fitness";
   // A secondary, lower-confidence signal from comparing the user's stored
@@ -942,20 +974,16 @@ function buildPrompt(
   const trainingEmphasisLine = userRow?.training_emphasis
     ? `\nThe same photo comparison also suggests an overall training direction of "${userRow.training_emphasis}" (cut = lean out/reduce fat, bulk = add size, recomp = both/composition change, maintain = little change wanted). Let this gently inform today's exercise mix alongside the goals and emphasis above -- e.g. a "cut" direction favors a bit more conditioning/metabolic work where the day's structure allows it; a "bulk" direction favors sticking with heavier compound work. Never let this override the day's intensity category, injury exclusions, or equipment above.`
     : "";
-  const equipment = userRow?.equipment?.length
-    ? userRow.equipment.join(", ")
-    : "no equipment (bodyweight only)";
-  // Granular catalog + free-typed "Other" items (GymEquipmentPicker) --
-  // named alongside the coarse access-type line above, never instead of
-  // it, so the model sees both "what kind of access" and "specifically
-  // what gear."
-  const gymEquipmentDisplayLine = resolveGymEquipmentItems(
-    userRow?.gym_equipment_items ?? [],
-    userRow?.custom_gym_equipment ?? [],
-  ).displayLine;
-  const equipmentWithGymDetail = gymEquipmentDisplayLine
-    ? `${equipment} Specific gym equipment available: ${gymEquipmentDisplayLine}.`
-    : equipment;
+  // equipmentScope is computed once in the handler (see its own call site
+  // for why) and reused here verbatim -- this used to independently
+  // recompute the user's FULL equipment profile regardless of which
+  // suggestion/category was picked (the actual bug: a resistance-bands
+  // suggestion's prompt bragged about the user's kettlebells/bench just
+  // like a real gym suggestion would). promptDescription is narrow-scoped
+  // for categories that promise a specific modality, matching the SAME
+  // scope the candidate-exercise fetch below uses -- prose and the
+  // schema-constrained candidate list can no longer disagree.
+  const equipmentWithGymDetail = equipmentScope.promptDescription;
   // Deterministic exclusion sentence -- never left to the model to infer
   // what's safe, same rule this codebase applies everywhere else.
   const { promptLine: injuries } = describeContraindications(
