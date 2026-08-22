@@ -16,6 +16,39 @@ struct HomeView: View {
     @State private var healthDashboardInitialSection: HealthDashboardView.DashboardSection = .overview
     @State private var recentRecommendations: [DailyRecommendation] = []
     @State private var selectedDay: String?
+
+    /// Which day's data Home is currently showing -- defaults to real
+    /// today. Swiping changes this and triggers reloadForSelectedDate();
+    /// everything below that reads/writes "today's" mood/sleep/workout/
+    /// meals/etc. now reads/writes selectedDateString instead of a
+    /// hardcoded Self.todayDateString(). A few things deliberately stay
+    /// anchored to REAL today regardless of what's being viewed --
+    /// streaks, the 7-day calendar strip, quota counts, notification
+    /// gating, the gym-photo scan CTA, and "Check now"/regenerate --
+    /// see isViewingToday's call sites for the exact list. Distinct from
+    /// `selectedDay` above (that one drives the calendar-strip's own tap
+    /// -> sheet, unrelated to this).
+    @State private var selectedDate = Date()
+    /// Account creation date, floor for how far back swiping can go --
+    /// loaded once alongside loadGoalBodyPhotoState's existing profile
+    /// fetch (see that function). nil (not loaded yet) imposes no floor,
+    /// rather than blocking swiping until the first profile fetch lands.
+    @State private var accountCreatedDate: Date?
+    /// The viewed day's recommendation when selectedDate isn't real today
+    /// -- appState.currentRecommendation is a single, non-date-keyed slot
+    /// read by RecommendationDetailView and the rest of the app while
+    /// viewing today, so a past day's recommendation must never be
+    /// written there; doing so would corrupt what "today" shows the
+    /// moment the user swipes back. Rendered by its own read-only
+    /// pastDayReadinessCard, never the interactive readinessCard (see
+    /// that function's doc comment) -- read-only end to end: past days
+    /// never auto-generate a missing recommendation.
+    @State private var dayRecommendation: DailyRecommendation?
+    @State private var isLoadingSelectedDate = false
+
+    private var isViewingToday: Bool { Calendar.current.isDateInToday(selectedDate) }
+    private var selectedDateString: String { Self.dateString(for: selectedDate) }
+
     @State private var todaysWorkoutLog: WorkoutLogEntry?
     /// The single device-detected timeline entry currently awaiting a
     /// yes/no answer -- nil whenever there's nothing left to ask about (see
@@ -238,25 +271,33 @@ struct HomeView: View {
 
                 greetingRow
 
-                if subscriptionManager.isInTrial {
+                dayNavRow
+
+                if isViewingToday, subscriptionManager.isInTrial {
                     trialUpgradeBanner
                 }
 
-                if showTrainingSourceToggle {
+                if isViewingToday, showTrainingSourceToggle {
                     trainingSourceToggle
                 }
 
                 Group {
-                    if trainingSource == .custom {
+                    if trainingSource == .custom, isViewingToday {
                         customTrainingCard
-                    } else if let recommendation = appState.currentRecommendation {
-                        readinessCard(recommendation)
+                    } else if isViewingToday {
+                        if let recommendation = appState.currentRecommendation {
+                            readinessCard(recommendation)
+                        } else {
+                            needsDataCard
+                        }
+                    } else if let dayRecommendation {
+                        pastDayReadinessCard(dayRecommendation)
                     } else {
-                        needsDataCard
+                        noDataForSelectedDayCard
                     }
                 }
 
-                if let detectedWorkoutPendingConfirmation {
+                if isViewingToday, let detectedWorkoutPendingConfirmation {
                     DetectedWorkoutConfirmationView(
                         entry: detectedWorkoutPendingConfirmation,
                         onConfirm: { Task { await confirmDetectedWorkout(detectedWorkoutPendingConfirmation) } },
@@ -264,13 +305,21 @@ struct HomeView: View {
                     )
                 }
 
-                if deliberateWorkoutLogToday == nil, let todaysAIPlan, todaysAIPlan.addedToPlan {
+                if isViewingToday, deliberateWorkoutLogToday == nil, let todaysAIPlan, todaysAIPlan.addedToPlan {
                     aiGeneratedWorkoutCard(todaysAIPlan)
                 }
 
                 widgetGrid
 
-                if dailyTasksWidgetEnabled {
+                // The checklist is a live "today's tasks" list, not a
+                // historical log -- hidden while browsing a past day
+                // rather than showing today's tasks alongside a past
+                // day's other cards, which would read as if those tasks
+                // belonged to that day. The hidden background instance
+                // below (for the greeting row's ring-pill) is unaffected
+                // -- it always loads real today's state regardless of
+                // which day is being viewed, same as before this change.
+                if dailyTasksWidgetEnabled, isViewingToday {
                     dailyChecklistWidget
                 }
 
@@ -303,6 +352,7 @@ struct HomeView: View {
             )
         }
         .somaBackground()
+        .simultaneousGesture(daySwipeGesture)
         .safeAreaInset(edge: .bottom) {
             dashboardDock
         }
@@ -322,6 +372,7 @@ struct HomeView: View {
             await evaluateDetectedWorkoutForConfirmation()
             await loadTodaysAIPlan()
             await loadWeeklyProgressAndStreak()
+            await loadSnapshotsForSelectedDate()
             await loadGoalBodyPhotoState()
             await loadNutritionState()
             try? await loadTodaysMood()
@@ -329,23 +380,33 @@ struct HomeView: View {
             await loadTodaysAffirmation()
         }
         .refreshable {
-            await checkNow()
-            await loadRecentRecommendations()
-            await loadTodaysWorkoutLog()
-            // Independent fetches feeding the calendar strip's two separate
-            // badges (crown/star) -- no data dependency between them.
-            async let completedDatesFetch: Void = loadCompletedDates()
-            async let goalTrainingDatesFetch: Void = loadGoalTrainingDates()
-            await completedDatesFetch
-            await goalTrainingDatesFetch
-            await loadTimeline()
-            await evaluateDetectedWorkoutForConfirmation()
-            await loadTodaysAIPlan()
-            await loadWeeklyProgressAndStreak()
-            await loadNutritionState()
-            try? await loadTodaysMood()
-            try? await loadTodaysSleep()
-            await loadTodaysAffirmation()
+            // Pull-to-refresh means something different depending on which
+            // day is showing: on today it's the existing generate-on-open
+            // path; on a past day there's nothing to generate, so it's
+            // just the same re-fetch a swipe/chevron tap would trigger.
+            if isViewingToday {
+                await checkNow()
+                await loadRecentRecommendations()
+                await loadTodaysWorkoutLog()
+                // Independent fetches feeding the calendar strip's two
+                // separate badges (crown/star) -- no data dependency
+                // between them.
+                async let completedDatesFetch: Void = loadCompletedDates()
+                async let goalTrainingDatesFetch: Void = loadGoalTrainingDates()
+                await completedDatesFetch
+                await goalTrainingDatesFetch
+                await loadTimeline()
+                await evaluateDetectedWorkoutForConfirmation()
+                await loadTodaysAIPlan()
+                await loadWeeklyProgressAndStreak()
+                await loadSnapshotsForSelectedDate()
+                await loadNutritionState()
+                try? await loadTodaysMood()
+                try? await loadTodaysSleep()
+                await loadTodaysAffirmation()
+            } else {
+                await reloadForSelectedDate()
+            }
         }
         .sheet(isPresented: $showDetail, onDismiss: {
             Task {
@@ -383,7 +444,7 @@ struct HomeView: View {
         .sheet(isPresented: $showNutrition, onDismiss: {
             Task { await loadNutritionState() }
         }) {
-            NutritionView()
+            NutritionView(viewingDate: selectedDateString)
         }
         .sheet(isPresented: $showLogManualWorkout, onDismiss: {
             Task {
@@ -392,7 +453,7 @@ struct HomeView: View {
                 await loadWeeklyProgressAndStreak()
             }
         }) {
-            LogManualWorkoutView()
+            LogManualWorkoutView(initialDate: selectedDate)
         }
         .sheet(isPresented: $showManualWorkoutDetail) {
             if let todaysWorkoutLog {
@@ -690,6 +751,75 @@ struct HomeView: View {
         }
     }
 
+    /// Day-navigation row -- chevron buttons (accessible, VoiceOver-
+    /// reachable alternative to the gesture below) plus the explicit
+    /// "which day am I looking at" label, so it's never ambiguous that
+    /// everything below belongs to a past day rather than today, even
+    /// though greetingRow's own date/greeting text above stays about the
+    /// real current moment (an actual greeting, not a page header).
+    /// Hidden entirely while on today -- chevron.right (forward) is
+    /// meaningless there anyway (never past real today), and the row
+    /// would just repeat "Today" redundantly under a greeting that
+    /// already says so.
+    @ViewBuilder
+    private var dayNavRow: some View {
+        if !isViewingToday {
+            HStack {
+                Button {
+                    goToAdjacentDay(offset: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(canGoBackADay ? SomaTokens.accent : SomaTokens.ink3.opacity(0.4))
+                        .frame(width: 30, height: 30)
+                        .glassLens(cornerRadius: SomaTokens.rPill)
+                }
+                .buttonStyle(SomaNavPillButtonStyle())
+                .disabled(!canGoBackADay)
+                .accessibilityLabel(String(localized: "home.dayNav.previousDay", defaultValue: "Previous day", comment: "Home: button that moves the swipeable day view one day earlier"))
+
+                Spacer()
+
+                Button {
+                    goToToday()
+                } label: {
+                    VStack(spacing: 1) {
+                        HStack(spacing: 5) {
+                            if isLoadingSelectedDate {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                            }
+                            Text(Self.dayHeaderString(selectedDate))
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(SomaTokens.ink)
+                        }
+                        Text(String(localized: "home.dayNav.backToToday", defaultValue: "Back to today", comment: "Home: link under a past day's header that returns the swipeable day view to today"))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(SomaTokens.accent)
+                    }
+                }
+                .buttonStyle(.plain)
+                .animation(.easeInOut(duration: 0.15), value: isLoadingSelectedDate)
+                .accessibilityElement(children: .combine)
+
+                Spacer()
+
+                Button {
+                    goToAdjacentDay(offset: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SomaTokens.accent)
+                        .frame(width: 30, height: 30)
+                        .glassLens(cornerRadius: SomaTokens.rPill)
+                }
+                .buttonStyle(SomaNavPillButtonStyle())
+                .accessibilityLabel(String(localized: "home.dayNav.nextDay", defaultValue: "Next day", comment: "Home: button that moves the swipeable day view one day later, toward today"))
+            }
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+    }
+
     /// 3a: calendar-lens entry point immediately left of the checklist
     /// ring-pill -- opens the new month-grid history screen (15a). Distinct
     /// from tapping a day chip in the week strip, which still opens
@@ -729,6 +859,112 @@ struct HomeView: View {
         .buttonStyle(SomaNavPillButtonStyle())
         .accessibilityLabel(String(localized: "home.greetingRow.historyCalendar.accessibilityLabel", defaultValue: "History", comment: "Home: greeting row calendar-icon button that opens the full training history calendar"))
         .accessibilityIdentifier("home.historyCalendarButton")
+    }
+
+    // MARK: - Day navigation (swipe)
+    //
+    // Real feedback: users want to swipe through past days on Home
+    // itself and see the same screen reconstructed for that day, fully
+    // interactive (log/edit for a past day, not just view it) -- not a
+    // separate history screen. selectedDate is the single source of
+    // truth for which day; reloadForSelectedDate() re-fetches everything
+    // day-scoped whenever it changes (swipe, chevron tap, or "Back to
+    // today"). Two hard bounds: never past real today (there's nothing
+    // to show), and never before accountCreatedDate (nothing existed
+    // yet).
+
+    /// Confirmed direction (real feedback, not a guess): swipe RIGHT goes
+    /// backward in time (toward yesterday/earlier), swipe LEFT goes
+    /// forward (toward today) -- the opposite of a plain horizontal
+    /// ScrollView's natural left-to-right reading direction, which is why
+    /// this is a dedicated DragGesture rather than e.g. a paged
+    /// horizontal ScrollView. minimumDistance keeps this from competing
+    /// with the outer ScrollView's own vertical pan for small/ambiguous
+    /// touches; the width-vs-height check in the handler is the second
+    /// layer, so a mostly-vertical scroll gesture never gets
+    /// misinterpreted as a day change.
+    private var daySwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) * 1.5,
+                      abs(value.translation.width) > 50 else { return }
+                goToAdjacentDay(offset: value.translation.width > 0 ? -1 : 1)
+            }
+    }
+
+    private func goToAdjacentDay(offset: Int) {
+        guard let target = Calendar.current.date(byAdding: .day, value: offset, to: selectedDate) else { return }
+        goTo(date: target)
+    }
+
+    private func goToToday() {
+        guard !isViewingToday else { return }
+        goTo(date: Date())
+    }
+
+    private func goTo(date: Date) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let target = calendar.startOfDay(for: date)
+        guard target <= today else { return }
+        if let accountCreatedDate {
+            guard target >= calendar.startOfDay(for: accountCreatedDate) else { return }
+        }
+        guard target != calendar.startOfDay(for: selectedDate) else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            selectedDate = date
+        }
+        Task { await reloadForSelectedDate() }
+    }
+
+    /// Whether one more day back is actually reachable -- drives the
+    /// previous-day chevron's disabled/dimmed state.
+    private var canGoBackADay: Bool {
+        guard let accountCreatedDate,
+              let previous = Calendar.current.date(byAdding: .day, value: -1, to: selectedDate) else { return true }
+        return Calendar.current.startOfDay(for: previous) >= Calendar.current.startOfDay(for: accountCreatedDate)
+    }
+
+    /// Re-fetches every day-scoped piece of Home's content for whichever
+    /// day selectedDate now points at. Deliberately NOT the same list as
+    /// the .task/.refreshable reload -- those also do real-today-only
+    /// things (checkNow()'s generate-on-open, quota/scan-streak,
+    /// affirmations) that have no sound past-day meaning, covered
+    /// instead by loadRecommendationForSelectedDate's plain read.
+    private func reloadForSelectedDate() async {
+        isLoadingSelectedDate = true
+        defer { isLoadingSelectedDate = false }
+
+        waterGlassesToday = Self.waterGlasses(on: selectedDateString)
+
+        if isViewingToday {
+            dayRecommendation = nil
+            await loadTodaysRecommendation()
+        } else {
+            await loadRecommendationForSelectedDate()
+        }
+
+        async let workoutLogFetch: Void = loadTodaysWorkoutLog()
+        async let aiPlanFetch: Void = loadTodaysAIPlan()
+        async let nutritionFetch: Void = loadNutritionState()
+        async let timelineFetch: Void = loadTimeline()
+        async let snapshotsFetch: Void = loadSnapshotsForSelectedDate()
+        await workoutLogFetch
+        await aiPlanFetch
+        await nutritionFetch
+        await timelineFetch
+        await snapshotsFetch
+        try? await loadTodaysMood()
+        try? await loadTodaysSleep()
+    }
+
+    /// "Friday, 21 August" for a past day's header -- distinct from
+    /// longDateString() (always real today, used by the actual greeting).
+    private static func dayHeaderString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, d MMMM"
+        return formatter.string(from: date)
     }
 
     /// The mockup's own top row (`21:36 •••`) -- the dots are a real
@@ -1322,6 +1558,11 @@ struct HomeView: View {
     }
 
     private var scanState: ScanState {
+        // A live camera capture + AI equipment scan has no sound meaning
+        // pointed at a bygone day -- hidden on any page but today's, same
+        // as the AI-generated-workout card and detected-workout
+        // confirmation above.
+        if !isViewingToday { return .hidden }
         // A committed or completed workout removes the row entirely --
         // including a confirmed device-detected one, matching the server's
         // own lock checks (generate-workout-plan/generate-gym-workout).
@@ -1937,7 +2178,7 @@ struct HomeView: View {
             ForEach(1...8, id: \.self) { index in
                 Button {
                     waterGlassesToday = index
-                    UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey())
+                    UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey(for: selectedDateString))
                 } label: {
                     Image(systemName: index <= waterGlassesToday ? "drop.fill" : "drop")
                         .font(.system(size: 13, weight: .semibold))
@@ -1960,7 +2201,7 @@ struct HomeView: View {
             case .decrement: waterGlassesToday = max(waterGlassesToday - 1, 0)
             @unknown default: break
             }
-            UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey())
+            UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey(for: selectedDateString))
         }
     }
 
@@ -1970,7 +2211,7 @@ struct HomeView: View {
         HStack(spacing: 8) {
             Button {
                 waterGlassesToday = max(waterGlassesToday - 1, 0)
-                UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey())
+                UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey(for: selectedDateString))
             } label: {
                 Image(systemName: "minus")
                     .font(.system(size: 12, weight: .bold))
@@ -2010,7 +2251,7 @@ struct HomeView: View {
 
             Button {
                 waterGlassesToday = min(waterGlassesToday + 1, 99)
-                UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey())
+                UserDefaults.standard.set(waterGlassesToday, forKey: Self.waterStorageKey(for: selectedDateString))
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .bold))
@@ -2725,6 +2966,47 @@ struct HomeView: View {
         }
     }
 
+    /// Read-only counterpart to readinessCard for a past day (see
+    /// dayRecommendation's doc comment on why this is a separate, simpler
+    /// function rather than readinessCard itself branching on
+    /// isViewingToday) -- category, message, and whatever workout was
+    /// actually logged that day, with none of readinessCard's live
+    /// controls (refresh/regenerate, rest-day request, the workout-detail
+    /// tap-through) -- those all act on "today" specifically and have no
+    /// sound meaning pointed at a bygone day.
+    private func pastDayReadinessCard(_ recommendation: DailyRecommendation) -> some View {
+        CardView {
+            Text(recommendation.category.displayTitle)
+                .font(.body.bold())
+            Text(recommendation.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let todaysWorkoutLog {
+                loggedWorkoutRow(todaysWorkoutLog)
+            }
+        }
+    }
+
+    /// Shown swiping to a past day with no daily_recommendation row on
+    /// file -- deliberately NOT a "Check now" CTA like needsDataCard's:
+    /// generating one for a bygone day would need to source that day's
+    /// on-device HealthKit data, which is no longer available "now", and
+    /// would incorrectly mark today's notification as already sent (see
+    /// checkNow()'s own doc comment) -- so a past day with nothing on
+    /// file just stays empty.
+    private var noDataForSelectedDayCard: some View {
+        CardView {
+            Text(String(localized: "home.pastDay.noData.title", defaultValue: "Nothing recorded", comment: "Home: title shown when swiping to a past day with no readiness data logged"))
+                .font(.body.bold())
+            Text(String(localized: "home.pastDay.noData.subtitle", defaultValue: "No readiness data was recorded for this day.", comment: "Home: subtitle shown when swiping to a past day with no readiness data logged"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let todaysWorkoutLog {
+                loggedWorkoutRow(todaysWorkoutLog)
+            }
+        }
+    }
+
     /// Reads today's row first; if it doesn't exist yet, generates it on
     /// the spot instead of leaving the user on a stale/empty state.
     ///
@@ -2746,6 +3028,15 @@ struct HomeView: View {
         await checkNow()
     }
 
+    /// Past-day counterpart to loadTodaysRecommendation -- a plain read
+    /// of whatever's on file for selectedDateString, never a fallback
+    /// into checkNow() (see pastDayReadinessCard/noDataForSelectedDayCard
+    /// doc comments for why generating one for a bygone day doesn't make
+    /// sense). Writes dayRecommendation, never appState.currentRecommendation.
+    private func loadRecommendationForSelectedDate() async {
+        dayRecommendation = try? await SupabaseClient.shared.fetchTodaysRecommendation(date: selectedDateString)
+    }
+
     /// Feeds the calendar strip -- silent on failure, same as the other
     /// plain reads (worst case the strip just shows neutral gray dots).
     private func loadRecentRecommendations() async {
@@ -2756,7 +3047,7 @@ struct HomeView: View {
     /// refreshed on appear, pull-to-refresh, and whenever the detail sheet
     /// closes (that's the only place a log can be created).
     private func loadTodaysWorkoutLog() async {
-        let logs = (try? await SupabaseClient.shared.fetchWorkoutLogs(date: Self.todayDateString())) ?? []
+        let logs = (try? await SupabaseClient.shared.fetchWorkoutLogs(date: selectedDateString)) ?? []
         todaysWorkoutLog = logs.first
     }
 
@@ -2777,47 +3068,66 @@ struct HomeView: View {
     /// persistent AI-generated-workout card -- silent on failure, same as
     /// the other plain reads.
     private func loadTodaysAIPlan() async {
-        todaysAIPlan = (try? await SupabaseClient.shared.fetchTodaysAIPlan(date: Self.todayDateString())) ?? todaysAIPlan
+        todaysAIPlan = (try? await SupabaseClient.shared.fetchTodaysAIPlan(date: selectedDateString)) ?? todaysAIPlan
     }
 
-    /// Feeds the scan card's streak.
+    /// Feeds the scan card's streak. Deliberately stays anchored to REAL
+    /// today throughout, unlike most other load functions here -- scan
+    /// streak/quota and the weekly session target are account-level/
+    /// rolling concepts, not "what happened on the day being viewed" (see
+    /// loadSnapshotsForSelectedDate below for the one piece of this that
+    /// DOES follow the viewed day).
     private func loadWeeklyProgressAndStreak() async {
         async let scanDatesFetch: Set<String> = (try? await SupabaseClient.shared.fetchGymPhotoScanDates()) ?? []
         async let profileFetch: UserProfile? = {
             guard let userId = SupabaseClient.shared.currentUserID else { return nil }
             return try? await SupabaseClient.shared.fetchProfile(id: userId)
         }()
-        async let snapshotsFetch: [DailySnapshotRow] = (try? await SupabaseClient.shared.fetchTodaysSnapshots(date: Self.todayDateString())) ?? []
         async let generationCountFetch: Int = (try? await SupabaseClient.shared.fetchTodaysGenerationCount(date: Self.todayDateString())) ?? 0
 
         scanDates = await scanDatesFetch
         scanStreak = Self.streak(from: scanDates)
         let profile = await profileFetch
         weeklyTarget = profile?.weeklySessionTarget
-        todaysSnapshots = await snapshotsFetch
         todaysGenerationCount = await generationCountFetch
         await loadSportGoal()
+    }
+
+    /// The readiness card's "inputs" disclosure line -- unlike the quota/
+    /// streak fields above, this genuinely is about the viewed day (which
+    /// signals fed that day's recommendation), so it follows selectedDate
+    /// via reloadForSelectedDate() as its own small fetch rather than
+    /// living inside loadWeeklyProgressAndStreak.
+    private func loadSnapshotsForSelectedDate() async {
+        todaysSnapshots = (try? await SupabaseClient.shared.fetchTodaysSnapshots(date: selectedDateString)) ?? []
     }
 
     /// Reuses loadWeeklyProgressAndStreak's own profile fetch would mean
     /// waiting on scan dates/snapshots too just to know if a goal photo is
     /// set -- cheap enough on its own to just fetch again independently.
+    /// Also the swipeable day view's floor: accountCreatedDate, parsed
+    /// once here from the same profile row rather than a separate fetch.
     private func loadGoalBodyPhotoState() async {
         guard let userId = SupabaseClient.shared.currentUserID,
               let profile = try? await SupabaseClient.shared.fetchProfile(id: userId) else { return }
         hasGoalBodyPhoto = profile.goalBodyPhotoPath != nil
         hasCurrentBodyPhoto = profile.currentBodyPhotoPath != nil
         isConfirmedAdultForBodyPhotos = AgeGate.isAdult(dobString: profile.dateOfBirth)
+        if let createdAt = profile.createdAt {
+            accountCreatedDate = Self.parseISODate(createdAt)
+        }
     }
 
     /// nil target (never computed -- no goal/current photo pair analyzed
     /// yet) is a real, valid state, not an error -- the row below shows a
     /// CTA instead of hiding entirely, same posture as goalProgressRow's
-    /// own "add your goal photo" state.
+    /// own "add your goal photo" state. Target itself stays account-level
+    /// (one standing row, not per-day) -- only the entries fetch follows
+    /// selectedDate.
     private func loadNutritionState() async {
         // Independent reads -- concurrent, not sequential (this runs on
         // every Home appear/refresh).
-        async let entriesFetch = (try? SupabaseClient.shared.fetchMealLogs(date: Self.todayDateString())) ?? []
+        async let entriesFetch = (try? SupabaseClient.shared.fetchMealLogs(date: selectedDateString)) ?? []
         async let targetFetch = try? SupabaseClient.shared.fetchNutritionTargets()
         todaysMealEntries = await entriesFetch
         nutritionTarget = await targetFetch ?? nil
@@ -2831,7 +3141,7 @@ struct HomeView: View {
     /// happens"). The plain `.task`/`.refreshable` call sites below still
     /// want a best-effort read, so they keep their own `try?`.
     private func loadTodaysMood() async throws {
-        todaysMood = try await SupabaseClient.shared.fetchTodaysMood(date: Self.todayDateString())
+        todaysMood = try await SupabaseClient.shared.fetchTodaysMood(date: selectedDateString)
     }
 
     private func logMood(_ rating: MoodRating) async {
@@ -2839,7 +3149,7 @@ struct HomeView: View {
         moodError = nil
         defer { isSavingMood = false }
         do {
-            try await SupabaseClient.shared.logMood(date: Self.todayDateString(), rating: rating.rawValue)
+            try await SupabaseClient.shared.logMood(date: selectedDateString, rating: rating.rawValue)
             try await loadTodaysMood()
         } catch {
             // Visible now instead of silent -- real feedback: "when the
@@ -2859,7 +3169,7 @@ struct HomeView: View {
     /// stuck on the picker if the user tapped "change" and then navigated
     /// away without picking a new value.
     private func loadTodaysSleep() async throws {
-        todaysSleepLog = try await SupabaseClient.shared.fetchTodaysSleepLog(date: Self.todayDateString())
+        todaysSleepLog = try await SupabaseClient.shared.fetchTodaysSleepLog(date: selectedDateString)
         isEditingSleep = false
     }
 
@@ -2868,7 +3178,7 @@ struct HomeView: View {
         sleepError = nil
         defer { isSavingSleep = false }
         do {
-            try await SupabaseClient.shared.logSleep(date: Self.todayDateString(), bucket: bucket)
+            try await SupabaseClient.shared.logSleep(date: selectedDateString, bucket: bucket)
             try await loadTodaysSleep()
         } catch {
             sleepError = String(localized: "home.sleepCheckIn.error", defaultValue: "Couldn't save that -- check your connection and try again.", comment: "Home: shown when saving the daily sleep check-in fails")
@@ -2928,19 +3238,34 @@ struct HomeView: View {
     /// fails independently (silent on failure) -- worst case the timeline
     /// just shows whichever source actually responded.
     private func loadTimeline() async {
-        async let healthKitEntries: [WorkoutTimelineEntry] = HealthKitManager.isAvailable
+        // Bounds follow selectedDate, not always-real-today -- for a past
+        // day, endTime is that day's own midnight (there's no "now" for a
+        // bygone day); for today it stays the real current instant, same
+        // as before this change.
+        let dayStart = Calendar.current.startOfDay(for: selectedDate)
+        let dayEnd = isViewingToday ? Date() : (Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart)
+
+        // HealthKitManager.fetchTodaysWorkouts() only ever queries the
+        // real on-device "now" (no arbitrary-date overload exists) --
+        // skipped entirely for a past day rather than querying the wrong
+        // window. A past day's timeline still shows whatever was already
+        // synced from HealthKit on a prior open (syncedEntries below) plus
+        // connected-provider data (providerEntries), which covers the
+        // normal case; only a HealthKit workout that was never synced
+        // while viewing today wouldn't show up when revisited later.
+        async let healthKitEntries: [WorkoutTimelineEntry] = (isViewingToday && HealthKitManager.isAvailable)
             ? await HealthKitManager.shared.fetchTodaysWorkouts()
             : []
         // Explicit LOCAL-day bounds -- without them the edge function
         // defaults to the UTC day, which west of UTC includes yesterday
         // evening's session and auto-marked today done at wake-up.
         async let providerEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchProviderWorkoutTimeline(
-            date: Self.todayDateString(),
-            startTime: Calendar.current.startOfDay(for: Date()),
-            endTime: Date()
+            date: selectedDateString,
+            startTime: dayStart,
+            endTime: dayEnd
         )) ?? []
 
-        async let syncedEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchSyncedHealthKitWorkouts(date: Self.todayDateString())) ?? []
+        async let syncedEntries: [WorkoutTimelineEntry] = (try? await SupabaseClient.shared.fetchSyncedHealthKitWorkouts(date: selectedDateString)) ?? []
 
         let hkEntries = await healthKitEntries
         if !hkEntries.isEmpty {
@@ -3148,11 +3473,28 @@ struct HomeView: View {
         return timeString(date)
     }
 
-    private static func todayDateString() -> String {
+    private static func todayDateString() -> String { dateString(for: Date()) }
+
+    /// "yyyy-MM-dd" for an arbitrary Date -- the swipeable day view's
+    /// general form of todayDateString() above, which stays as its own
+    /// zero-arg wrapper since most call sites genuinely do mean "today"
+    /// (the notification/quota/streak machinery is deliberately never
+    /// day-swipe-aware, see selectedDate's own doc comment).
+    private static func dateString(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = .current
-        return formatter.string(from: Date())
+        return formatter.string(from: date)
+    }
+
+    /// Same parse-with-fallback shape as moodLoggedTimeText/
+    /// sleepLoggedTimeText -- used to turn UserProfile.createdAt (a raw
+    /// ISO8601 wire string) into the swipeable day view's floor.
+    private static func parseISODate(_ raw: String) -> Date? {
+        let isoWithFraction = ISO8601DateFormatter()
+        isoWithFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let iso = ISO8601DateFormatter()
+        return isoWithFraction.date(from: raw) ?? iso.date(from: raw)
     }
 }
 
