@@ -2018,11 +2018,22 @@ final class SupabaseClient {
     /// `notes` is optional freeform text the user typed right after
     /// checking a workout (e.g. "sore shoulder today") -- folded into the
     /// generation prompt for this call only, not persisted.
-    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, notes: String? = nil, targetDurationMinutes: ClosedRange<Int>? = nil, forceRegenerate: Bool = false) async throws -> AIWorkoutPlan {
+    /// `selectedEquipment` (nil-able) is the picked WorkoutSuggestion's own
+    /// EquipmentTag -- BUG FIX (2026-08-22): the server used to have no way
+    /// to know which suggestion's equipment CATEGORY was picked, only its
+    /// title/bodyPart, so exercise selection fell back to the user's ENTIRE
+    /// stored equipment profile regardless of what was actually promised
+    /// (e.g. a "resistance band circuit" pulling in kettlebells/a bench).
+    /// nil is a safe, additive default -- the server treats a missing tag
+    /// the same as an unrecognized one (falls back to today's existing
+    /// full-profile behavior), never a hard failure.
+    func fetchOrGenerateAIWorkoutPlan(date: String, selectedTitle: String, selectedBodyPart: String, selectedEquipment: EquipmentTag? = nil, notes: String? = nil, targetDurationMinutes: ClosedRange<Int>? = nil, forceRegenerate: Bool = false) async throws -> AIWorkoutPlan {
         var request = try await authorizedRequest(path: "functions/v1/generate-workout-plan", method: "POST", timeout: 180)
+        var selection: [String: Any] = ["title": selectedTitle, "bodyPart": selectedBodyPart]
+        if let selectedEquipment { selection["equipment"] = selectedEquipment.rawValue }
         var body: [String: Any] = [
             "date": date,
-            "selection": ["title": selectedTitle, "bodyPart": selectedBodyPart],
+            "selection": selection,
             "language": await currentAILanguageCode(),
         ]
         if let notes { body["notes"] = notes }
