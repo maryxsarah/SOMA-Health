@@ -330,7 +330,7 @@ struct MealRecommendationView: View {
                     Text("\(index + 1).")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(SomaTokens.accent)
-                    Text(step)
+                    Text(step.text)
                         .font(.system(size: 13.5))
                         .foregroundStyle(SomaTokens.ink2)
                 }

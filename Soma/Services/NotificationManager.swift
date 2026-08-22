@@ -71,6 +71,48 @@ final class NotificationManager {
         }
     }
 
+    // MARK: - Cooking timer
+    //
+    // CookModeView's per-step countdown. A fixed identifier is
+    // deliberate: only one step is ever showing at a time, so starting a
+    // new timer always means whatever was pending is now stale and
+    // should be replaced, never stacked.
+
+    private static let cookingTimerIdentifier = "cooking-timer"
+
+    /// One-shot "time's up" alert, same UNTimeIntervalNotificationTrigger
+    /// shape as scheduleUpgradeReminder -- keeps the countdown meaningful
+    /// even if the user backgrounds the app mid-step (switches apps while
+    /// something simmers) instead of relying on a foreground-only
+    /// decrementing counter that would silently freeze.
+    func scheduleCookingTimer(seconds: TimeInterval, stepText: String) async {
+        guard seconds > 0 else { return }
+        cancelCookingTimer()
+
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "notification.cookingTimer.title", defaultValue: "Timer's up", comment: "Push notification title when a cooking step's timer finishes")
+        content.body = stepText
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: Self.cookingTimerIdentifier,
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: seconds, repeats: false)
+        )
+
+        await withCheckedContinuation { continuation in
+            center.add(request) { _ in continuation.resume() }
+        }
+    }
+
+    /// Called when the user resets/restarts a step's timer, or navigates
+    /// away from the step (or out of cook mode entirely) while one is
+    /// still running -- same removePendingNotificationRequests shape as
+    /// cancelEveningWorkoutReminder.
+    func cancelCookingTimer() {
+        center.removePendingNotificationRequests(withIdentifiers: [Self.cookingTimerIdentifier])
+    }
+
     // MARK: - Quiet hours
     //
     // Off by default so nobody's existing schedule silently changes until

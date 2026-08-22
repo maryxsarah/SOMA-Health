@@ -20,9 +20,11 @@
 // goal direction, exact ingredient quantities, and step-by-step prep
 // instructions using ONLY equipment the user actually owns
 // (users.household_equipment). Recipe response shape: { name,
-// whyThisMeal, ingredients: [{name, quantity}], steps: string[],
-// equipmentUsed: string[], totalTimeMinutes, calories, proteinG, carbsG,
-// fatG }. Daily mode wraps that in { date, category, recommendation }.
+// whyThisMeal, ingredients: [{name, quantity}], steps: [{text,
+// durationSeconds}], equipmentUsed: string[], totalTimeMinutes, calories,
+// proteinG, carbsG, fatG }. durationSeconds is null for any step that
+// isn't a timed wait -- see claudeGeneration.ts's prompt. Daily mode
+// wraps that in { date, category, recommendation }.
 //
 // Like parse-meal-text, a recipe is a SUGGESTION, never auto-saved
 // server-side -- the client shows it back and only writes to meal_log if

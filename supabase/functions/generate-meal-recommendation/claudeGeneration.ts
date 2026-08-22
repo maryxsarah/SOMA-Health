@@ -12,7 +12,7 @@ export interface ClaudeRecommendation {
   name: string;
   why_this_meal: string;
   ingredients: { name: string; quantity: string }[];
-  steps: string[];
+  steps: { text: string; duration_seconds: number | null }[];
   equipment_used: string[];
   total_time_minutes: number;
   calories: number;
@@ -50,7 +50,23 @@ function buildSchema(equipmentOptions: string[]) {
           additionalProperties: false,
         },
       },
-      steps: { type: "array", items: { type: "string" } },
+      // duration_seconds is required (not omittable) so the model must
+      // explicitly decide per step rather than silently leaving it out --
+      // null for any step that isn't a wait (chopping, seasoning), a
+      // whole-number second count for one that is (CookModeView renders a
+      // real countdown off this, e.g. "flip the pancakes" -> 30).
+      steps: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            duration_seconds: { type: ["integer", "null"] },
+          },
+          required: ["text", "duration_seconds"],
+          additionalProperties: false,
+        },
+      },
       // Closed vocabulary, same "deterministic vocabulary, never free
       // text" pattern generate-workout-plan uses for exercise names -- the
       // model literally cannot claim equipment the user doesn't have.
@@ -100,7 +116,7 @@ Return:
 - name: a short, appetizing meal name
 - why_this_meal: one or two encouraging sentences on why this fits their remaining macros and goal today -- reference the actual numbers, write like a supportive coach, never clinical
 - ingredients: array of {name, quantity} with realistic quantities for one serving
-- steps: array of clear, sequential instructions as full sentences -- any step involving heat must name the exact equipment (from the allowed list), the temperature if relevant, and the cook time (e.g. "Preheat the oven to 200°C/400°F and roast for 18 minutes")
+- steps: array of {text, duration_seconds}. text is a clear, sequential instruction as a full sentence -- any step involving heat must name the exact equipment (from the allowed list), the temperature if relevant, and the cook time stated in the sentence itself (e.g. "Preheat the oven to 200°C/400°F and roast for 18 minutes"), so it still reads correctly on its own. duration_seconds is that same wait, in whole seconds, ONLY when the step genuinely involves waiting/cooking passively (roasting, simmering, resting, a timed flip) -- null for anything active (chopping, seasoning, stirring, plating) or with no specific duration. A short, precise wait like "flip after 30 seconds" should use duration_seconds: 30, not be rounded away.
 - equipment_used: which of the allowed equipment this recipe actually needs -- return using the identifier before the parenthesis above (e.g. "stove", not "Stove"), a subset of the list (omit anything unused)
 - total_time_minutes: realistic total time including prep
 - calories, protein_g, carbs_g, fat_g: realistic totals for the whole plated meal, whole numbers
@@ -140,7 +156,7 @@ export function toResponse(r: ClaudeRecommendation) {
     name: r.name,
     whyThisMeal: r.why_this_meal,
     ingredients: r.ingredients,
-    steps: r.steps,
+    steps: r.steps.map((s) => ({ text: s.text, durationSeconds: s.duration_seconds })),
     equipmentUsed: r.equipment_used,
     totalTimeMinutes: r.total_time_minutes,
     calories: r.calories,
