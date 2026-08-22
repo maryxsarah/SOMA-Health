@@ -20,9 +20,12 @@ import { assessHealthKit } from "./healthkitBand.ts";
 import { EXCEPTIONAL_OURA_READINESS, EXCEPTIONAL_WHOOP_RECOVERY } from "../_shared/readinessThresholds.ts";
 import { BODY_PART_SESSION_MRV, type ExperienceLevel, VOLUME_LANDMARKS } from "../_shared/volumeLandmarks.ts";
 import {
+  CONSECUTIVE_DAYS_THRESHOLD,
+  computeExceptionalReadinessBypassAllowed,
   computeInjuryProtocolRestApplied,
   computeMoodCapApplied,
   computeProactiveRestCapApplied,
+  REST_ESCALATION_THRESHOLD,
 } from "../_shared/independentCaps.ts";
 import { buildReasoningMessage } from "./reasoningMessage.ts";
 import { normalizeLanguageCode } from "../_shared/language.ts";
@@ -408,19 +411,32 @@ Deno.serve(async (req: Request) => {
     // recommendation but never explicitly logs completion used to be
     // invisible to this whole safety net regardless of real accumulated
     // load. On top of that: an EXCEPTIONAL readiness day (same bar
-    // generate-workout-plan uses for its finisher) skips the cap entirely
-    // -- a body that's clearly recovered exceptionally well doesn't need
-    // to be forced down just because of the calendar. And a streak that
-    // goes well past the threshold (REST_ESCALATION_THRESHOLD) lands on
-    // full "rest" instead of "light" -- the accumulated load at that point
-    // calls for more than active recovery.
+    // generate-workout-plan uses for its finisher) can skip the cap -- a
+    // body that's clearly recovered exceptionally well doesn't need to be
+    // forced down just because of the calendar -- but only until the
+    // streak itself reaches REST_ESCALATION_THRESHOLD (see
+    // exceptionalReadinessBypassAllowed below): BUG FIX (2026-08-22) --
+    // this used to skip the cap unconditionally on any exceptional day,
+    // with no limit on how many consecutive exceptional days could each
+    // waive it, so a genuinely great WEEK could go indefinitely with no
+    // real rest/active-recovery day ever recommended. consecutiveDays
+    // already organically counts a bypassed day as training (its category
+    // stayed moderate/push_hard), so it's already the right signal to cap
+    // the bypass itself against -- no new counter needed. And a streak
+    // that goes well past the threshold lands on full "rest" instead of
+    // "light" -- the accumulated load at that point calls for more than
+    // active recovery.
     const trainingDates = await fetchTrainingDates(supabase, userId, date);
     const consecutiveDays = countConsecutiveTrainingDays(trainingDates, date);
     const exceptionalReadinessToday =
       (whoopRecovery !== null && whoopRecovery.recoveryScore >= EXCEPTIONAL_WHOOP_RECOVERY) ||
       (ouraReadiness !== null && ouraReadiness >= EXCEPTIONAL_OURA_READINESS);
+    const exceptionalReadinessBypassAllowed = computeExceptionalReadinessBypassAllowed(
+      exceptionalReadinessToday,
+      consecutiveDays,
+    );
     const consecutiveDaysCapApplied = consecutiveDays >= CONSECUTIVE_DAYS_THRESHOLD &&
-      !exceptionalReadinessToday &&
+      !exceptionalReadinessBypassAllowed &&
       (bandCategory === "moderate" || bandCategory === "push_hard");
     const consecutiveDaysRestEscalated = consecutiveDaysCapApplied &&
       consecutiveDays >= REST_ESCALATION_THRESHOLD;
@@ -451,7 +467,7 @@ Deno.serve(async (req: Request) => {
       return mrv !== undefined && count >= mrv;
     });
     const volumeCapApplied = (recentTrainingDays >= VOLUME_LANDMARKS.full_body[experienceLevel].mrv || bodyPartVolumeExceeded) &&
-      !exceptionalReadinessToday &&
+      !exceptionalReadinessBypassAllowed &&
       (bandCategory === "moderate" || bandCategory === "push_hard");
     // Proactive rest floor (2026-08-15): every cap in this file up to here
     // is REACTIVE -- it only ever fires off a bad signal. If the wearable
@@ -463,7 +479,7 @@ Deno.serve(async (req: Request) => {
     const proactiveRestCapApplied = computeProactiveRestCapApplied(
       workoutsPerWeek,
       recentCategoriesRaw,
-      exceptionalReadinessToday,
+      exceptionalReadinessBypassAllowed,
       bandCategory,
     );
     // Same post-processing-on-final-category mechanism as the consecutive-
@@ -681,33 +697,9 @@ function mapBandToCategory(
   return { category, injuryCapApplied, loadCapApplied, pregnancyCapApplied };
 }
 
-/// Consecutive prior days with a TRAINING day (moderate or push_hard),
-/// strictly before `date`, stopping at the first gap -- e.g. training on
-/// d-1, d-2, d-3 but not d-4 counts as 3, regardless of what happened
-/// further back.
-///
-/// The category filter is what makes the cap releasable: counting every
-/// workout_log row meant a dutifully-logged "Full rest day" or recovery
-/// walk extended the streak, and -- worse -- each capped "light" day the
-/// user then logged re-extended it again, so the cap never let go and a
-/// well-recovered user never saw another moderate/push_hard day. Rest and
-/// light days are the streak BREAKING, not the streak continuing; that is
-/// the entire point of capping to light.
-const CONSECUTIVE_DAYS_THRESHOLD = 4;
-/// DRAFTED, NOT EXPERT-REVIEWED -- past this many consecutive hard-training
-/// days, the accumulated load calls for more than active recovery: the day
-/// lands on full "rest" instead of "light".
-///
-/// 2026-08-15 recalibration (both this and CONSECUTIVE_DAYS_THRESHOLD
-/// above, 6->5 and 5->4): general recovery guidance discourages more than
-/// ~4-5 consecutive high-intensity days without at least a lighter one;
-/// the old 5/6 was already on the lenient edge of that. The new proactive
-/// rest floor (computeProactiveRestCapApplied, _shared/independentCaps.ts)
-/// now provides the PRIMARY guarantee of a real week-over-week rest day
-/// independent of streaks -- this pair is the secondary backstop for a
-/// genuine back-to-back grind, tightened by one day each rather than
-/// dramatically narrowed.
-const REST_ESCALATION_THRESHOLD = 5;
+// CONSECUTIVE_DAYS_THRESHOLD / REST_ESCALATION_THRESHOLD moved to
+// _shared/independentCaps.ts (2026-08-22) -- imported above, alongside
+// computeExceptionalReadinessBypassAllowed which reuses them.
 
 function pickSleepHours(
   rows: { source: string; sleep_hours: number | null }[],

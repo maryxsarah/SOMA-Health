@@ -1,11 +1,14 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
+  CONSECUTIVE_DAYS_THRESHOLD,
+  computeExceptionalReadinessBypassAllowed,
   computeInjuryProtocolRestApplied,
   computeMoodCapApplied,
   computeProactiveRestCapApplied,
   LOW_MOOD_RATING_THRESHOLD,
   PROACTIVE_REST_MIN_RECOMMENDATIONS,
   RECENT_SEVERE_INJURY_WINDOW_HOURS,
+  REST_ESCALATION_THRESHOLD,
   SEVERE_INJURY_BAD_DAYS_TO_REST,
 } from "./independentCaps.ts";
 
@@ -90,7 +93,71 @@ Deno.test("computeMoodCapApplied: no check-in today (null) never caps", () => {
   assertEquals(computeMoodCapApplied(null, "push_hard"), false);
 });
 
+// --- computeExceptionalReadinessBypassAllowed ---
+//
+// BUG this covers: exceptionalReadinessToday used to bypass the
+// consecutive-days/volume/proactive-rest caps unconditionally, with no
+// limit on how many consecutive exceptional-readiness days could each
+// waive them -- a genuinely great WEEK could go on forever with no real
+// rest/active-recovery day ever recommended. Fix reuses consecutiveDays
+// (already computed for the consecutive-days cap) as the ceiling rather
+// than inventing a new counter.
+
+Deno.test("a non-exceptional day never bypasses, regardless of streak length", () => {
+  assertEquals(computeExceptionalReadinessBypassAllowed(false, 0), false);
+  assertEquals(computeExceptionalReadinessBypassAllowed(false, REST_ESCALATION_THRESHOLD + 10), false);
+});
+
+Deno.test("an exceptional day still bypasses below the ceiling, exactly like before this fix", () => {
+  assertEquals(computeExceptionalReadinessBypassAllowed(true, 0), true);
+  assertEquals(computeExceptionalReadinessBypassAllowed(true, REST_ESCALATION_THRESHOLD - 1), true);
+});
+
+Deno.test("an exceptional day no longer bypasses once the streak reaches the real ceiling", () => {
+  assertEquals(computeExceptionalReadinessBypassAllowed(true, REST_ESCALATION_THRESHOLD), false);
+  assertEquals(computeExceptionalReadinessBypassAllowed(true, REST_ESCALATION_THRESHOLD + 3), false);
+});
+
+Deno.test("REGRESSION: a multi-day run of exceptional readiness eventually stops bypassing -- the exact reported scenario", () => {
+  // Simulates the real report: readiness reads exceptional every single
+  // day. Walk consecutiveDays up as if each prior day's cap had been
+  // (correctly) bypassed and therefore stayed a training day -- exactly
+  // how the real streak grows in generate-recommendation/index.ts, since
+  // a bypassed day's category stays moderate/push_hard.
+  const bypassedByDay: boolean[] = [];
+  for (let consecutiveDays = 0; consecutiveDays <= REST_ESCALATION_THRESHOLD + 5; consecutiveDays++) {
+    bypassedByDay.push(computeExceptionalReadinessBypassAllowed(true, consecutiveDays));
+  }
+  // Bypassed every day the streak is still under the ceiling...
+  for (let i = 0; i < REST_ESCALATION_THRESHOLD; i++) {
+    assertEquals(bypassedByDay[i], true, `day with consecutiveDays=${i} should still bypass`);
+  }
+  // ...and, critically, NOT bypassed forever -- a rest/light day must
+  // eventually get through once the real ceiling is hit, no matter how
+  // many more exceptional days follow.
+  for (let i = REST_ESCALATION_THRESHOLD; i < bypassedByDay.length; i++) {
+    assertEquals(bypassedByDay[i], false, `day with consecutiveDays=${i} must NOT bypass -- this is the bug`);
+  }
+});
+
+Deno.test("CONSECUTIVE_DAYS_THRESHOLD stays below REST_ESCALATION_THRESHOLD -- the lighter cap must still be reachable before the ceiling", () => {
+  // Not a behavior test of the function itself -- a sanity check on the
+  // two constants' relative ordering, since computeExceptionalReadinessBypassAllowed
+  // implicitly assumes the ceiling (REST_ESCALATION_THRESHOLD) sits at or
+  // above the point the consecutive-days cap would otherwise first fire
+  // (CONSECUTIVE_DAYS_THRESHOLD) -- if that ever inverted, the bypass
+  // could outlive the cap it's supposed to eventually yield to.
+  assertEquals(CONSECUTIVE_DAYS_THRESHOLD <= REST_ESCALATION_THRESHOLD, true);
+});
+
 // --- computeProactiveRestCapApplied ---
+//
+// NOTE: this function's 3rd parameter is exceptionalReadinessBypassAllowed
+// (see computeExceptionalReadinessBypassAllowed above), not the raw
+// same-day exceptional reading -- tests below that pass a bare `true`/
+// `false` are exercising this function's own "does bypass=true skip the
+// floor" behavior, independent of how that boolean gets computed
+// upstream (covered separately above).
 
 const aFullWeekOfHardTraining: ("rest" | "light" | "moderate" | "push_hard")[] = [
   "moderate", "push_hard", "moderate", "push_hard", "moderate", "push_hard", "moderate",

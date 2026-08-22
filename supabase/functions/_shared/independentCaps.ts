@@ -82,6 +82,79 @@ const SKIP_PROACTIVE_REST_BELOW = "zero_to_two";
 /// be read as "a solid week of nothing but hard training".
 export const PROACTIVE_REST_MIN_RECOMMENDATIONS = 5;
 
+/// Consecutive prior days with a TRAINING day (moderate or push_hard),
+/// strictly before the day being evaluated, stopping at the first gap --
+/// e.g. training on d-1, d-2, d-3 but not d-4 counts as 3, regardless of
+/// what happened further back.
+///
+/// The category filter is what makes the cap releasable: counting every
+/// workout_log row meant a dutifully-logged "Full rest day" or recovery
+/// walk extended the streak, and -- worse -- each capped "light" day the
+/// user then logged re-extended it again, so the cap never let go and a
+/// well-recovered user never saw another moderate/push_hard day. Rest and
+/// light days are the streak BREAKING, not the streak continuing; that is
+/// the entire point of capping to light.
+///
+/// Moved here from generate-recommendation/index.ts (2026-08-22) so
+/// computeExceptionalReadinessBypassAllowed below and index.ts's own
+/// consecutive-days/volume caps share one definition instead of risking
+/// drift between two copies.
+export const CONSECUTIVE_DAYS_THRESHOLD = 4;
+
+/// DRAFTED, NOT EXPERT-REVIEWED -- past this many consecutive hard-training
+/// days, the accumulated load calls for more than active recovery: the day
+/// lands on full "rest" instead of "light".
+///
+/// 2026-08-15 recalibration (both this and CONSECUTIVE_DAYS_THRESHOLD
+/// above, 6->5 and 5->4): general recovery guidance discourages more than
+/// ~4-5 consecutive high-intensity days without at least a lighter one;
+/// the old 5/6 was already on the lenient edge of that. The proactive rest
+/// floor (computeProactiveRestCapApplied, below) provides the PRIMARY
+/// guarantee of a real week-over-week rest day independent of streaks --
+/// this pair is the secondary backstop for a genuine back-to-back grind.
+///
+/// Also, since 2026-08-22, this is the ceiling
+/// computeExceptionalReadinessBypassAllowed reuses to stop an exceptional
+/// same-day reading from waiving caps indefinitely -- see that function's
+/// own doc comment for why this number (not CONSECUTIVE_DAYS_THRESHOLD)
+/// is the right one to reuse for that.
+export const REST_ESCALATION_THRESHOLD = 5;
+
+/**
+ * Whether an exceptional same-day readiness reading (WHOOP recovery >=
+ * EXCEPTIONAL_WHOOP_RECOVERY or Oura readiness >= EXCEPTIONAL_OURA_READINESS,
+ * computed in generate-recommendation/index.ts) should still be allowed to
+ * bypass the consecutive-days/volume/proactive-rest caps today.
+ *
+ * BUG this fixes: exceptionalReadinessToday used to bypass all three caps
+ * with a flat `if (exceptionalReadinessToday)`, with NO memory of how many
+ * prior days had already been bypassed the same way -- a user with a
+ * genuinely great WEEK (exceptional readiness every day) could go
+ * indefinitely without a real rest/active-recovery day ever being
+ * recommended, defeating the exact purpose the proactive-rest floor was
+ * built for. Muscles need programmed recovery to actually adapt/build
+ * regardless of how good daily readiness looks.
+ *
+ * Fix: reuses consecutiveDays (generate-recommendation/index.ts's own
+ * countConsecutiveTrainingDays result, already computed for the
+ * consecutive-days cap) rather than inventing a new parallel counter --
+ * a bypassed day's category stays moderate/push_hard, so consecutiveDays
+ * ALREADY organically counts a bypassed day as a training day. Once the
+ * streak reaches REST_ESCALATION_THRESHOLD -- the same ceiling that
+ * already forces a *non*-exceptional streak down to full "rest" -- an
+ * exceptional reading stops being able to extend it further. Below that
+ * ceiling, exceptional readiness still waives the caps exactly as before
+ * (a body that's clearly recovered exceptionally well for a day or two
+ * isn't forced down just because of the calendar); it just can no longer
+ * do so forever.
+ */
+export function computeExceptionalReadinessBypassAllowed(
+  exceptionalReadinessToday: boolean,
+  consecutiveDays: number,
+): boolean {
+  return exceptionalReadinessToday && consecutiveDays < REST_ESCALATION_THRESHOLD;
+}
+
 /**
  * True when the trailing window (generate-recommendation/index.ts passes
  * the last 7 days of daily_recommendation.category, excluding today) shows
@@ -94,18 +167,21 @@ export const PROACTIVE_REST_MIN_RECOMMENDATIONS = 5;
  * Independent of every other cap (same "any one can fire" pattern as the
  * rest of this file) -- this only ever caps to "light" (the floor), never
  * escalates to "rest" the way the consecutive-days/severe-injury paths do.
- * Skipped on an exceptional-readiness day, same bar the consecutive-days
- * and volume caps already use to skip -- a genuinely great week isn't
- * forced down, only a week that's simply had no bad signal at all.
+ *
+ * `exceptionalReadinessBypassAllowed` (NOT the raw same-day reading --
+ * see computeExceptionalReadinessBypassAllowed above) skips this cap, same
+ * bar the consecutive-days and volume caps use: a genuinely great week
+ * isn't forced down, only a week that's simply had no bad signal at all --
+ * but that grace period has a ceiling now, same as the other two caps.
  */
 export function computeProactiveRestCapApplied(
   workoutsPerWeek: string | null,
   recommendationCategoriesInWindow: Category[],
-  exceptionalReadinessToday: boolean,
+  exceptionalReadinessBypassAllowed: boolean,
   bandCategory: Category,
 ): boolean {
   if (workoutsPerWeek === SKIP_PROACTIVE_REST_BELOW) return false;
-  if (exceptionalReadinessToday) return false;
+  if (exceptionalReadinessBypassAllowed) return false;
   if (bandCategory !== "moderate" && bandCategory !== "push_hard") return false;
   if (recommendationCategoriesInWindow.length < PROACTIVE_REST_MIN_RECOMMENDATIONS) return false;
   return !recommendationCategoriesInWindow.some((c) => c === "rest" || c === "light");
